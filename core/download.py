@@ -28,12 +28,25 @@ class StreamDownloader:
     async def aclose(self):
         await self.client.aclose()
 
-    def _validate_content_length(self, response: httpx.Response) -> int:
+    def _validate_content_length(self, response: httpx.Response) -> int | None:
+        """校验明确声明的响应大小。
+
+        抖音等平台 CDN 常用 ``Transfer-Encoding: chunked``，此时**不会**返回
+        ``Content-Length``。缺少该头并不代表响应为空，因此这里返回 ``None``
+        让下载继续，真实大小在流式写入过程中统计（见 ``_validate_downloaded_bytes``）。
+
+        上游 rika 在 2026-09 修复了此问题：旧实现把缺失的 Content-Length 当成 0，
+        会直接取消下载——抖音视频因此全部下不下来。
+        """
         content_length = response.headers.get("Content-Length")
-        content_length = int(content_length) if content_length else 0
+        if not content_length:
+            return None
+
+        content_length = int(content_length)
         if content_length == 0:
             logger.warning(f"媒体 url: {response.url}, 大小为 0, 取消下载")
             raise IgnoreException
+
         # 体积上限：超过限制的媒体直接放弃，避免下载完才发现发不出去
         if self.max_size_mb > 0 and content_length > self.max_size_mb * 1024 * 1024:
             size_mb = content_length / 1024 / 1024
@@ -44,6 +57,24 @@ class StreamDownloader:
                 f"媒体大小({size_mb:.1f}MB)超过上限({self.max_size_mb}MB)"
             )
         return content_length
+
+    @staticmethod
+    async def _validate_downloaded_bytes(file_path: Path, url: str, received_bytes: int, max_bytes: int = 0):
+        """防止把空响应当成成功下载，并在超限时清理已写入的文件。"""
+        if received_bytes <= 0:
+            await safe_unlink(file_path)
+            logger.warning(f"媒体 url: {url}, 实际写入 0 字节, 取消下载")
+            raise IgnoreException
+
+        if max_bytes > 0 and received_bytes > max_bytes:
+            await safe_unlink(file_path)
+            mb = received_bytes / 1024 / 1024
+            logger.warning(f"媒体 url: {url}, 实际下载 {mb:.1f}MB 超过上限, 已丢弃")
+            raise IgnoreException(f"媒体大小({mb:.1f}MB)超过上限({max_bytes // 1024 // 1024}MB)")
+
+    @property
+    def _max_bytes(self) -> int:
+        return self.max_size_mb * 1024 * 1024 if self.max_size_mb > 0 else 0
 
     async def _download_file_with_httpx(
         self,
@@ -56,9 +87,31 @@ class StreamDownloader:
         async with self.client.stream("GET", url, headers=headers, follow_redirects=True) as response:
             response.raise_for_status()
             self._validate_content_length(response)
-            async with aiofiles.open(file_path, "wb") as file:
-                async for chunk in response.aiter_bytes(chunk_size):
-                    await file.write(chunk)
+            received_bytes = 0
+            try:
+                async with aiofiles.open(file_path, "wb") as file:
+                    async for chunk in response.aiter_bytes(chunk_size):
+                        if not chunk:
+                            continue
+                        await file.write(chunk)
+                        received_bytes += len(chunk)
+                        # chunked 场景没有 Content-Length，边下边判大小
+                        if self._max_bytes and received_bytes > self._max_bytes:
+                            await safe_unlink(file_path)
+                            mb = received_bytes / 1024 / 1024
+                            logger.warning(
+                                f"媒体 url: {response.url}, 下载到 {mb:.1f}MB 超过上限，中断"
+                            )
+                            raise IgnoreException(
+                                f"媒体大小超过上限({self.max_size_mb}MB)"
+                            )
+            except IgnoreException:
+                raise
+            except Exception:
+                # 下载中断时清掉半截文件，避免下次命中缓存拿到坏文件
+                await safe_unlink(file_path)
+                raise
+            await self._validate_downloaded_bytes(file_path, str(response.url), received_bytes)
         return file_path
 
     async def _download_file_with_curl_cffi(
@@ -79,9 +132,25 @@ class StreamDownloader:
             )
             response.raise_for_status()
             self._validate_content_length(response)
-            async with aiofiles.open(file_path, "wb") as file:
-                async for chunk in response.aiter_content(chunk_size=8192):
-                    await file.write(chunk)
+            received_bytes = 0
+            try:
+                async with aiofiles.open(file_path, "wb") as file:
+                    async for chunk in response.aiter_content(chunk_size=8192):
+                        if not chunk:
+                            continue
+                        await file.write(chunk)
+                        received_bytes += len(chunk)
+                        if self._max_bytes and received_bytes > self._max_bytes:
+                            await safe_unlink(file_path)
+                            raise IgnoreException(
+                                f"媒体大小超过上限({self.max_size_mb}MB)"
+                            )
+            except IgnoreException:
+                raise
+            except Exception:
+                await safe_unlink(file_path)
+                raise
+            await self._validate_downloaded_bytes(file_path, str(response.url), received_bytes)
         return file_path
 
     async def _download_file(

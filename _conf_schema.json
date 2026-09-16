@@ -1,41 +1,34 @@
 {
-  "平台设置": {
+  "解析设置": {
     "type": "object",
-    "description": "各平台的解析与下载设置",
+    "description": "日常最常用到的几项",
     "items": {
       "DISABLED_PLATFORMS": {
         "description": "禁用的平台(逗号分隔)",
         "type": "string",
         "default": "",
-        "hint": "可选: bilibili,douyin,kuaishou,weibo,xiaohongshu,twitter,nga,acfun（留空表示全部启用）",
+        "hint": "可选: bilibili,douyin,kuaishou,weibo,xiaohongshu,twitter,nga,acfun（留空=全部启用）",
         "obvious_hint": false
       },
       "VIDEO_DURATION_MAXIMUM": {
         "description": "视频最大时长(秒)",
         "type": "int",
         "default": 480,
-        "hint": "超过此时长的视频不会下载，但仍会返回标题/作者/封面",
+        "hint": "超过此时长不下载视频，但仍会返回标题、作者和封面",
         "obvious_hint": true
       },
       "VIDEO_SIZE_MAXIMUM_MB": {
         "description": "单个视频体积上限(MB)",
         "type": "int",
         "default": 100,
-        "hint": "下载前按 Content-Length 判断，超限直接放弃。建议不超过 60，QQ 大文件上传容易失败",
+        "hint": "下载前按 Content-Length 判断，边下边判。QQ 大文件上传容易失败，建议不超过 60",
         "obvious_hint": true
       },
-      "PROXY": {
-        "description": "全局代理地址",
-        "type": "string",
-        "default": "",
-        "hint": "形如 http://127.0.0.1:7890，留空不使用。仅作用于媒体下载；Twitter 解析需要时可填",
-        "obvious_hint": false
-      },
-      "XHS_CK": {
-        "description": "小红书 Cookie",
-        "type": "string",
-        "default": "",
-        "hint": "从浏览器获取 xiaohongshu.com 的 cookie（可选）",
+      "SEND_ERROR_MESSAGES": {
+        "description": "解析失败时发送错误提示",
+        "type": "bool",
+        "default": false,
+        "hint": "关闭则只写日志、不在群里刷报错。排查问题时可临时打开",
         "obvious_hint": true
       }
     }
@@ -45,47 +38,27 @@
     "description": "B站 Cookie 与下载清晰度",
     "items": {
       "BILI_CK": {
-        "description": "哔哩哔哩 Cookie（可选，也可用 /bili_login 扫码登录获取）",
+        "description": "哔哩哔哩 Cookie",
         "type": "string",
         "default": "",
-        "hint": "从浏览器获取 bilibili.com 的 SESSDATA，或使用 /bili_login 扫码登录自动获取",
+        "hint": "推荐用 /bili_login 扫码登录自动获取并持久化；配了才能下 1080P 及以上",
         "obvious_hint": true
       },
       "BILI_QUALITY": {
-        "description": "B站视频下载清晰度",
+        "description": "B站下载清晰度",
         "type": "string",
         "default": "1080P",
-        "hint": "可选: 360P, 480P, 720P, 1080P, 1080P+, 4K, 8K（需要对应账号权限）",
+        "hint": "360P / 480P / 720P / 1080P / 1080P+ / 4K / 8K，高画质需要对应账号权限",
         "obvious_hint": true
       }
     }
   },
-  "缓存设置": {
-    "type": "object",
-    "description": "缓存文件过期与自动清理策略",
-    "items": {
-      "CACHE_TTL_HOURS": {
-        "description": "缓存文件过期时间(小时)",
-        "type": "int",
-        "default": 24,
-        "hint": "缓存文件超过此时间未被使用将被清理。设为 0 禁用自动清理",
-        "obvious_hint": true
-      },
-      "CACHE_CLEANUP_INTERVAL_MINUTES": {
-        "description": "缓存清理检查间隔(分钟)",
-        "type": "int",
-        "default": 60,
-        "hint": "每隔多少分钟检查一次过期缓存",
-        "obvious_hint": false
-      }
-    }
-  },
-  "解析图片渲染": {
+  "卡片外观": {
     "type": "object",
     "description": "把解析结果渲染成分享卡片图片",
     "items": {
       "RENDER_ENABLED": {
-        "description": "启用解析卡片渲染",
+        "description": "启用卡片渲染",
         "type": "bool",
         "default": true,
         "hint": "关闭则回退为纯文本输出",
@@ -95,7 +68,7 @@
         "description": "卡片主题",
         "type": "string",
         "default": "dark",
-        "hint": "dark / light",
+        "hint": "dark（深色） / light（浅色）",
         "obvious_hint": true
       },
       "RENDER_LAYOUT": {
@@ -104,39 +77,46 @@
         "default": "standard",
         "hint": "standard / magazine / immersive / feed",
         "obvious_hint": false
-      },
-      "RENDER_WIDTH": {
-        "description": "卡片宽度(像素)",
-        "type": "int",
-        "default": 800,
-        "hint": "范围 520 - 1080",
-        "obvious_hint": false
-      },
-      "RENDER_FONT_PATH": {
-        "description": "自定义字体文件路径",
-        "type": "string",
-        "default": "",
-        "hint": "留空自动探测系统字体",
-        "obvious_hint": false
-      },
-      "RENDER_COVER_FULL_SIZE": {
-        "description": "封面全尺寸模式（不裁剪）",
-        "type": "bool",
-        "default": false,
-        "hint": "关闭时封面会被裁剪为统一比例",
-        "obvious_hint": false
       }
     }
   },
-  "调试设置": {
+  "高级设置": {
     "type": "object",
-    "description": "日志与排障",
+    "description": "一般用不到，按需开启",
     "items": {
-      "DEBUG_LOG_ENABLED": {
-        "description": "启用详细错误日志",
-        "type": "bool",
-        "default": true,
-        "hint": "关闭后只记录关键错误，日志更干净",
+      "XHS_CK": {
+        "description": "小红书 Cookie",
+        "type": "string",
+        "default": "",
+        "hint": "部分笔记需要登录态才能完整解析，从浏览器复制 xiaohongshu.com 的 cookie",
+        "obvious_hint": true
+      },
+      "PROXY": {
+        "description": "媒体下载代理",
+        "type": "string",
+        "default": "",
+        "hint": "形如 http://127.0.0.1:7897，留空不使用。注意这是运行 AstrBot 那台机器上的地址",
+        "obvious_hint": false
+      },
+      "TWITTER_MEDIA_PROXY_BASE": {
+        "description": "Twitter 图片/视频反代根地址",
+        "type": "string",
+        "default": "",
+        "hint": "留空=不启用。服务器连不上 twimg 时填写，如 https://your-proxy.example",
+        "obvious_hint": false
+      },
+      "CACHE_TTL_HOURS": {
+        "description": "缓存保留时长(小时)",
+        "type": "int",
+        "default": 24,
+        "hint": "超过此时间未使用的缓存会被自动清理。设为 0 禁用自动清理",
+        "obvious_hint": false
+      },
+      "RENDER_FONT_PATH": {
+        "description": "自定义字体文件",
+        "type": "string",
+        "default": "",
+        "hint": "留空自动探测系统字体；卡片出现方块字时才需要指定",
         "obvious_hint": false
       }
     }
