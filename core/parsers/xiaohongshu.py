@@ -78,9 +78,9 @@ class XiaoHongShuParser(BaseParser):
         if note_detail.is_video:
             video_url, cover_url, duration = note_detail.video_cover_duration
             self._add_limit_warning(result, duration)
-            result.video = self.create_video(video_url, cover_url, duration)
+            result.video = self.create_video(video_url, self._no_watermark(cover_url), duration)
         elif image_urls := note_detail.image_urls:
-            result.contents.extend(self.create_images(image_urls))
+            result.contents.extend(self.create_images([self._no_watermark(u) for u in image_urls]))
         return result
 
     async def parse_discovery(self, url: str):
@@ -115,10 +115,28 @@ class XiaoHongShuParser(BaseParser):
             else:
                 cover_url = note_data.image_urls[0]
             self._add_limit_warning(result, duration)
-            result.video = self.create_video(video_url, cover_url, duration)
+            result.video = self.create_video(video_url, self._no_watermark(cover_url), duration)
         elif img_urls := note_data.image_urls:
-            result.contents.extend(self.create_images(img_urls))
+            result.contents.extend(self.create_images([self._no_watermark(u) for u in img_urls]))
         return result
+
+    @staticmethod
+    def _no_watermark(url: str | None) -> str | None:
+        """把带鉴权的 webpic 链接改写成公开的无水印原图链接。
+
+        - ``sns-webpic-*`` 是鉴权 CDN，部分场景会叠加平台水印（画面中央「小红书」字样）
+        - ``sns-img-hw`` 是公开原图 CDN，无水印
+
+        来源：娅娅版 astrbot_plugin_media_parser，实测（2026-08-23）fileId 需保留
+        命名空间前缀（``notes_pre_post/``、``spectrum/``），图集常见的裸 ``1040g...``
+        同样可用。匹配不上时原样返回，不会把链接弄坏。
+        """
+        if not url or ("sns-webpic" not in url and "sns-img" not in url):
+            return url
+        matched = re.search(r"((?:(?:notes_pre_post|spectrum)/)?1040g[^!?]+)", url)
+        if not matched:
+            return url
+        return f"https://sns-img-hw.xhscdn.com/{matched.group(1)}?imageView2/2/w/1080/format/jpg"
 
     def _extract_initial_state_raw(self, html: str) -> str:
         pattern = r"window\.__INITIAL_STATE__=(.*?)</script>"
