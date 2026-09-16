@@ -144,3 +144,15 @@ MIT License。详见 [LICENSE](LICENSE)。
 
 - [astrbot_plugin_rika_share](https://github.com/iris1598/astrbot_plugin_rika_share) —— MIT
 - 抖音 `a_bogus` 签名（`core/douyin/sign.py`）移植自 [Johnserf-Seed/f2](https://github.com/Johnserf-Seed/f2) —— **Apache-2.0**
+
+## 卡片渲染器的归属
+
+`core/render.py`（`ShareCardRenderer`，约 2300 行 Pillow 实现，4 种布局 × 深浅双主题）
+**是 rika_share 的原创作品**（作者 MIKU1598 / iris1598），不是从 nonebot-plugin-parser 移植的。
+
+容易混淆的一点：nonebot-plugin-parser 也有 `renders/` 目录，但它走的是
+**Jinja2 HTML 模板 + 浏览器截图**（`card.html.jinja2`），与这里的纯 Pillow 无头渲染是两套完全不同的实现。
+rika 的致谢里只把「解析库逻辑」归给 nonebot-plugin-parser，渲染器并未归给任何上游。
+
+本项目直接把该模块拷贝过来使用，改动仅限：
+把水印文字抽成常量 `WATERMARK_TAG`（娅娅版也是这么做的），并改为「达妮娅分享」。

@@ -8,10 +8,19 @@
 - 圆形作者头像、昵称与签名
 - 正文简介、毛玻璃数据统计徽章（时长 / 点赞 / 投币 / 收藏 / 播放等）
 - 图集网格（超过 6 张显示 +N）、转发内容引用卡片
-- 底部链接与「莉卡解析」徽标水印
+- 底部链接与「达妮娅分享」徽标水印
 
 所有绘图操作均为 CPU 密集的同步任务，由调用方通过 asyncio.to_thread
 放到后台线程执行，避免阻塞 AstrBot 事件循环。
+
+归属
+----
+本模块是 **rika_share 的原创作品**（MIT），作者 MIKU1598 / iris1598，
+并非 nonebot-plugin-parser 的移植件——后者虽然也有 ``renders/``，但走的是
+Jinja2 HTML 模板 + 浏览器截图，与本模块的 Pillow 实现是两回事。
+
+娅娅版（astrbot_plugin_media_parser）拷贝本模块后把水印常量化为
+``WATERMARK_TAG``，这里沿用同一做法并改为「达妮娅分享」。
 """
 
 from __future__ import annotations
@@ -41,6 +50,9 @@ try:
     _LANCZOS = Image.Resampling.LANCZOS
 except AttributeError:  # Pillow < 9.1
     _LANCZOS = Image.LANCZOS  # type: ignore[attr-defined]
+
+# 卡片右下角水印文字。娅娅版也是这样把它抽成常量的，改品牌只动这一处。
+WATERMARK_TAG = "达妮娅分享"
 
 
 # ============================ 文本与统计处理 ============================
@@ -1332,7 +1344,7 @@ class ShareCardRenderer:
             )
             y += quote_h + 20
 
-        # ============ 页脚（链接 + 「莉卡解析」徽标水印） ============
+        # ============ 页脚（链接 + 「达妮娅分享」徽标水印） ============
         divider_layer = Image.new("RGBA", (inner_w, 1), (0, 0, 0, 0))
         ImageDraw.Draw(divider_layer).line(
             (0, 0, inner_w - 1, 0),
@@ -1342,7 +1354,7 @@ class ShareCardRenderer:
         canvas.alpha_composite(divider_layer, (pad, y + 12))
         foot_y = y + 28
 
-        wm_text = "莉卡解析"
+        wm_text = WATERMARK_TAG
         wm_font = self._font(_L.F_FOOT, bold=True)
         wm_text_w = self._text_width(wm_text, wm_font)
         wm_lh = self._line_height(wm_font)
@@ -1750,7 +1762,7 @@ class ShareCardRenderer:
     def _footer_block(self, canvas, draw, theme: _Theme, accent: str, accent_rgb,
                       result: ParseResult, y: int, inner_w: int,
                       on_image: bool = False) -> None:
-        """页脚：分隔线 + 左链接 + 右「圆点 莉卡解析」水印。"""
+        """页脚：分隔线 + 左链接 + 右「圆点 达妮娅分享」水印。"""
         pad = _L.PAD
         divider_layer = Image.new("RGBA", (inner_w, 1), (0, 0, 0, 0))
         ImageDraw.Draw(divider_layer).line(
@@ -1762,7 +1774,7 @@ class ShareCardRenderer:
         canvas.alpha_composite(divider_layer, (pad, y + 12))
         foot_y = y + 28
         wm_font = self._font(_L.F_FOOT, bold=True)
-        wm_text_w = self._text_width("莉卡解析", wm_font)
+        wm_text_w = self._text_width(WATERMARK_TAG, wm_font)
         wm_group_w = _L.WM_DOT + _L.WM_DOT_GAP + wm_text_w
         wm_x = self.width - pad - wm_group_w
         wm_lh = self._line_height(wm_font)
@@ -1772,7 +1784,7 @@ class ShareCardRenderer:
             fill=(*accent_rgb, 255),
         )
         self._draw_text(draw, (wm_x + _L.WM_DOT + _L.WM_DOT_GAP, foot_y),
-                        "莉卡解析", _L.F_FOOT, accent, bold=True)
+                        WATERMARK_TAG, _L.F_FOOT, accent, bold=True)
         url_text = short_url(result.url)
         if url_text:
             url_font = self._font(_L.F_FOOT)
