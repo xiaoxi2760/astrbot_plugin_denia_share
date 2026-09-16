@@ -325,6 +325,22 @@ class BilibiliParser(BaseParser):
             (s for s in streams if isinstance(s, AudioStreamDownloadURL)), None,
         )
 
+        # DASH 拿不到流、或拿到的流低于目标清晰度时（典型：未登录），
+        # 回退 html5 单文件 MP4。
+        # 实测（2026-09-17，匿名）：DASH 只给到 480P，html5 durl 却是 720P——
+        # 同一个 5 分钟视频 35.3MB，而 DASH 360P 只有 11.2MB。
+        # 娅娅版正是靠这条回退，在未登录时拿到比纯 DASH 更高的清晰度。
+        need_mp4_fallback = video_stream is None or self._below_target(video_stream, target_quality)
+        if need_mp4_fallback:
+            # 只在 html5 档位确实高于 DASH 时才替换，避免登录后反而被降级
+            dash_qid = getattr(getattr(video_stream, "video_quality", None), "value", None)
+            mp4_url, mp4_backups = await self._try_html5_mp4(
+                video, page_index, target_quality, better_than=dash_qid,
+            )
+            if mp4_url:
+                # html5 durl 是音视频合并好的单文件，没有独立音轨
+                return mp4_url, mp4_backups, None, []
+
         if video_stream is None:
             raise DownloadException("未找到可下载的视频流")
 
@@ -335,6 +351,59 @@ class BilibiliParser(BaseParser):
             return video_stream.url, v_backups, None, []
 
         return video_stream.url, v_backups, audio_stream.url, a_backups
+
+    # 清晰度档位 → 期望高度（用于判断 DASH 实际给到的是否够用）
+    _QUALITY_HEIGHT = {
+        "360P": 360, "480P": 480, "720P": 720,
+        "1080P": 1080, "1080P+": 1080, "4K": 2160, "8K": 4320,
+    }
+
+    def _below_target(self, video_stream, target_quality) -> bool:
+        """DASH 实际流高度是否明显低于目标档位。"""
+        try:
+            height = int(getattr(video_stream, "scale", (0, 0))[1] or 0)
+        except (TypeError, ValueError, IndexError):
+            height = 0
+        if not height:
+            return False
+        target_height = self._QUALITY_HEIGHT.get(
+            str(getattr(target_quality, "name", "")).replace("_PLUS", "").replace("_", "").upper(),
+            self._QUALITY_HEIGHT.get(str(target_quality).upper()),
+        )
+        if not target_height:
+            return False
+        return height < target_height
+
+    async def _try_html5_mp4(self, video, page_index: int, target_quality, better_than: int | None = None):
+        """尝试 html5 接口拿音视频合并的单文件 MP4，返回 (url, backups)。
+
+        ``better_than`` 为 DASH 已拿到的清晰度 id；若 html5 档位不高于它则放弃，
+        避免「目标设 4K、DASH 给了 1080P、html5 只给 720P」时反而被降级。
+        """
+        from astrbot.api import logger
+
+        try:
+            data = await video.get_download_url(page_index=page_index, html5=True)
+        except Exception as e:
+            logger.debug(f"[bili] html5 MP4 回退不可用: {e}")
+            return None, []
+
+        served = data.get("quality")
+        if better_than is not None and isinstance(served, int) and served <= better_than:
+            logger.debug(
+                f"[bili] html5 档位 {served} 不高于 DASH 的 {better_than}，放弃回退"
+            )
+            return None, []
+
+        durl = data.get("durl") or []
+        urls = [d.get("url") for d in durl if isinstance(d, dict) and d.get("url")]
+        if not urls:
+            return None, []
+        logger.info(
+            f"[bili] 使用 html5 单文件 MP4 回退（服务端 quality={served}，"
+            f"目标 {getattr(target_quality, 'name', target_quality)}）"
+        )
+        return urls[0], urls[1:]
 
     def _save_credential(self):
         if self._credential is None or self._cookies_file is None:
