@@ -79,7 +79,7 @@ class _EventUrlWrapper:
 
 
 @register("达妮娅分享", "xiaoxi2760",
-          "链接分享自动解析，支持 B站|抖音|快手|微博|小红书|Twitter|AcFun|NGA", "0.3.0")
+          "链接分享自动解析，支持 B站|抖音|快手|微博|小红书|Twitter|AcFun|NGA", "0.4.0")
 class DeniaSharePlugin(Star):
 
     @staticmethod
@@ -119,6 +119,7 @@ class DeniaSharePlugin(Star):
             max_size_mb=pconfig.VIDEO_SIZE_MAXIMUM_MB,
         )
         self.disabled_platforms = pconfig.DISABLED_PLATFORMS
+        self._send_errors = pconfig.SEND_ERROR_MESSAGES
 
         self.parsers: dict[str, Any] = {}
         self._init_parsers()
@@ -315,14 +316,18 @@ class DeniaSharePlugin(Star):
         except SilentException:
             return
         except IgnoreException as e:
-            yield event.plain_result(f"ℹ️ {e.message}")
+            if self._send_errors:
+                yield event.plain_result(f"ℹ️ {e.message}")
         except ParseException as e:
-            yield event.plain_result(f"❌ 解析失败: {e.message}")
+            if self._send_errors:
+                yield event.plain_result(f"❌ 解析失败: {e.message}")
         except DownloadException as e:
-            yield event.plain_result(f"⚠️ 下载失败: {e.message}")
+            if self._send_errors:
+                yield event.plain_result(f"⚠️ 下载失败: {e.message}")
         except Exception as e:
             logger.exception("解析异常")
-            yield event.plain_result(f"❌ 处理出错: {str(e)[:100]}")
+            if self._send_errors:
+                yield event.plain_result(f"❌ 处理出错: {str(e)[:100]}")
 
     async def _send_image(self, event: AstrMessageEvent, path: Path):
         """主动发送图片，绕开事件回复管线，避免被附加「引用回复 / @」。"""
@@ -671,8 +676,24 @@ class DeniaSharePlugin(Star):
             f"达妮娅分享 v{__version__}\n"
             f"已启用平台：{platforms}\n"
             f"卡片渲染：{'开' if self._renderer.enabled else '关'}\n"
-            f"B站 Cookie：{'已配置' if self._bili_cookie else '未配置'}"
+            f"B站 Cookie：{'已配置' if self._bili_cookie else '未配置'}\n"
+            f"错误提示：{'开' if self._send_errors else '关'}"
         )
+
+    @filter.permission_type(filter.PermissionType.ADMIN)
+    @filter.command("denia_clear")
+    async def denia_clear_cache(self, event: AstrMessageEvent):
+        """立即清空解析缓存（含渲染卡片与已下载媒体）"""
+        from .core.utils import clear_cache_dir
+
+        try:
+            cleaned = await clear_cache_dir(self.cache_dir)
+        except Exception as e:
+            yield event.plain_result(f"❌ 清空缓存失败: {str(e)[:120]}")
+            return
+        self._result_cache.clear()
+        self._render_cache.clear()
+        yield event.plain_result(f"🧹 已清空 {cleaned} 个缓存文件")
 
     async def terminate(self):
         if self._cache_cleanup_task is not None and not self._cache_cleanup_task.done():

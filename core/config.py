@@ -14,28 +14,28 @@ from typing import Any
 
 _config = None
 
+# 只保留「会改变可见行为」的配置。 housekeeping 类的（缓存清理间隔、卡片宽度、
+# 封面裁剪、调试日志开关）不再暴露到 WebUI，改用代码内默认值。
 CONFIG_GROUP_KEYS: dict[str, tuple[str, ...]] = {
-    "平台设置": (
+    "解析设置": (
         "DISABLED_PLATFORMS",
         "VIDEO_DURATION_MAXIMUM",
         "VIDEO_SIZE_MAXIMUM_MB",
-        "PROXY",
-        "XHS_CK",
+        "SEND_ERROR_MESSAGES",
     ),
     "B站设置": ("BILI_CK", "BILI_QUALITY"),
-    "缓存设置": (
-        "CACHE_TTL_HOURS",
-        "CACHE_CLEANUP_INTERVAL_MINUTES",
-    ),
-    "解析图片渲染": (
+    "卡片外观": (
         "RENDER_ENABLED",
         "RENDER_THEME",
         "RENDER_LAYOUT",
-        "RENDER_WIDTH",
-        "RENDER_FONT_PATH",
-        "RENDER_COVER_FULL_SIZE",
     ),
-    "调试设置": ("DEBUG_LOG_ENABLED",),
+    "高级设置": (
+        "XHS_CK",
+        "PROXY",
+        "CACHE_TTL_HOURS",
+        "RENDER_FONT_PATH",
+        "TWITTER_MEDIA_PROXY_BASE",
+    ),
 }
 
 _KEY_GROUP_MAP: dict[str, str] = {
@@ -46,20 +46,27 @@ _DEFAULTS: dict[str, Any] = {
     "DISABLED_PLATFORMS": "",
     "VIDEO_DURATION_MAXIMUM": 480,
     "VIDEO_SIZE_MAXIMUM_MB": 100,
-    "PROXY": "",
+    "SEND_ERROR_MESSAGES": False,
     "XHS_CK": "",
+    "PROXY": "",
     "BILI_CK": "",
     "BILI_QUALITY": "1080P",
     "CACHE_TTL_HOURS": 24,
-    "CACHE_CLEANUP_INTERVAL_MINUTES": 60,
     "RENDER_ENABLED": True,
     "RENDER_THEME": "dark",
     "RENDER_LAYOUT": "standard",
-    "RENDER_WIDTH": 800,
     "RENDER_FONT_PATH": "",
-    "RENDER_COVER_FULL_SIZE": False,
+    "TWITTER_MEDIA_PROXY_BASE": "",
+    # 不再暴露到 WebUI，保留默认值以便旧配置与代码内部引用仍可读
     "DEBUG_LOG_ENABLED": True,
+    "CACHE_CLEANUP_INTERVAL_MINUTES": 60,
+    "RENDER_WIDTH": 800,
+    "RENDER_COVER_FULL_SIZE": False,
 }
+
+# 从 WebUI 移除、但仍按固定值生效的配置
+CACHE_CLEANUP_INTERVAL_MINUTES_FIXED = 60
+RENDER_WIDTH_FIXED = 800
 
 
 def migrate_grouped_config(config: Any) -> bool:
@@ -148,7 +155,8 @@ class ParserConfig:
 
     @property
     def CACHE_CLEANUP_INTERVAL_MINUTES(self) -> int:
-        return int(self._cfg_get("CACHE_CLEANUP_INTERVAL_MINUTES", 60))
+        # 已不在 WebUI 暴露，保留读取以便旧配置兼容
+        return int(self._cfg_get("CACHE_CLEANUP_INTERVAL_MINUTES", CACHE_CLEANUP_INTERVAL_MINUTES_FIXED))
 
     # ---------------- 渲染 ---------------- #
 
@@ -168,7 +176,8 @@ class ParserConfig:
 
     @property
     def RENDER_WIDTH(self) -> int:
-        return max(520, min(1080, int(self._cfg_get("RENDER_WIDTH", 800))))
+        # 已不在 WebUI 暴露，保留读取以便旧配置兼容
+        return max(520, min(1080, int(self._cfg_get("RENDER_WIDTH", RENDER_WIDTH_FIXED))))
 
     @property
     def RENDER_FONT_PATH(self) -> str:
@@ -176,12 +185,24 @@ class ParserConfig:
 
     @property
     def RENDER_COVER_FULL_SIZE(self) -> bool:
+        # 已不在 WebUI 暴露，保留读取以便旧配置兼容
         return bool(self._cfg_get("RENDER_COVER_FULL_SIZE", False))
 
-    # ---------------- 调试 ---------------- #
+    # ---------------- 行为与调试 ---------------- #
+
+    @property
+    def SEND_ERROR_MESSAGES(self) -> bool:
+        """解析失败时是否向对话发送错误提示（关闭则只记日志，群里更安静）。"""
+        return bool(self._cfg_get("SEND_ERROR_MESSAGES", False))
+
+    @property
+    def TWITTER_MEDIA_PROXY_BASE(self) -> str:
+        """Twitter/X 媒体反代根地址（结尾斜杠会被去掉），留空表示不启用。"""
+        return str(self._cfg_get("TWITTER_MEDIA_PROXY_BASE", "") or "").strip().rstrip("/")
 
     @property
     def DEBUG_LOG_ENABLED(self) -> bool:
+        # 已不在 WebUI 暴露，默认开启
         return bool(self._cfg_get("DEBUG_LOG_ENABLED", True))
 
 

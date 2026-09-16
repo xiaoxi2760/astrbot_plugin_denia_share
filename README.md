@@ -50,7 +50,49 @@ B站的清晰度上限由服务端按登录态决定，与用什么库无关。�
 - ❌ 热评、ZIP 归档、媒体中转、权限白黑名单、频率限制
 - ✅ 保留：8 平台解析、卡片渲染、OneBot 合并转发 / 其他平台直发、JSON 卡片（QQ 小程序）提取、B站扫码登录
 
-配置项从娅娅版的几十个压到 **15 个以内**。
+配置项从娅娅版的几十个压到 **14 项**（上游 rika 同期为 40+ 项且仍在增加）。
+
+## 配置项
+
+WebUI 里只有 4 组，常用在前、折腾在后。
+
+### 解析设置
+
+| 项 | 默认 | 说明 |
+| --- | --- | --- |
+| `DISABLED_PLATFORMS` | 空 | 禁用平台，逗号分隔 |
+| `VIDEO_DURATION_MAXIMUM` | 480 | 视频最大时长（秒），超限不下载但保留标题封面 |
+| `VIDEO_SIZE_MAXIMUM_MB` | 100 | 视频体积上限，建议 ≤60（QQ 大文件上传易失败） |
+| `SEND_ERROR_MESSAGES` | 关 | 解析失败是否回消息；关闭只写日志，群里更安静 |
+
+### B站设置
+
+| 项 | 默认 | 说明 |
+| --- | --- | --- |
+| `BILI_CK` | 空 | 建议用 `/bili_login` 扫码；配了才能下 1080P+ |
+| `BILI_QUALITY` | 1080P | 360P ~ 8K |
+
+### 卡片外观
+
+| 项 | 默认 | 说明 |
+| --- | --- | --- |
+| `RENDER_ENABLED` | 开 | 关闭回退纯文本 |
+| `RENDER_THEME` | dark | dark / light |
+| `RENDER_LAYOUT` | standard | standard / magazine / immersive / feed |
+
+### 高级设置
+
+| 项 | 默认 | 说明 |
+| --- | --- | --- |
+| `XHS_CK` | 空 | 小红书 Cookie |
+| `PROXY` | 空 | 媒体下载代理，如 `http://127.0.0.1:7897` |
+| `TWITTER_MEDIA_PROXY_BASE` | 空 | twimg 反代根地址，服务器连不上 X CDN 时填 |
+| `CACHE_TTL_HOURS` | 24 | 缓存保留时长，0 = 不自动清理 |
+| `RENDER_FONT_PATH` | 空 | 卡片出现方块字时才需要指定 |
+
+**为了简洁而移除的旋钮**（改为代码内固定值）：缓存清理间隔（60 分钟）、
+卡片宽度（800）、封面裁剪模式（关闭）、调试日志开关（默认开）。
+这些键仍可从配置文件手动覆盖，只是不再出现在 WebUI。
 
 ## 开发状态
 
@@ -69,6 +111,24 @@ B站的清晰度上限由服务端按登录态决定，与用什么库无关。�
 | `/bili_login` | B站扫码登录，Cookie 持久化 | 管理员 |
 | `/bili_check` | 检查 B站 Cookie 是否有效 | 全部 |
 | `/denia_status` | 查看插件运行状态 | 管理员 |
+| `/denia_clear` | 立即清空解析缓存 | 管理员 |
+
+## 上游同步
+
+上游 [rika_share](https://github.com/iris1598/astrbot_plugin_rika_share) 在
+2026-08 至 09 有 6 次提交（HEAD `8a05728`），本插件已同步其中有用的部分：
+
+| 上游改动 | 处理 |
+| --- | --- |
+| `download.py` chunked 编码修复 | ✅ 已同步（**重要**：旧代码把缺失的 `Content-Length` 当成 0，会取消下载，抖音视频全部下不来） |
+| `bilibili.py` -504 退避重试 + AI 总结失败不再阻断解析 | ✅ 已同步 |
+| `base_parser.py` `PathTask` 包装修复（抽封面与内容并发 await 同一协程会报错） | ✅ 已同步 |
+| `utils.py` 新增 `clear_cache_dir` | ✅ 已同步，接了 `/denia_clear` |
+| `twitter.py` 媒体反代 | ✅ 已同步（改为单键 `TWITTER_MEDIA_PROXY_BASE`，省掉开关） |
+| `config.py` `SEND_ERROR_MESSAGES` | ✅ 已同步 |
+| `douyin.py` 改回无签名 `aweme/detail` + `open.douyin.com` 头 | ⏸ 暂不跟：我们已有签名兜底，未签名路径待实测 |
+
+上游的 `_conf_schema.json` 同期从 22.5KB 涨到 24.5KB（继续加配置项），与本项目做减法的方向相反，故不跟随。
 
 ## 安装
 

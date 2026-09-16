@@ -12,6 +12,7 @@ import json
 import re
 from datetime import datetime
 from typing import Any, ClassVar
+from urllib.parse import urlsplit
 
 import aiohttp
 from httpx import AsyncClient
@@ -19,6 +20,33 @@ from astrbot.api import logger
 
 from ..base_parser import BaseParser, PlatformEnum, ParseException, handle
 from ..data import Platform, ParseResult
+
+# pbs.twimg.com / video.twimg.com 在国内常不可达，可配置反代根地址绕过
+_TWIMG_HOST_PREFIX = {
+    "pbs.twimg.com": "pbs",
+    "video.twimg.com": "video",
+}
+
+
+def proxy_media_url(url: str | None) -> str | None:
+    """把 X 官方媒体 CDN 地址改写为自定义反代地址。
+
+    未配置 ``TWITTER_MEDIA_PROXY_BASE`` 时原样返回，无副作用。
+    """
+    if not url:
+        return url
+    from ..config import get_config
+
+    config = get_config()
+    base = config.TWITTER_MEDIA_PROXY_BASE
+    if not base:
+        return url
+    parts = urlsplit(url)
+    prefix = _TWIMG_HOST_PREFIX.get(parts.netloc.lower())
+    if prefix is None:
+        return url
+    query = f"?{parts.query}" if parts.query else ""
+    return f"{base}/{prefix}{parts.path}{query}"
 
 BEARER = (
     "AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOjj6tT7UeCs"
@@ -84,7 +112,9 @@ class TwitterParser(BaseParser):
             response.raise_for_status()
             data = response.json()
 
-        author = self.create_author(data.get("user_name") or "", data.get("user_profile_image_url"))
+        author = self.create_author(
+            data.get("user_name") or "", proxy_media_url(data.get("user_profile_image_url"))
+        )
         article = data.get("article")
         title = article.get("title") if isinstance(article, dict) else article
 
@@ -99,12 +129,14 @@ class TwitterParser(BaseParser):
                 self._add_limit_warning(result, duration)
                 result.contents.append(
                     self.create_video(
-                        media.get("url"), media.get("thumbnail_url"),
+                        proxy_media_url(media.get("url")), proxy_media_url(media.get("thumbnail_url")),
                         duration=duration, is_gif=mtype == "gif",
                     )
                 )
             elif mtype == "image":
-                result.contents.append(self.create_image(f"{media.get('url')}?format=jpg&name=orig"))
+                result.contents.append(
+                    self.create_image(proxy_media_url(f"{media.get('url')}?name=orig"))
+                )
         return result
 
     # ------------------------------------------------------------------ #
@@ -129,7 +161,7 @@ class TwitterParser(BaseParser):
         screen = info.get("screen_name") or ""
         author = self.create_author(
             f"{name}(@{screen})" if name and screen else (name or screen),
-            (info.get("avatar_url") or None),
+            proxy_media_url(info.get("avatar_url") or None),
         )
 
         timestamp = None
@@ -144,13 +176,17 @@ class TwitterParser(BaseParser):
         media = tweet.get("media") or {}
         for photo in media.get("photos") or []:
             if isinstance(photo, dict) and photo.get("url"):
-                result.contents.append(self.create_image(photo["url"]))
+                result.contents.append(self.create_image(proxy_media_url(photo["url"])))
         for video in media.get("videos") or []:
             if isinstance(video, dict) and video.get("url"):
                 duration = float(video.get("duration") or 0) or None
                 self._add_limit_warning(result, duration)
                 result.contents.append(
-                    self.create_video(video["url"], video.get("thumbnail_url"), duration=duration)
+                    self.create_video(
+                        proxy_media_url(video["url"]),
+                        proxy_media_url(video.get("thumbnail_url")),
+                        duration=duration,
+                    )
                 )
         return result
 
@@ -200,7 +236,7 @@ class TwitterParser(BaseParser):
         screen = user_legacy.get("screen_name") or ""
         author = self.create_author(
             f"{name}(@{screen})" if name and screen else (name or screen),
-            user_legacy.get("profile_image_url_https"),
+            proxy_media_url(user_legacy.get("profile_image_url_https")),
         )
 
         result = self.result(
@@ -217,7 +253,9 @@ class TwitterParser(BaseParser):
             if mtype == "photo":
                 img = media.get("media_url_https")
                 if img:
-                    result.contents.append(self.create_image(f"{img}?format=jpg&name=orig"))
+                    result.contents.append(
+                        self.create_image(proxy_media_url(f"{img}?name=orig"))
+                    )
             elif mtype in ("video", "animated_gif"):
                 video_url = self._best_variant(media)
                 if video_url:
@@ -225,7 +263,7 @@ class TwitterParser(BaseParser):
                     self._add_limit_warning(result, duration)
                     result.contents.append(
                         self.create_video(
-                            video_url, media.get("media_url_https"),
+                            proxy_media_url(video_url), proxy_media_url(media.get("media_url_https")),
                             duration=duration, is_gif=mtype == "animated_gif",
                         )
                     )
