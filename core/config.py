@@ -24,6 +24,12 @@ CONFIG_GROUP_KEYS: dict[str, tuple[str, ...]] = {
         "SEND_ERROR_MESSAGES",
     ),
     "B站设置": ("BILI_CK", "BILI_QUALITY"),
+    "网页截图": (
+        "SCREENSHOT_BACKEND",
+        "SCREENSHOT_FALLBACK",
+        "CF_ACCOUNT_ID",
+        "CF_API_TOKEN",
+    ),
     "卡片外观": (
         "RENDER_ENABLED",
         "RENDER_THEME",
@@ -31,6 +37,8 @@ CONFIG_GROUP_KEYS: dict[str, tuple[str, ...]] = {
     ),
     "高级设置": (
         "XHS_CK",
+        "PIXIV_CK",
+        "GITHUB_TOKEN",
         "PROXY",
         "CACHE_TTL_HOURS",
         "RENDER_FONT_PATH",
@@ -48,7 +56,13 @@ _DEFAULTS: dict[str, Any] = {
     "VIDEO_SIZE_MAXIMUM_MB": 100,
     "SEND_ERROR_MESSAGES": False,
     "XHS_CK": "",
+    "PIXIV_CK": "",
+    "GITHUB_TOKEN": "",
     "PROXY": "",
+    "SCREENSHOT_BACKEND": "thum",
+    "SCREENSHOT_FALLBACK": False,
+    "CF_ACCOUNT_ID": "",
+    "CF_API_TOKEN": "",
     "BILI_CK": "",
     "BILI_QUALITY": "1080P",
     "CACHE_TTL_HOURS": 24,
@@ -136,6 +150,46 @@ class ParserConfig:
     @property
     def XHS_CK(self) -> str | None:
         return self._cfg_get("XHS_CK", None)
+
+    # ---------------- Pixiv / GitHub ---------------- #
+
+    @property
+    def PIXIV_CK(self) -> str:
+        """Pixiv Cookie（可选）。
+
+        配了 Cookie 搜索收录会更全，但也会让搜索结果开始出现 R18 作品。
+        解析器侧对 xRestrict != 0 有硬性过滤，Cookie 不会放宽这条限制。
+        """
+        return str(self._cfg_get("PIXIV_CK", "") or "").strip()
+
+    @property
+    def GITHUB_TOKEN(self) -> str:
+        """GitHub Personal Access Token（可选，但强烈建议）。
+
+        免 token 时限额 60 次/小时且按**出口 IP**计，共享 IP 下几乎必被限流。
+        填了 token 提升到 5000 次/小时（按账号计）。
+        """
+        return str(self._cfg_get("GITHUB_TOKEN", "") or "").strip()
+
+    # ---------------- 网页截图 ---------------- #
+
+    @property
+    def SCREENSHOT_BACKEND(self) -> str:
+        val = str(self._cfg_get("SCREENSHOT_BACKEND", "thum")).strip().lower()
+        return val if val in {"thum", "cloudflare"} else "thum"
+
+    @property
+    def SCREENSHOT_FALLBACK(self) -> bool:
+        """链接匹配不到任何平台时，是否自动截图（默认关，避免群里刷图）。"""
+        return bool(self._cfg_get("SCREENSHOT_FALLBACK", False))
+
+    @property
+    def CF_ACCOUNT_ID(self) -> str:
+        return str(self._cfg_get("CF_ACCOUNT_ID", "") or "").strip()
+
+    @property
+    def CF_API_TOKEN(self) -> str:
+        return str(self._cfg_get("CF_API_TOKEN", "") or "").strip()
 
     # ---------------- B站 ---------------- #
 

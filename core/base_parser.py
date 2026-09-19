@@ -41,6 +41,23 @@ class BaseParser:
         self.android_headers = ANDROID_HEADER.copy()
         self.downloader = downloader
         self.timeout = COMMON_TIMEOUT
+        # 全局代理：自建 AsyncClient 的解析器（github/pixiv 等）必须带上，
+        # 否则在直连不通的服务器环境里会直接失败
+        try:
+            from .config import get_config
+            self.proxies = get_config().PROXY or None
+        except Exception:
+            self.proxies = None
+
+    def new_client(self, **kwargs) -> "AsyncClient":
+        """创建带代理与默认超时的 httpx 客户端。"""
+        from httpx import AsyncClient
+        kwargs.setdefault("timeout", self.timeout)
+        kwargs.setdefault("follow_redirects", True)
+        kwargs.setdefault("verify", False)
+        if self.proxies:
+            kwargs.setdefault("proxy", self.proxies)
+        return AsyncClient(**kwargs)
 
     def __init_subclass__(cls, **kwargs):
         super().__init_subclass__(**kwargs)

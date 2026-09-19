@@ -2,7 +2,8 @@
 
 AstrBot 链接分享自动解析插件：解析分享链接，渲染成分享卡片发送。
 
-支持 **B站 / 抖音 / 快手 / 微博 / 小红书 / Twitter / AcFun / NGA** 八个平台。
+支持 **B站 / 抖音 / 快手 / 微博 / 小红书 / Twitter / AcFun / NGA / GitHub / Pixiv** 十个平台，
+另有网页截图（`/shot`）与 Pixiv 关键词搜索（`/pixiv`）。
 
 ## 解析内核：两个插件择优合并
 
@@ -17,6 +18,8 @@ AstrBot 链接分享自动解析插件：解析分享链接，渲染成分享卡
 | 微博 | rika + 娅娅增强 | rika 的完整度更高（长文 / 视频 fid / mid2id 转换 / 转发递归） |
 | Twitter | **娅娅**（三级兜底） | rika 只走 `vxtwitter` 一家第三方镜像；娅娅版是 vxtwitter → fxtwitter → 官方 Guest GraphQL 三级兜底 |
 | AcFun / NGA | rika | 娅娅无此平台 |
+| GitHub | 本仓库新增 | 官方 REST API，仓库卡片（星标 / 分支 / 语言 / 许可 / topics） |
+| Pixiv | 本仓库新增 | 官方 Ajax 接口，作品解析 + 关键词搜索 |
 
 **抖音**保留了双路径：先试零成本的 HTML 直取，失败再退到签名接口。
 **Twitter**同理：两家第三方镜像都失败后才走官方 GraphQL。
@@ -38,6 +41,37 @@ B站的清晰度上限由服务端按登录态决定，与用什么库无关。�
 
 要 1080P 及以上仍然必须配置 Cookie（`/bili_login`）。
 
+## 新增解析器（v0.5.0）
+
+### 网页截图
+
+两个后端，配置 `SCREENSHOT_BACKEND` 切换：
+
+| 后端 | 凭据 | 实测 | 适用 |
+| --- | --- | --- | --- |
+| `thum`（默认） | 免 key | 连打 4/4 成功，900×900 | 一般资讯站、博客、商品页 |
+| `cloudflare` | Account ID + API Token | 未实测（需账号） | 要截长图 / 等待 JS / 指定选择器 |
+
+命令 `/shot <网址>`；也可开启 `SCREENSHOT_FALLBACK`，让匹配不到任何平台的链接自动截图（默认关，避免群里刷图）。
+
+局限：强反爬站点截不到内容（实测知乎只返回 16KB 空白图），thum.io 也拿不到 JS 渲染后的长图。
+
+### GitHub 仓库
+
+官方 REST API，出卡片：星标 / 分支 / 未关闭 issue / 主语言 / 许可 / topics / 最近提交。
+
+**建议填 `GITHUB_TOKEN`**：免 token 限额 60 次/小时且**按出口 IP 计算**，共享出口（代理、容器 NAT）下几乎必被限流。填了提升到 5000 次/小时。
+
+### Pixiv
+
+- 作品链接（`pixiv.net/artworks/{id}`）自动解析
+- `/pixiv <关键词>` 搜索，最多返回 6 张
+
+**内容过滤是硬性的**：Pixiv 的 `xRestrict` 字段 0=全年龄、1=R18、2=R18G，
+本插件对非 0 一律拦截，**不提供开关**。实测未登录时搜索结果 `xRestrict` 恒为 0，
+但配置 Cookie 后收录更全的同时也会开始出现 R18 —— 过滤逻辑与是否登录无关，
+配 Cookie 不会放宽。这是为了不在群里发出违规内容。
+
 ## 与 yaya（astrbot_plugin_media_parser）的差异
 
 娅娅版功能面很大（13 平台 + LLM 翻译 + 热评 + 归档 + 媒体中转 + 权限/限流），
@@ -45,16 +79,16 @@ B站的清晰度上限由服务端按登录态决定，与用什么库无关。�
 
 - ❌ **LLM 文本翻译**（10 语言 × 10 厂商接口）—— 与链接解析无关
 - ❌ **视频仅发送封面** —— 边缘功能
-- ❌ Cloudflare 网页截图兜底（20+ 配置项）
 - ❌ B站 Cookie 定时监控与失效通知（保留扫码登录 + 持久化）
 - ❌ 热评、ZIP 归档、媒体中转、权限白黑名单、频率限制
-- ✅ 保留：8 平台解析、卡片渲染、OneBot 合并转发 / 其他平台直发、JSON 卡片（QQ 小程序）提取、B站扫码登录
+- ✅ 保留：平台解析、卡片渲染、OneBot 合并转发 / 其他平台直发、JSON 卡片（QQ 小程序）提取、B站扫码登录
+- ✅ 网页截图只保留 4 个配置项（娅娅/rika 的 Cloudflare 实现有 20+ 项）
 
-配置项从娅娅版的几十个压到 **14 项**（上游 rika 同期为 40+ 项且仍在增加）。
+配置项从娅娅版的几十个压到 **20 项**（上游 rika 同期为 40+ 项且仍在增加）。
 
 ## 配置项
 
-WebUI 里只有 4 组，常用在前、折腾在后。
+WebUI 里只有 5 组，常用在前、折腾在后。
 
 ### 解析设置
 
@@ -72,6 +106,15 @@ WebUI 里只有 4 组，常用在前、折腾在后。
 | `BILI_CK` | 空 | 建议用 `/bili_login` 扫码；配了才能下 1080P+ |
 | `BILI_QUALITY` | 1080P | 360P ~ 8K |
 
+### 网页截图
+
+| 项 | 默认 | 说明 |
+| --- | --- | --- |
+| `SCREENSHOT_BACKEND` | thum | `thum` 免 key；`cloudflare` 功能更强但需账号 |
+| `SCREENSHOT_FALLBACK` | 关 | 匹配不到平台的链接是否自动截图 |
+| `CF_ACCOUNT_ID` | 空 | 仅 cloudflare 后端需要 |
+| `CF_API_TOKEN` | 空 | 仅 cloudflare 后端需要，需带 Browser Rendering 权限 |
+
 ### 卡片外观
 
 | 项 | 默认 | 说明 |
@@ -85,7 +128,9 @@ WebUI 里只有 4 组，常用在前、折腾在后。
 | 项 | 默认 | 说明 |
 | --- | --- | --- |
 | `XHS_CK` | 空 | 小红书 Cookie |
-| `PROXY` | 空 | 媒体下载代理，如 `http://127.0.0.1:7897` |
+| `PIXIV_CK` | 空 | Pixiv Cookie，留空也能搜；填了收录更全（R18 仍会被过滤） |
+| `GITHUB_TOKEN` | 空 | 建议填，免 token 时 60 次/小时且按出口 IP 计 |
+| `PROXY` | 空 | 全局代理，如 `http://127.0.0.1:7897`，作用于下载与自建请求 |
 | `TWITTER_MEDIA_PROXY_BASE` | 空 | twimg 反代根地址，服务器连不上 X CDN 时填 |
 | `CACHE_TTL_HOURS` | 24 | 缓存保留时长，0 = 不自动清理 |
 | `RENDER_FONT_PATH` | 空 | 卡片出现方块字时才需要指定 |
@@ -99,15 +144,18 @@ WebUI 里只有 4 组，常用在前、折腾在后。
 | 模块 | 状态 |
 | --- | --- |
 | 仓库骨架 / 插件注册 | ✅ |
-| 解析层（`core/parsers/`） | ✅ 8 平台（3 个为合并改写） |
+| 解析层（`core/parsers/`） | ✅ 10 平台（3 个为合并改写，2 个为新增） |
 | 分享卡片渲染（`core/render.py`） | ✅ 来自 rika |
 | 下载器（`core/download.py`） | ✅ 来自 rika，加了体积上限与代理 |
-| 配置（`_conf_schema.json`） | ✅ 5 组 15 项 |
+| 网页截图（`core/screenshot.py`） | ✅ 双后端，thum 免 key / Cloudflare 需账号 |
+| 配置（`_conf_schema.json`） | ✅ 5 组 20 项 |
 
 ## 命令
 
 | 命令 | 说明 | 权限 |
 | --- | --- | --- |
+| `/shot <网址>` | 网页截图 | 全部 |
+| `/pixiv <关键词>` | Pixiv 搜索，最多 6 张，强制过滤非全年龄 | 全部 |
 | `/bili_login` | B站扫码登录，Cookie 持久化 | 管理员 |
 | `/bili_check` | 检查 B站 Cookie 是否有效 | 全部 |
 | `/denia_status` | 查看插件运行状态 | 管理员 |

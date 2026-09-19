@@ -1,7 +1,8 @@
 """
 达妮娅分享 - 链接分享自动解析插件
 
-支持 B站 | 抖音 | 快手 | 微博 | 小红书 | Twitter | AcFun | NGA
+支持 B站 | 抖音 | 快手 | 微博 | 小红书 | Twitter | AcFun | NGA | GitHub | Pixiv
+另有网页截图（thum.io / Cloudflare 双后端）与 Pixiv 关键词搜索。
 
 解析内核合并自两个插件，取各自更强的一版：
 - astrbot_plugin_rika_share（架构 / 渲染 / B站 / 微博 / 小红书 / AcFun / NGA）
@@ -31,9 +32,11 @@ from .core.exception import (
     ParseException, IgnoreException, DownloadException, SilentException,
 )
 from .core.render import ShareCardRenderer
+from .core.screenshot import ScreenshotService, is_probably_screenshotable
 from .core.parsers import (
     BilibiliParser, DouyinParser, KuaiShouParser, WeiBoParser,
     XiaoHongShuParser, TwitterParser, NGAParser, AcfunParser,
+    GitHubParser, PixivParser,
 )
 
 PLUGIN_NAME = "astrbot_plugin_denia_share"
@@ -63,6 +66,8 @@ XHS_PATTERN = re.compile(r"(xhslink\.com|xhslink\.cn|xiaohongshu\.com)")
 TWITTER_PATTERN = re.compile(r"(x\.com|twitter\.com)")
 NGA_PATTERN = re.compile(r"(nga\.178\.com|ngabbs\.com|bbs\.nga\.cn)")
 ACFUN_PATTERN = re.compile(r"acfun\.cn")
+GITHUB_PATTERN = re.compile(r"github\.com/[\w.\-]+/[\w.\-]+")
+PIXIV_PATTERN = re.compile(r"pixiv\.net")
 
 URL_PATTERN = re.compile(r"https?://[^\s'\"<>]+")
 
@@ -79,7 +84,7 @@ class _EventUrlWrapper:
 
 
 @register("达妮娅分享", "xiaoxi2760",
-          "链接分享自动解析，支持 B站|抖音|快手|微博|小红书|Twitter|AcFun|NGA", "0.4.0")
+          "链接分享自动解析，支持 B站|抖音|快手|微博|小红书|Twitter|AcFun|NGA|GitHub|Pixiv", "0.5.0")
 class DeniaSharePlugin(Star):
 
     @staticmethod
@@ -171,6 +176,19 @@ class DeniaSharePlugin(Star):
             self.parsers["nga"] = NGAParser(self.downloader)
         if "acfun" not in disabled:
             self.parsers["acfun"] = AcfunParser(self.downloader)
+        if "github" not in disabled:
+            self.parsers["github"] = GitHubParser(self.downloader, token=pconfig.GITHUB_TOKEN)
+        if "pixiv" not in disabled:
+            self.parsers["pixiv"] = PixivParser(self.downloader, cookie=pconfig.PIXIV_CK)
+
+        self.screenshot = ScreenshotService(
+            self.cache_dir,
+            backend=pconfig.SCREENSHOT_BACKEND,
+            cf_account_id=pconfig.CF_ACCOUNT_ID,
+            cf_api_token=pconfig.CF_API_TOKEN,
+            proxy=pconfig.PROXY,
+        )
+        self._screenshot_fallback = pconfig.SCREENSHOT_FALLBACK
 
     async def initialize(self):
         pconfig = get_config()
@@ -246,6 +264,68 @@ class DeniaSharePlugin(Star):
         async for r in self._dispatch(event, "acfun"):
             yield r
 
+    @filter.regex(GITHUB_PATTERN)
+    async def github_handler(self, event: AstrMessageEvent, matched: re.Match | None = None):
+        async for r in self._dispatch(event, "github"):
+            yield r
+
+    @filter.regex(PIXIV_PATTERN)
+    async def pixiv_handler(self, event: AstrMessageEvent, matched: re.Match | None = None):
+        async for r in self._dispatch(event, "pixiv"):
+            yield r
+
+    # ==================== 网页截图 ====================
+
+    @filter.command("shot")
+    async def shot_command(self, event: AstrMessageEvent):
+        """对链接截图 /shot <网址>"""
+        url = self._first_url(event)
+        if not url:
+            yield event.plain_result("用法: /shot <网址>")
+            return
+        async for r in self._do_screenshot(event, url):
+            yield r
+
+    @filter.regex(URL_PATTERN)
+    async def screenshot_fallback_handler(self, event: AstrMessageEvent, matched: re.Match | None = None):
+        """无可解析平台时按需截图兜底（默认关闭）。"""
+        if not self._screenshot_fallback or self._has_json_component(event):
+            return
+        url = self._first_url(event)
+        if not url or self._match_parser(url) is not None:
+            return
+        async for r in self._do_screenshot(event, url):
+            yield r
+
+    @filter.command("pixiv")
+    async def pixiv_search_command(self, event: AstrMessageEvent):
+        """Pixiv 关键词搜索 /pixiv <关键词>"""
+        keyword = " ".join((event.message_str or "").split()[1:]).strip()
+        if not keyword:
+            yield event.plain_result("用法: /pixiv <关键词>\n结果强制过滤非全年龄内容")
+            return
+
+        parser = self.parsers.get("pixiv")
+        if parser is None:
+            yield event.plain_result("Pixiv 平台已被禁用")
+            return
+
+        try:
+            cache_key = f"pixiv:{keyword}"
+            result = self._result_cache.get(cache_key)
+            if result is None:
+                result = await parser.search(keyword)
+                self._result_cache[cache_key] = result
+            async for r in self._deliver(event, result, cache_key):
+                yield r
+        except IgnoreException as e:
+            yield event.plain_result(f"ℹ️ {e.message}")
+        except ParseException as e:
+            yield event.plain_result(f"❌ 搜索失败: {e.message}")
+        except Exception as e:
+            logger.exception("Pixiv 搜索异常")
+            yield event.plain_result(f"❌ 搜索出错: {str(e)[:100]}")
+
     # ==================== JSON 卡片（QQ 小程序分享） ====================
 
     @filter.regex(r".*")
@@ -279,38 +359,7 @@ class DeniaSharePlugin(Star):
                 result = await parser.parse(keyword, searched)
                 self._result_cache[cache_key] = result
 
-            header, nodes_content = await self._build_output(result)
-
-            render_path: Path | None = None
-            if self._renderer.enabled:
-                render_path = await self._renderer.render(
-                    result, cache_key=cache_key, existing=self._render_cache.get(cache_key),
-                )
-                if render_path is not None:
-                    self._render_cache[cache_key] = render_path
-
-            warnings = result.extra.get("limit_warnings") or []
-
-            if render_path is not None:
-                await self._send_image(event, render_path)
-                # 卡片已承载标题/作者/统计/时长，视频场景不再重复发文字
-                skip_text = bool(result.video_contents)
-                header_text = "" if skip_text else header
-                text_items = [] if skip_text else list(nodes_content)
-            else:
-                header_text = header
-                text_items = list(nodes_content)
-                for w in warnings:
-                    text_items.append([Comp.Plain(w)])
-
-            if text_items:
-                if self._is_onebot(event):
-                    yield await self._build_nodes_result(event, header_text, text_items)
-                else:
-                    async for r in self._send_plain_output(event, header_text, text_items):
-                        yield r
-
-            async for r in self._try_send_media(event, result):
+            async for r in self._deliver(event, result, cache_key):
                 yield r
 
         except SilentException:
@@ -328,6 +377,83 @@ class DeniaSharePlugin(Star):
             logger.exception("解析异常")
             if self._send_errors:
                 yield event.plain_result(f"❌ 处理出错: {str(e)[:100]}")
+
+    async def _deliver(
+        self, event: AstrMessageEvent, result: ParseResult, cache_key: str
+    ) -> AsyncGenerator[MessageEventResult, None]:
+        """把已得到的 ParseResult 渲染并发送出去。
+
+        链接解析与 /pixiv 搜索共用这条输出链路。
+        """
+        header, nodes_content = await self._build_output(result)
+
+        render_path: Path | None = None
+        if self._renderer.enabled:
+            render_path = await self._renderer.render(
+                result, cache_key=cache_key, existing=self._render_cache.get(cache_key),
+            )
+            if render_path is not None:
+                self._render_cache[cache_key] = render_path
+
+        warnings = result.extra.get("limit_warnings") or []
+
+        if render_path is not None:
+            await self._send_image(event, render_path)
+            # 卡片已承载标题/作者/统计/时长，视频场景不再重复发文字
+            skip_text = bool(result.video_contents)
+            header_text = "" if skip_text else header
+            text_items = [] if skip_text else list(nodes_content)
+        else:
+            header_text = header
+            text_items = list(nodes_content)
+            for w in warnings:
+                text_items.append([Comp.Plain(w)])
+
+        if text_items:
+            if self._is_onebot(event):
+                yield await self._build_nodes_result(event, header_text, text_items)
+            else:
+                async for r in self._send_plain_output(event, header_text, text_items):
+                    yield r
+
+        async for r in self._try_send_media(event, result):
+            yield r
+
+    # ==================== 网页截图 ====================
+
+    @staticmethod
+    def _first_url(event: AstrMessageEvent) -> str | None:
+        urls = URL_PATTERN.findall(event.message_str or "")
+        return urls[0] if urls else None
+
+    def _match_parser(self, url: str) -> str | None:
+        """找出能处理该 URL 的解析器名，没有则返回 None。"""
+        for name, parser in self.parsers.items():
+            try:
+                parser.search_url(url)
+                return name
+            except Exception:
+                continue
+        return None
+
+    async def _do_screenshot(self, event: AstrMessageEvent, url: str):
+        if not is_probably_screenshotable(url):
+            yield event.plain_result("这个地址不支持截图")
+            return
+        if not self.screenshot.is_configured:
+            yield event.plain_result(
+                "截图后端未配置：使用 Cloudflare 时请填写 Account ID 与 API Token"
+            )
+            return
+
+        path = await self.screenshot.capture(url)
+        if path is None:
+            detail = self.screenshot.last_error or "未知原因"
+            yield event.plain_result(f"截图失败：{detail}\n{url}")
+            return
+
+        await self._send_image(event, path)
+        yield event.plain_result(f"截图完成 {url}")
 
     async def _send_image(self, event: AstrMessageEvent, path: Path):
         """主动发送图片，绕开事件回复管线，避免被附加「引用回复 / @」。"""
@@ -672,11 +798,15 @@ class DeniaSharePlugin(Star):
         from . import __version__
 
         platforms = "、".join(self.parsers) if self.parsers else "（无）"
+        backend = self.screenshot.backend
+        shot_ready = "已就绪" if self.screenshot.is_configured else "未配置"
         yield event.plain_result(
             f"达妮娅分享 v{__version__}\n"
             f"已启用平台：{platforms}\n"
             f"卡片渲染：{'开' if self._renderer.enabled else '关'}\n"
             f"B站 Cookie：{'已配置' if self._bili_cookie else '未配置'}\n"
+            f"截图后端：{backend}（{shot_ready}）"
+            f"{'，链接兜底开' if self._screenshot_fallback else ''}\n"
             f"错误提示：{'开' if self._send_errors else '关'}"
         )
 
