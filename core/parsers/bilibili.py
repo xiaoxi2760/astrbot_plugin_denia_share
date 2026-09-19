@@ -14,8 +14,8 @@ from msgspec import convert
 
 from ..base_parser import BaseParser, PlatformEnum, ParseException, IgnoreException, DownloadException, handle
 from ..data import Platform, ImageContent, MediaContent
-from ..cookie import ck2dict
-from ..utils_parser import fmt_duration
+from ..cookie_utils import ck2dict
+from ..media_utils import fmt_duration
 
 try:
     select_client("curl_cffi")
@@ -123,7 +123,7 @@ class BilibiliParser(BaseParser):
         return await self._parse_bilibli_api_opus(opus)
 
     async def parse_video(self, *, bvid: str | None = None, avid: int | None = None, page_num: int = 1):
-        from ..bili_models.video import VideoInfo, AIConclusion
+        from ..models.bilibili.video import VideoInfo, AIConclusion
 
         credential = await self.credential
         video = Video(bvid=bvid, aid=avid, credential=credential)
@@ -246,7 +246,7 @@ class BilibiliParser(BaseParser):
 
     async def parse_dynamic_or_opus(self, dynamic_id: int):
         from bilibili_api.dynamic import Dynamic
-        from ..bili_models.dynamic import DynamicWrapper
+        from ..models.bilibili.dynamic import DynamicWrapper
 
         dynamic = Dynamic(dynamic_id, await self.credential)
         if await dynamic.is_article():
@@ -256,7 +256,7 @@ class BilibiliParser(BaseParser):
         return await self._parse_dynamic_info(dynamic_info)
 
     async def _parse_dynamic_info(self, dynamic_info):
-        from ..bili_models.dynamic import DynamicInfo
+        from ..models.bilibili.dynamic import DynamicInfo
 
         if dynamic_info.is_video():
             if (major := dynamic_info.modules.major) and (archive := major.archive):
@@ -284,7 +284,7 @@ class BilibiliParser(BaseParser):
         return await self._parse_bilibli_api_opus(opus)
 
     async def _parse_bilibli_api_opus(self, bili_opus: Opus):
-        from ..bili_models.opus import OpusItem
+        from ..models.bilibili.opus import OpusItem
 
         opus_info = await bili_opus.get_info()
         if not isinstance(opus_info, dict):
@@ -303,7 +303,7 @@ class BilibiliParser(BaseParser):
 
     async def parse_live(self, room_id: int):
         from bilibili_api.live import LiveRoom
-        from ..bili_models.live import RoomData
+        from ..models.bilibili.live import RoomData
 
         room = LiveRoom(room_display_id=room_id, credential=await self.credential)
         info_dict = await room.get_room_info()
@@ -320,7 +320,7 @@ class BilibiliParser(BaseParser):
 
     async def parse_favlist(self, fav_id: int):
         from bilibili_api.favorite_list import get_video_favorite_list_content
-        from ..bili_models.favlist import FavData
+        from ..models.bilibili.favlist import FavData
 
         fav_dict = await get_video_favorite_list_content(fav_id)
         if fav_dict["medias"] is None:

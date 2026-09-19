@@ -55,7 +55,7 @@ class XiaoHongShuParser(BaseParser):
             return await self.parse_discovery(f"{xhs_domain}/discovery/item/{query}")
 
     async def parse_explore(self, url: str, xhs_id: str):
-        from ..xhs_models.explore import decoder as explore_decoder
+        from ..models.xiaohongshu.explore import decoder as explore_decoder
 
         async with AsyncClient(headers=self.headers, timeout=self.timeout) as client:
             response = await client.get(url)
@@ -84,7 +84,7 @@ class XiaoHongShuParser(BaseParser):
         return result
 
     async def parse_discovery(self, url: str):
-        from ..xhs_models.discovery import decoder as discovery_decoder
+        from ..models.xiaohongshu.discovery import decoder as discovery_decoder
 
         async with AsyncClient(
             headers=self.ios_headers,

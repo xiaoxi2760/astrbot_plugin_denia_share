@@ -49,7 +49,7 @@ class WeiBoParser(BaseParser):
         return await self.parse_article(_id)
 
     async def parse_article(self, _id: str):
-        from ..weibo_models.article import decoder as article_decoder
+        from ..models.weibo.article import decoder as article_decoder
 
         url = "https://card.weibo.com/article/m/aj/detail"
         params = {"_rid": str(uuid4()), "id": _id, "_t": int(time() * 1000)}
@@ -78,7 +78,7 @@ class WeiBoParser(BaseParser):
         return self.result(url=data.url, title=data.title, author=author, timestamp=data.create_at_unix, graphics=graphics)
 
     async def parse_fid(self, fid: str):
-        from ..weibo_models.show import decoder as show_decoder
+        from ..models.weibo.show import decoder as show_decoder
 
         req_url = f"https://h5.video.weibo.com/api/component?page=/show/{fid}"
         headers = {"Referer": f"https://h5.video.weibo.com/show/{fid}", "Content-Type": "application/x-www-form-urlencoded", **self.headers}
@@ -96,7 +96,7 @@ class WeiBoParser(BaseParser):
         return result
 
     async def parse_weibo_id(self, weibo_id: str):
-        from ..weibo_models.common import decoder as weibo_decoder
+        from ..models.weibo.common import decoder as weibo_decoder
 
         headers = {
             "accept": "application/json, text/plain, */*",

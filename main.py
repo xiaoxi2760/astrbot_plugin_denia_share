@@ -25,14 +25,14 @@ from astrbot.api.event import filter, AstrMessageEvent, MessageEventResult, Mess
 import astrbot.api.message_components as Comp
 from astrbot.api.star import Context, Star, register, StarTools
 
-from .core.utils import cleanup_cache_dir
+from .core.media_utils import cleanup_cache_dir
 from .core.config import init_config, get_config
 from .core.download import StreamDownloader
 from .core.data import ParseResult, ImageContent, VideoContent, AudioContent
 from .core.exception import (
     ParseException, IgnoreException, DownloadException, SilentException,
 )
-from .core.render import ShareCardRenderer
+from .core.card_renderer import ShareCardRenderer
 from .core.screenshot import ScreenshotService, is_probably_screenshotable
 from .core.parsers import (
     BilibiliParser, DouyinParser, KuaiShouParser, WeiBoParser,
@@ -827,7 +827,7 @@ class DeniaSharePlugin(Star):
     @filter.command("denia_clear")
     async def denia_clear_cache(self, event: AstrMessageEvent):
         """立即清空解析缓存（含渲染卡片与已下载媒体）"""
-        from .core.utils import clear_cache_dir
+        from .core.media_utils import clear_cache_dir
 
         try:
             cleaned = await clear_cache_dir(self.cache_dir)

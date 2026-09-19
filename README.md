@@ -182,13 +182,52 @@ WebUI 里只有 6 组，常用在前、折腾在后。
 卡片宽度（800）、封面裁剪模式（关闭）、调试日志开关（默认开）。
 这些键仍可从配置文件手动覆盖，只是不再出现在 WebUI。
 
+## 目录结构
+
+```
+astrbot_plugin_denia_share/
+├── main.py                  插件入口：平台分发、命令、发送
+├── metadata.yaml            插件元数据（AstrBot 读取）
+├── _conf_schema.json        WebUI 配置项定义（AstrBot 读取）
+└── core/
+    ├── base_parser.py       解析器基类：URL 注册、懒下载、媒体构建
+    ├── data.py              解析结果数据模型（ParseResult 等）
+    ├── task.py              PathTask：结果的懒加载包装
+    ├── download.py          下载器：流式下载、体积上限、代理
+    ├── card_renderer.py     分享卡片渲染（约 2300 行 Pillow，来自 rika）
+    ├── screenshot.py        网页截图（thum / Cloudflare 双后端）
+    ├── config.py            配置读取（分组 + 扁平回退）
+    ├── constants.py         常量与平台枚举
+    ├── exception.py         异常类型
+    ├── media_utils.py       媒体与文件工具（ffmpeg、缓存清理、时长格式化）
+    ├── cookie_utils.py      Cookie 工具
+    ├── models/              平台接口数据模型（msgspec）
+    │   ├── bilibili/        视频 / 动态 / 专栏 / 直播 / 收藏夹
+    │   ├── douyin/          视频 / 图集
+    │   ├── weibo/           长文 / 详情 / 通用
+    │   ├── xiaohongshu/     explore / discovery
+    │   ├── kuaishou/
+    │   └── acfun/
+    └── parsers/             平台解析器，一个平台一个模块
+        ├── bilibili.py  douyin/  kuaishou.py  weibo.py
+        ├── xiaohongshu.py  twitter.py  acfun.py  nga.py
+        ├── github.py  pixiv.py  steam.py
+        └── douyin/          抖音（唯一需要拆包的平台）
+            ├── parser.py    解析主流程
+            ├── sign.py      a_bogus 签名（移植自 f2，Apache-2.0）
+            └── web.py       网页客户端（ttwid 会话）
+```
+
+命名约定：`models/` 下的子目录名与 `parsers/` 下的解析器名一一对应，
+`parsers/bilibili.py` 对应 `models/bilibili/`，不用缩写。
+
 ## 开发状态
 
 | 模块 | 状态 |
 | --- | --- |
 | 仓库骨架 / 插件注册 | ✅ |
 | 解析层（`core/parsers/`） | ✅ 11 平台（3 个为合并改写，3 个为新增） |
-| 分享卡片渲染（`core/render.py`） | ✅ 来自 rika |
+| 分享卡片渲染（`core/card_renderer.py`） | ✅ 来自 rika |
 | 下载器（`core/download.py`） | ✅ 来自 rika，加了体积上限与代理 |
 | 网页截图（`core/screenshot.py`） | ✅ 双后端，thum 免 key / Cloudflare 需账号 |
 | 配置（`_conf_schema.json`） | ✅ 6 组 22 项 |
@@ -214,7 +253,7 @@ WebUI 里只有 6 组，常用在前、折腾在后。
 | `download.py` chunked 编码修复 | ✅ 已同步（**重要**：旧代码把缺失的 `Content-Length` 当成 0，会取消下载，抖音视频全部下不来） |
 | `bilibili.py` -504 退避重试 + AI 总结失败不再阻断解析 | ✅ 已同步 |
 | `base_parser.py` `PathTask` 包装修复（抽封面与内容并发 await 同一协程会报错） | ✅ 已同步 |
-| `utils.py` 新增 `clear_cache_dir` | ✅ 已同步，接了 `/denia_clear` |
+| `utils.py` 新增 `clear_cache_dir` | ✅ 已同步，接了 `/denia_clear`（现位于 `core/media_utils.py`） |
 | `twitter.py` 媒体反代 | ✅ 已同步（改为单键 `TWITTER_MEDIA_PROXY_BASE`，省掉开关） |
 | `config.py` `SEND_ERROR_MESSAGES` | ✅ 已同步 |
 | `douyin.py` 改回无签名 `aweme/detail` + `open.douyin.com` 头 | ⏸ 暂不跟：我们已有签名兜底，未签名路径待实测 |
@@ -234,11 +273,11 @@ MIT License。详见 [LICENSE](LICENSE)。
 本项目包含移植自以下项目的代码，保留其原始版权声明：
 
 - [astrbot_plugin_rika_share](https://github.com/iris1598/astrbot_plugin_rika_share) —— MIT
-- 抖音 `a_bogus` 签名（`core/douyin/sign.py`）移植自 [Johnserf-Seed/f2](https://github.com/Johnserf-Seed/f2) —— **Apache-2.0**
+- 抖音 `a_bogus` 签名（`core/parsers/douyin/sign.py`）移植自 [Johnserf-Seed/f2](https://github.com/Johnserf-Seed/f2) —— **Apache-2.0**
 
 ## 卡片渲染器的归属
 
-`core/render.py`（`ShareCardRenderer`，约 2300 行 Pillow 实现，4 种布局 × 深浅双主题）
+`core/card_renderer.py`（`ShareCardRenderer`，约 2300 行 Pillow 实现，4 种布局 × 深浅双主题）
 **是 rika_share 的原创作品**（作者 MIKU1598 / iris1598），不是从 nonebot-plugin-parser 移植的。
 
 容易混淆的一点：nonebot-plugin-parser 也有 `renders/` 目录，但它走的是
