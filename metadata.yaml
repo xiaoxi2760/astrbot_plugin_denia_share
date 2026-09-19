@@ -12,18 +12,6 @@ desc: |
 
   另有网页截图（`/shot`，thum.io 与 Cloudflare 双后端）与 Pixiv 关键词搜索（`/pixiv`）。
 
-  ## 解析内核
-
-  合并自两个插件，取各自更强的一版：
-
-  - [astrbot_plugin_rika_share](https://github.com/iris1598/astrbot_plugin_rika_share)（MIT）——
-    解析架构、卡片渲染、B站 / 微博 / 小红书 / AcFun / NGA
-  - astrbot_plugin_media_parser 娅娅版 —— 抖音 a_bogus 签名、快手新版页面兼容、
-    Twitter Guest GraphQL 兜底
-
-  抖音采用「HTML 直取 + 签名接口」双路径；Twitter 采用
-  「vxtwitter → fxtwitter → 官方 GraphQL」三级兜底。
-
   B站在 DASH 达不到目标清晰度时回退 html5 单文件 MP4（匿名下可拿 720P，纯 DASH 只有 480P）；
   小红书图片与封面统一改写为无水印原图。
 
@@ -70,6 +58,13 @@ desc: |
   Steam 的历史最低价需要 `ITAD_API_KEY`（免费申请 https://isthereanydeal.com/apps）：
   Steam 官方接口不提供历史价格，SteamDB 已被 Cloudflare 拦死，
   CheapShark 的史低字段实测恒为空。未填 key 时只是不显示史低，其余功能照常。
+
+  ## 致谢
+
+  解析框架与分享卡片渲染来自 astrbot_plugin_rika_share（MIT）；
+  部分平台解析与媒体发送机制来自 astrbot_plugin_media_parser；
+  抖音 a_bogus 签名移植自 Johnserf-Seed/f2（Apache-2.0）。
+  以上项目的原始版权声明均保留在对应源文件内。
 version: 0.6.0
 astrbot_version: ">=4.25.3"
 author: xiaoxi2760
