@@ -185,9 +185,12 @@ class ScreenshotService:
             data = {}
         message = raw
         if isinstance(data, dict) and data.get("errors"):
-            message = str(data["errors"])[:300]
-        if self.cf_api_token and self.cf_api_token in message:
-            message = message.replace(self.cf_api_token, "***REDACTED***")
+            message = str(data["errors"])
+        # 先脱敏再截断：反过来的话 token 会被截断成半截，replace 匹配不上而残留
+        token = self.cf_api_token or ""
+        if token:
+            message = message.replace(token, "***REDACTED***")
+        message = message[:300]
         return f"Cloudflare API 错误 (HTTP {status}): {message}"
 
 

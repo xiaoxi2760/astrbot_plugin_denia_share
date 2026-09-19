@@ -87,7 +87,13 @@ class NGAParser(BaseParser):
         time_tag = soup.find(id="postdate0")
         if time_tag and isinstance(time_tag, Tag):
             timestr = time_tag.get_text(strip=True)
-            result.timestamp = int(time.mktime(time.strptime(timestr, "%Y-%m-%d %H:%M")))
+            # NGA 页面时间是北京时间；time.mktime 会按本机时区换算，在 UTC 容器里偏 8 小时
+            from datetime import datetime, timezone, timedelta
+            result.timestamp = int(
+                datetime.strptime(timestr, "%Y-%m-%d %H:%M")
+                .replace(tzinfo=timezone(timedelta(hours=8)))
+                .timestamp()
+            )
 
         content_tag = soup.find(id="postcontent0")
         if content_tag and isinstance(content_tag, Tag):

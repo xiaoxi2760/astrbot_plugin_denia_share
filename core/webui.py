@@ -275,16 +275,19 @@ class WebUIApi:
         pconfig = get_config()
         changed, errors = pconfig.apply_updates(values)
         runtime: dict[str, Any] = {}
+        runtime_ok = True
         if changed:
             try:
                 runtime = await self.plugin.apply_runtime_config()
             except Exception as exc:
+                runtime_ok = False
                 logger.warning("[denia_share] 应用新配置失败", exc_info=True)
                 errors.append(f"配置已保存，但运行时热更新失败：{str(exc)[:120]}")
         return _json_response(
             {
                 "changed": changed,
                 "errors": errors,
+                "runtime_ok": runtime_ok,
                 "runtime": runtime,
                 "values": pconfig.current_values(),
             }
@@ -295,16 +298,19 @@ class WebUIApi:
         changed = pconfig.reset_to_defaults()
         runtime: dict[str, Any] = {}
         errors: list[str] = []
+        runtime_ok = True
         if changed:
             try:
                 runtime = await self.plugin.apply_runtime_config()
             except Exception as exc:
+                runtime_ok = False
                 logger.warning("[denia_share] 恢复默认配置后热更新失败", exc_info=True)
                 errors.append(f"已恢复默认，但运行时热更新失败：{str(exc)[:120]}")
         return _json_response(
             {
                 "changed": changed,
                 "errors": errors,
+                "runtime_ok": runtime_ok,
                 "runtime": runtime,
                 "values": pconfig.current_values(),
             }
@@ -377,7 +383,8 @@ class WebUIApi:
             return _error(f"解析出错：{str(exc)[:160]}", 500)
 
         elapsed_ms = int((time.perf_counter() - started) * 1000)
-        cache_key = url[:64]
+        # 与聊天链路的 _process_url 用同一个键，否则同一链接会各缓存一份
+        cache_key = plugin.result_cache_key(url)
         plugin._result_cache[cache_key] = result
 
         payload = await self._preview_payload(
@@ -566,8 +573,18 @@ class WebUIApi:
         keyword = (request.query.get("keyword") or "").strip()
         platform = (request.query.get("platform") or "").strip().lower()
         via = (request.query.get("via") or "").strip().lower()
-        limit = max(1, min(MAX_QUERY_LIMIT, request.query.get("limit", 20, type=int) or 20))
-        offset = max(0, request.query.get("offset", 0, type=int) or 0)
+        def _query_int(name: str, default: int, upper: int) -> int:
+            """query 参数转 int，非法值回退默认（不依赖框架 type=int 的失败语义）。"""
+            raw = request.query.get(name)
+            if raw is None or raw == "":
+                return default
+            try:
+                return max(0 if name == "offset" else 1, min(upper, int(raw)))
+            except (TypeError, ValueError):
+                return default
+
+        limit = _query_int("limit", 20, MAX_QUERY_LIMIT)
+        offset = _query_int("offset", 0, 10_000)
 
         store = self.plugin.history
         items, total = await asyncio.to_thread(
@@ -581,20 +598,25 @@ class WebUIApi:
         stats = await asyncio.to_thread(store.stats)
         cache_dir = self.plugin.cache_dir
 
-        records = []
-        for record in items:
-            data = record.to_dict()
-            card_exists = False
-            if record.card_file:
-                target = _safe_under(cache_dir, Path(record.card_file))
-                card_exists = bool(target and target.is_file())
-            data["card_exists"] = card_exists
-            data["media_existing"] = sum(
-                1
-                for name in record.media_files
-                if (target := _safe_under(cache_dir, Path(name))) and target.is_file()
-            )
-            records.append(data)
+        def _assemble_records():
+            """逐条检查卡片/媒体文件是否还在盘上（含 resolve 磁盘 IO），放线程里做。"""
+            assembled = []
+            for record in items:
+                data = record.to_dict()
+                card_exists = False
+                if record.card_file:
+                    target = _safe_under(cache_dir, Path(record.card_file))
+                    card_exists = bool(target and target.is_file())
+                data["card_exists"] = card_exists
+                data["media_existing"] = sum(
+                    1
+                    for name in record.media_files
+                    if (target := _safe_under(cache_dir, Path(name))) and target.is_file()
+                )
+                assembled.append(data)
+            return assembled
+
+        records = await asyncio.to_thread(_assemble_records)
 
         files, size = await asyncio.to_thread(_dir_stats, cache_dir)
         return _json_response(

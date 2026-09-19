@@ -143,6 +143,9 @@ class BaseParser:
                     f"视频时长 {fmt_duration(duration)} "
                     f"超过限制 {fmt_duration(pconfig.VIDEO_DURATION_MAXIMUM)}, 跳过下载"
                 )
+                # 提前返回前取消已调度的下载任务，避免后台协程跑完整个下载而无人回收
+                if isinstance(url_or_task, asyncio.Task):
+                    url_or_task.cancel()
                 # 模仿 B站：创建一个 download_video 闭包，被 await 时抛出 IgnoreException
                 # 这样解析结果能正常返回（标题/作者/封面），但实际不下载视频
                 async def _skip_video_download():

@@ -8,7 +8,10 @@ def save_cookies_with_netscape(cookies_str: str, file_path: Path, domain: str):
     """以 netscape 格式保存 cookies"""
     cj = cookiejar.MozillaCookieJar(file_path)
     for cookie in cookies_str.split(";"):
-        name, value = cookie.strip().split("=", 1)
+        cookie = cookie.strip()
+        if not cookie or "=" not in cookie:
+            continue
+        name, value = cookie.split("=", 1)
         cj.set_cookie(
             cookiejar.Cookie(
                 version=0,
@@ -37,6 +40,9 @@ def ck2dict(cookies_str: str) -> dict[str, str]:
     """将 cookies 字符串转换为字典"""
     res = {}
     for cookie in cookies_str.split(";"):
-        name, value = cookie.strip().split("=", 1)
+        cookie = cookie.strip()
+        if not cookie or "=" not in cookie:
+            continue
+        name, value = cookie.split("=", 1)
         res[name] = value
     return res

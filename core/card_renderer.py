@@ -476,8 +476,12 @@ class ShareCardRenderer:
         self.cover_full_size = cover_full_size
         self._regular_font: str | None = None
         self._bold_font: str | None = None
+        self._fonts_loaded = False
         self._font_cache: dict[tuple[int, bool], Any] = {}
         self._measure = ImageDraw.Draw(Image.new("RGBA", (1, 1))) if Image else None
+        # 渲染跑在 to_thread 线程池里，可能并发；字体缓存与 _measure 需要锁保护
+        import threading
+        self._font_lock = threading.Lock()
 
     # ---------- 字体 ----------
 
@@ -491,21 +495,24 @@ class ShareCardRenderer:
 
     def _font(self, size: int, bold: bool = False) -> Any:
         key = (size, bold)
-        if key in self._font_cache:
-            return self._font_cache[key]
-        if self._regular_font is None:
-            self._load_fonts()
-        path = self._bold_font if bold and self._bold_font else self._regular_font
-        try:
-            if path:
-                font = ImageFont.truetype(str(path), size)
-            else:
+        with self._font_lock:
+            if key in self._font_cache:
+                return self._font_cache[key]
+            if not self._fonts_loaded:
+                # 只扫描一次；找不到字体时以前每次渲染都会全盘重扫
+                self._fonts_loaded = True
+                self._load_fonts()
+            path = self._bold_font if bold and self._bold_font else self._regular_font
+            try:
+                if path:
+                    font = ImageFont.truetype(str(path), size)
+                else:
+                    font = ImageFont.load_default()
+            except Exception:
+                logger.exception(f"加载字体失败: {path}")
                 font = ImageFont.load_default()
-        except Exception:
-            logger.exception(f"加载字体失败: {path}")
-            font = ImageFont.load_default()
-        self._font_cache[key] = font
-        return font
+            self._font_cache[key] = font
+            return font
 
     def _bold_stroke(self, bold: bool) -> int:
         """使用常规字体模拟粗体时的描边宽度。"""
@@ -514,7 +521,9 @@ class ShareCardRenderer:
     # ---------- 文本工具 ----------
 
     def _text_width(self, text: str, font: Any) -> int:
-        return math.ceil(self._measure.textlength(text, font=font))
+        # ImageDraw 对象非线程安全，to_thread 并发渲染时必须串行测量
+        with self._font_lock:
+            return math.ceil(self._measure.textlength(text, font=font))
 
     def _wrap(self, text: str, font: Any, max_width: int) -> list[str]:
         """按字符宽度换行，兼容中日韩文本。"""

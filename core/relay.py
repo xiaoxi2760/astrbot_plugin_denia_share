@@ -24,6 +24,7 @@ AstrBot 把插件发出去的媒体交给协议端时，各类消息段处理方
 
 from __future__ import annotations
 
+import asyncio
 import os
 from typing import Iterable
 
@@ -110,8 +111,9 @@ async def register_files(
     callback_base: str,
     ttl_seconds: int,
 ) -> list[str | None]:
-    """批量注册，逐项失败不影响其它项（失败的返回 None）。"""
-    result: list[str | None] = []
-    for path in file_paths:
-        result.append(await register_file(path, callback_base, ttl_seconds))
-    return result
+    """批量并发注册，逐项失败不影响其它项（失败的返回 None）。"""
+    return list(
+        await asyncio.gather(
+            *(register_file(path, callback_base, ttl_seconds) for path in file_paths)
+        )
+    )

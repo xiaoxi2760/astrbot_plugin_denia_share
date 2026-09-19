@@ -10,12 +10,11 @@
 
 import json
 import re
-from datetime import datetime
+from datetime import timezone
 from typing import Any, ClassVar
 from urllib.parse import urlsplit
 
 import aiohttp
-from httpx import AsyncClient
 from astrbot.api import logger
 
 from ..base_parser import BaseParser, PlatformEnum, ParseException, handle
@@ -48,9 +47,10 @@ def proxy_media_url(url: str | None) -> str | None:
     query = f"?{parts.query}" if parts.query else ""
     return f"{base}/{prefix}{parts.path}{query}"
 
+# Twitter Web 端公开 bearer token（未登录 guest 身份用）
 BEARER = (
-    "AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOjj6tT7UeCs"
-    "TnIU3U%3D0owR4rQG2v0nE"
+    "AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOjj6tT7UeCsTnIU3U%3D"
+    "0owR4rQG2v0nEoq4TSAN0vNyI4iEfFPU1Rn7mSrh2aU1T7F5YTpGJ3"
 )
 GUEST_TOKEN_URL = "https://api.twitter.com/1.1/guest/activate.json"
 GRAPHQL_ENDPOINT = (
@@ -107,7 +107,7 @@ class TwitterParser(BaseParser):
 
     async def parse_by_vxapi(self, url: str) -> ParseResult:
         api_url = url.replace("x.com", "api.vxtwitter.com").replace("twitter.com", "api.vxtwitter.com")
-        async with AsyncClient(headers=self.headers, timeout=self.timeout) as client:
+        async with self.new_client(headers=self.headers) as client:
             response = await client.get(api_url)
             response.raise_for_status()
             data = response.json()
@@ -145,7 +145,7 @@ class TwitterParser(BaseParser):
 
     async def parse_by_fxapi(self, url: str, tweet_id: str) -> ParseResult:
         api_url = url.replace("x.com", "api.fxtwitter.com").replace("twitter.com", "api.fxtwitter.com")
-        async with AsyncClient(headers=self.headers, timeout=self.timeout) as client:
+        async with self.new_client(headers=self.headers) as client:
             response = await client.get(api_url)
             if response.status_code >= 500:
                 raise ParseException(f"fxtwitter 服务异常: {response.status_code}")
@@ -195,8 +195,10 @@ class TwitterParser(BaseParser):
     # ------------------------------------------------------------------ #
 
     async def parse_by_graphql(self, url: str, tweet_id: str) -> ParseResult:
+        # aiohttp 的代理是请求级参数；与 httpx 系解析器一样走全局 PROXY 配置
+        proxy = self.proxies
         async with aiohttp.ClientSession() as session:
-            token = await self._guest_token(session)
+            token = await self._guest_token(session, proxy=proxy)
             headers = {
                 **self.headers,
                 "Authorization": f"Bearer {BEARER}",
@@ -219,7 +221,7 @@ class TwitterParser(BaseParser):
             }
             async with session.get(
                 GRAPHQL_ENDPOINT, headers=headers, params=params,
-                timeout=aiohttp.ClientTimeout(total=20),
+                proxy=proxy, timeout=aiohttp.ClientTimeout(total=20),
             ) as response:
                 response.raise_for_status()
                 data = await response.json(content_type=None)
@@ -259,7 +261,7 @@ class TwitterParser(BaseParser):
             elif mtype in ("video", "animated_gif"):
                 video_url = self._best_variant(media)
                 if video_url:
-                    duration = (media.get("video_info", {}).get("duration_millis") or 0) / 1000 or None
+                    duration = ((media.get("video_info") or {}).get("duration_millis") or 0) / 1000 or None
                     self._add_limit_warning(result, duration)
                     result.contents.append(
                         self.create_video(
@@ -272,10 +274,11 @@ class TwitterParser(BaseParser):
             raise ParseException("推文中没有可提取的内容")
         return result
 
-    async def _guest_token(self, session: aiohttp.ClientSession) -> str:
+    async def _guest_token(self, session: aiohttp.ClientSession, proxy: str | None = None) -> str:
         headers = {**self.headers, "Authorization": f"Bearer {BEARER}"}
         async with session.post(
-            GUEST_TOKEN_URL, headers=headers, timeout=aiohttp.ClientTimeout(total=15),
+            GUEST_TOKEN_URL, headers=headers, proxy=proxy,
+            timeout=aiohttp.ClientTimeout(total=15),
         ) as response:
             response.raise_for_status()
             data = await response.json(content_type=None)
@@ -320,10 +323,20 @@ class TwitterParser(BaseParser):
 
     @staticmethod
     def _parse_created_at(value: Any) -> int | None:
+        """解析 Twitter 的 ``Mon Jan 01 00:00:00 +0000 2024`` 时间串。
+
+        不用 ``datetime.strptime`` 的 ``%a %b``：它们跟随进程 locale，
+        宿主程序切到中文 locale 后会解析失败。改用与 locale 无关的
+        RFC 2822 解析（两者格式兼容：星期与月份均为英文缩写）。
+        """
         if not value:
             return None
         try:
-            return int(datetime.strptime(str(value), "%a %b %d %H:%M:%S %z %Y").timestamp())
+            from email.utils import parsedate_to_datetime
+            parsed = parsedate_to_datetime(str(value))
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=timezone.utc)
+            return int(parsed.timestamp())
         except Exception:
             return None
 

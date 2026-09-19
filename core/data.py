@@ -155,8 +155,11 @@ class ParseResult:
         return [cont for cont in self.contents if isinstance(cont, (VideoContent, ImageContent))]
 
     @property
-    def formartted_datetime(self, fmt: str = "%Y-%m-%d %H:%M:%S") -> str | None:
-        return datetime.fromtimestamp(self.timestamp).strftime(fmt) if self.timestamp is not None else None
+    def formartted_datetime(self) -> str | None:
+        """发布时间格式化为本地时间字符串（无参数属性版）。"""
+        if self.timestamp is None:
+            return None
+        return datetime.fromtimestamp(self.timestamp).strftime("%Y-%m-%d %H:%M:%S")
 
     def _iterate_download_coros(self, img_only: bool = False) -> Iterator[Awaitable[Path | None]]:
         if author := self.author:
@@ -200,7 +203,7 @@ class ParseResult:
             f"contents: {self.contents}, "
             f"graphics: {self.graphics}, "
             f"extra: {self.extra}, "
-            f"repost: <<<<<<<{self.repost}>>>>>>, "
+            f"repost: [[{self.repost}]], "
             f"render_image: {self.render_image.name if self.render_image else 'None'}"
         )
 

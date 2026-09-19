@@ -57,9 +57,9 @@ class PixivParser(BaseParser):
             headers["Cookie"] = self.cookie
         return headers
 
-    async def _fetch_ajax(self, client: AsyncClient, url: str, referer: str = PIXIV_REFERER):
+    async def _fetch_ajax(self, client: AsyncClient, url: str, referer: str = PIXIV_REFERER, params: dict | None = None):
         """请求 Pixiv Ajax 接口，被 Cloudflare 拦截或返回 HTML 时抛出 ParseException。"""
-        resp = await client.get(url, headers=self._ajax_headers(referer))
+        resp = await client.get(url, headers=self._ajax_headers(referer), params=params)
         if resp.status_code == 404:
             raise ParseException("作品不存在或已被删除")
         resp.raise_for_status()
@@ -149,7 +149,7 @@ class PixivParser(BaseParser):
             "lang": "zh",
         }
         async with self.new_client() as client:
-            data = await self._fetch_ajax(client, url, PIXIV_REFERER)
+            data = await self._fetch_ajax(client, url, PIXIV_REFERER, params=params)
 
         items = ((data.get("illustManga") or {}).get("data")) or []
         if not items:
