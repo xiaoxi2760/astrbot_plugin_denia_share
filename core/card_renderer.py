@@ -8,7 +8,7 @@
 - 圆形作者头像、昵称与签名
 - 正文简介、毛玻璃数据统计徽章（时长 / 点赞 / 投币 / 收藏 / 播放等）
 - 图集网格（超过 6 张显示 +N）、转发内容引用卡片
-- 底部链接与「达妮娅分享」徽标水印
+- 底部链接与「希望解析」徽标水印
 
 所有绘图操作均为 CPU 密集的同步任务，由调用方通过 asyncio.to_thread
 放到后台线程执行，避免阻塞 AstrBot 事件循环。
@@ -20,7 +20,7 @@
 Jinja2 HTML 模板 + 浏览器截图，与本模块的 Pillow 实现是两回事。
 
 娅娅版（astrbot_plugin_media_parser）拷贝本模块后把水印常量化为
-``WATERMARK_TAG``，这里沿用同一做法并改为「达妮娅分享」。
+``WATERMARK_TAG``，这里沿用同一做法并改为「希望解析」。
 """
 
 from __future__ import annotations
@@ -52,7 +52,7 @@ except AttributeError:  # Pillow < 9.1
     _LANCZOS = Image.LANCZOS  # type: ignore[attr-defined]
 
 # 卡片右下角水印文字。娅娅版也是这样把它抽成常量的，改品牌只动这一处。
-WATERMARK_TAG = "达妮娅分享"
+WATERMARK_TAG = "希望解析"
 
 
 # ============================ 文本与统计处理 ============================
@@ -1353,7 +1353,7 @@ class ShareCardRenderer:
             )
             y += quote_h + 20
 
-        # ============ 页脚（链接 + 「达妮娅分享」徽标水印） ============
+        # ============ 页脚（链接 + 「希望解析」徽标水印） ============
         divider_layer = Image.new("RGBA", (inner_w, 1), (0, 0, 0, 0))
         ImageDraw.Draw(divider_layer).line(
             (0, 0, inner_w - 1, 0),
@@ -1771,7 +1771,7 @@ class ShareCardRenderer:
     def _footer_block(self, canvas, draw, theme: _Theme, accent: str, accent_rgb,
                       result: ParseResult, y: int, inner_w: int,
                       on_image: bool = False) -> None:
-        """页脚：分隔线 + 左链接 + 右「圆点 达妮娅分享」水印。"""
+        """页脚：分隔线 + 左链接 + 右「圆点 希望解析」水印。"""
         pad = _L.PAD
         divider_layer = Image.new("RGBA", (inner_w, 1), (0, 0, 0, 0))
         ImageDraw.Draw(divider_layer).line(
