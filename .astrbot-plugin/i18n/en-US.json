@@ -1,0 +1,12 @@
+{
+  "metadata": {
+    "display_name": "Denia Share",
+    "short_desc": "Auto-parse shared links from Bilibili, Douyin, Kuaishou, Weibo, Xiaohongshu, Twitter, AcFun, NGA, GitHub, Pixiv and Steam"
+  },
+  "pages": {
+    "denia": {
+      "title": "Denia Share",
+      "description": "Overview, manual link parsing, parse-cache management and full configuration."
+    }
+  }
+}

@@ -4,6 +4,7 @@
 文件名生成，以及时长格式化。
 """
 
+import os
 import re
 import asyncio
 import hashlib
@@ -268,3 +269,8 @@ def is_module_available(module_name: str) -> bool:
     """检查模块是否可用"""
     import importlib.util
     return importlib.util.find_spec(module_name) is not None
+
+
+def is_docker_environment() -> bool:
+    """当前是否跑在 Docker 容器里（供 WebUI 与缓存目录提示使用）。"""
+    return os.path.exists("/.dockerenv") or os.path.exists("/run/.containerenv")

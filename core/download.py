@@ -21,12 +21,48 @@ class StreamDownloader:
         self.cache_dir: Path = cache_dir
         # max_size_mb <= 0 表示不限制
         self.max_size_mb: int = max(0, int(max_size_mb or 0))
+        self.proxies: str | None = (proxies or "").strip() or None
         self.client: httpx.AsyncClient = httpx.AsyncClient(
-            timeout=DOWNLOAD_TIMEOUT, verify=False, proxy=proxies or None,
+            timeout=DOWNLOAD_TIMEOUT, verify=False, proxy=self.proxies,
         )
 
     async def aclose(self):
         await self.client.aclose()
+
+    async def reconfigure(
+        self,
+        *,
+        proxies: str | None = None,
+        max_size_mb: int | None = None,
+        cache_dir: Path | None = None,
+    ) -> bool:
+        """就地更新下载参数，供 WebUI 保存配置后热生效。
+
+        体积上限与缓存目录只影响后续写入，直接改即可；代理绑定在连接池上，
+        变化时才重建 client 并关掉旧的（避免每次保存配置都泄漏一个连接池）。
+
+        Returns:
+            是否重建了连接池。
+        """
+        if max_size_mb is not None:
+            self.max_size_mb = max(0, int(max_size_mb))
+        if cache_dir is not None:
+            self.cache_dir = Path(cache_dir)
+
+        normalized = (proxies or "").strip() or None
+        if normalized == self.proxies:
+            return False
+        self.proxies = normalized
+
+        old_client = self.client
+        self.client = httpx.AsyncClient(
+            timeout=DOWNLOAD_TIMEOUT, verify=False, proxy=normalized,
+        )
+        try:
+            await old_client.aclose()
+        except Exception:
+            logger.debug("关闭旧下载连接池失败", exc_info=True)
+        return True
 
     def _validate_content_length(self, response: httpx.Response) -> int | None:
         """校验明确声明的响应大小。

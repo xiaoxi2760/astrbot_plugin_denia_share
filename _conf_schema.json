@@ -4,32 +4,32 @@
     "description": "日常最常用到的几项",
     "items": {
       "DISABLED_PLATFORMS": {
-        "description": "禁用的平台(逗号分隔)",
+        "description": "禁用的平台",
         "type": "string",
         "default": "",
-        "hint": "可选: bilibili,douyin,kuaishou,weibo,xiaohongshu,twitter,nga,acfun,github,pixiv（留空=全部启用）",
-        "obvious_hint": false
+        "invisible": true,
+        "hint": "逗号分隔，留空=全部启用。可用平台见本页下方列表，填错的名字会被忽略"
       },
       "VIDEO_DURATION_MAXIMUM": {
-        "description": "视频最大时长(秒)",
+        "description": "视频最大时长",
         "type": "int",
         "default": 480,
-        "hint": "超过此时长不下载视频，但仍会返回标题、作者和封面",
-        "obvious_hint": true
+        "invisible": true,
+        "hint": "超过此时长不下载视频，但仍会返回标题、作者和封面"
       },
       "VIDEO_SIZE_MAXIMUM_MB": {
-        "description": "单个视频体积上限(MB)",
+        "description": "单个视频体积上限",
         "type": "int",
         "default": 100,
-        "hint": "下载前按 Content-Length 判断，边下边判。QQ 大文件上传容易失败，建议不超过 60",
-        "obvious_hint": true
+        "invisible": true,
+        "hint": "下载前按 Content-Length 判断，边下边判。QQ 大文件上传容易失败，建议不超过 60"
       },
       "SEND_ERROR_MESSAGES": {
         "description": "解析失败时发送错误提示",
         "type": "bool",
         "default": false,
-        "hint": "关闭则只写日志、不在群里刷报错。排查问题时可临时打开",
-        "obvious_hint": true
+        "invisible": true,
+        "hint": "关闭则只写日志、不在群里刷报错。排查问题时可临时打开"
       }
     }
   },
@@ -39,17 +39,27 @@
     "items": {
       "BILI_CK": {
         "description": "哔哩哔哩 Cookie",
-        "type": "string",
+        "type": "text",
         "default": "",
-        "hint": "推荐用 /bili_login 扫码登录自动获取并持久化；配了才能下 1080P 及以上",
-        "obvious_hint": true
+        "invisible": true,
+        "hint": "推荐用「总览」页的扫码登录自动写入；配了才能下 1080P 及以上",
+        "secret": true
       },
       "BILI_QUALITY": {
         "description": "B站下载清晰度",
         "type": "string",
         "default": "1080P",
-        "hint": "360P / 480P / 720P / 1080P / 1080P+ / 4K / 8K，高画质需要对应账号权限",
-        "obvious_hint": true
+        "invisible": true,
+        "hint": "高画质需要对应账号权限；未登录时实际只能拿到 720P",
+        "options": [
+          "360P",
+          "480P",
+          "720P",
+          "1080P",
+          "1080P+",
+          "4K",
+          "8K"
+        ]
       }
     }
   },
@@ -61,15 +71,16 @@
         "description": "价格地区代码",
         "type": "string",
         "default": "cn",
-        "hint": "决定官方价格的货币（cn/us/jp 等），同时用作 ITAD 的 country 参数",
-        "obvious_hint": true
+        "invisible": true,
+        "hint": "决定官方价格的货币（cn/us/jp 等），同时用作 ITAD 的 country 参数"
       },
       "ITAD_API_KEY": {
-        "description": "IsThereAnyDeal API Key（可选）",
+        "description": "IsThereAnyDeal API Key",
         "type": "string",
         "default": "",
+        "invisible": true,
         "hint": "只有想看「历史最低价」才需要，免费申请 https://isthereanydeal.com/apps 。留空时 Steam 解析照常工作，只是不显示史低",
-        "obvious_hint": true
+        "secret": true
       }
     }
   },
@@ -81,29 +92,38 @@
         "description": "截图后端",
         "type": "string",
         "default": "thum",
-        "hint": "thum=image.thum.io，免 key 开箱即用（900×900 视窗图）；cloudflare=需要账号，可截长图/等待 JS",
-        "obvious_hint": true
+        "invisible": true,
+        "hint": "thum=image.thum.io，900×900 视窗图开箱即用；cloudflare 可截长图/等待 JS，但必须有账号",
+        "options": [
+          "thum",
+          "cloudflare"
+        ],
+        "labels": [
+          "thum（免 key）",
+          "cloudflare（需账号）"
+        ]
       },
       "SCREENSHOT_FALLBACK": {
         "description": "匹配不到平台的链接自动截图",
         "type": "bool",
         "default": false,
-        "hint": "默认关闭，避免群里刷图。开启后任何解析不了的 http 链接都会尝试截图",
-        "obvious_hint": true
+        "invisible": true,
+        "hint": "默认关闭，避免群里刷图。开启后任何解析不了的 http 链接都会尝试截图"
       },
       "CF_ACCOUNT_ID": {
         "description": "Cloudflare Account ID",
         "type": "string",
         "default": "",
-        "hint": "仅 cloudflare 后端需要。在 CF 控制台右侧栏可复制",
-        "obvious_hint": false
+        "invisible": true,
+        "hint": "仅 cloudflare 后端需要，在 CF 控制台右侧栏可复制"
       },
       "CF_API_TOKEN": {
         "description": "Cloudflare API Token",
         "type": "string",
         "default": "",
-        "hint": "仅 cloudflare 后端需要，需带 Browser Rendering 写权限。可以不填，改用 thum 后端",
-        "obvious_hint": false
+        "invisible": true,
+        "hint": "仅 cloudflare 后端需要，需带 Browser Rendering 写权限",
+        "secret": true
       }
     }
   },
@@ -115,22 +135,97 @@
         "description": "启用卡片渲染",
         "type": "bool",
         "default": true,
-        "hint": "关闭则回退为纯文本输出",
-        "obvious_hint": true
+        "invisible": true,
+        "hint": "关闭则回退为纯文本输出"
       },
       "RENDER_THEME": {
         "description": "卡片主题",
         "type": "string",
         "default": "dark",
-        "hint": "dark（深色） / light（浅色）",
-        "obvious_hint": true
+        "invisible": true,
+        "hint": "只影响发送出去的卡片图片，与网页界面主题无关",
+        "options": [
+          "dark",
+          "light"
+        ],
+        "labels": [
+          "深色",
+          "浅色"
+        ]
       },
       "RENDER_LAYOUT": {
         "description": "卡片布局",
         "type": "string",
         "default": "standard",
-        "hint": "standard / magazine / immersive / feed",
-        "obvious_hint": false
+        "invisible": true,
+        "hint": "切换后可在「解析」页立刻预览效果",
+        "options": [
+          "standard",
+          "magazine",
+          "immersive",
+          "feed"
+        ],
+        "labels": [
+          "standard 标准",
+          "magazine 杂志",
+          "immersive 沉浸",
+          "feed 信息流"
+        ]
+      },
+      "RENDER_WIDTH": {
+        "description": "卡片宽度",
+        "type": "int",
+        "default": 800,
+        "invisible": true,
+        "hint": "520~1080，越宽信息越舒展，但在聊天软件里显示会更小"
+      },
+      "RENDER_COVER_FULL_SIZE": {
+        "description": "封面按原始尺寸展示",
+        "type": "bool",
+        "default": false,
+        "invisible": true,
+        "hint": "开启后不裁切封面，长图会完整铺在卡片顶部"
+      },
+      "RENDER_FONT_PATH": {
+        "description": "自定义字体文件",
+        "type": "string",
+        "default": "",
+        "invisible": true,
+        "hint": "留空自动探测系统字体；卡片出现方块字时才需要指定绝对路径"
+      }
+    }
+  },
+  "媒体发送": {
+    "type": "object",
+    "description": "视频怎么送到消息平台：共享目录或中转链接",
+    "items": {
+      "CACHE_DIR": {
+        "description": "共享缓存目录",
+        "type": "string",
+        "default": "",
+        "invisible": true,
+        "hint": "① 本地文件方式：填一个「所有容器都把宿主机同一目录挂到它上面」的容器内路径，协议端（NapCat 等）就能直接读走视频。留空=用插件数据目录 —— 分容器部署时协议端读不到，视频会发不出去（图片语音不受影响，它们会转成 base64）"
+      },
+      "MEDIA_RELAY_ENABLED": {
+        "description": "启用媒体中转",
+        "type": "bool",
+        "default": false,
+        "invisible": true,
+        "hint": "② 链接方式：把已下载的视频注册成 AstrBot 的临时 HTTP 链接（/api/file/<token>）再发送。协议端只要能访问到下面的回调地址即可，不需要共享挂载；注册失败会自动回退本地文件"
+      },
+      "MEDIA_RELAY_CALLBACK_URL": {
+        "description": "AstrBot 回调地址",
+        "type": "string",
+        "default": "",
+        "invisible": true,
+        "hint": "留空时回退 AstrBot 全局 callback_api_base。必须填「消息平台所在容器能访问到」的地址，同一 Docker 网络内可直接用容器名，如 http://astrbot:6185"
+      },
+      "MEDIA_RELAY_TTL": {
+        "description": "中转链接有效期",
+        "type": "int",
+        "default": 300,
+        "invisible": true,
+        "hint": "到期后链接失效。视频越大、链路越慢越要留足时间，建议不低于 120 秒"
       }
     }
   },
@@ -140,52 +235,68 @@
     "items": {
       "XHS_CK": {
         "description": "小红书 Cookie",
-        "type": "string",
+        "type": "text",
         "default": "",
+        "invisible": true,
         "hint": "部分笔记需要登录态才能完整解析，从浏览器复制 xiaohongshu.com 的 cookie",
-        "obvious_hint": true
+        "secret": true
       },
       "PIXIV_CK": {
         "description": "Pixiv Cookie",
-        "type": "string",
+        "type": "text",
         "default": "",
-        "hint": "留空也能搜索（实测可用）。填了收录更全，但搜索结果会出现 R18 —— 插件对非全年龄内容有硬性过滤，不会放宽",
-        "obvious_hint": true
+        "invisible": true,
+        "hint": "留空也能搜索。填了收录更全，但搜索结果会出现 R18 —— 插件对非全年龄内容有硬性过滤，不会放宽",
+        "secret": true
       },
       "GITHUB_TOKEN": {
         "description": "GitHub Token",
         "type": "string",
         "default": "",
+        "invisible": true,
         "hint": "强烈建议填。免 token 限额 60 次/小时且按出口 IP 计算，共享 IP 下极易被限流；填后 5000 次/小时",
-        "obvious_hint": true
+        "secret": true
       },
       "PROXY": {
         "description": "全局代理",
         "type": "string",
         "default": "",
-        "hint": "形如 http://127.0.0.1:7897，留空不使用。作用于下载与自建请求（GitHub/Pixiv/截图）。注意填的是运行 AstrBot 那台机器上的地址",
-        "obvious_hint": false
+        "invisible": true,
+        "hint": "留空不使用。作用于下载与自建请求（GitHub/Pixiv/截图）。填运行 AstrBot 那台机器上的地址"
       },
       "TWITTER_MEDIA_PROXY_BASE": {
         "description": "Twitter 图片/视频反代根地址",
         "type": "string",
         "default": "",
-        "hint": "留空=不启用。服务器连不上 twimg 时填写，如 https://your-proxy.example",
-        "obvious_hint": false
-      },
+        "invisible": true,
+        "hint": "留空=不启用。服务器连不上 twimg 时填写"
+      }
+    }
+  },
+  "维护": {
+    "type": "object",
+    "description": "缓存与调试，改动后立即生效",
+    "items": {
       "CACHE_TTL_HOURS": {
-        "description": "缓存保留时长(小时)",
+        "description": "缓存保留时长",
         "type": "int",
         "default": 24,
-        "hint": "超过此时间未使用的缓存会被自动清理。设为 0 禁用自动清理",
-        "obvious_hint": false
+        "invisible": true,
+        "hint": "超过此时间未使用的缓存会被自动清理，设为 0 禁用自动清理"
       },
-      "RENDER_FONT_PATH": {
-        "description": "自定义字体文件",
-        "type": "string",
-        "default": "",
-        "hint": "留空自动探测系统字体；卡片出现方块字时才需要指定",
-        "obvious_hint": false
+      "CACHE_CLEANUP_INTERVAL_MINUTES": {
+        "description": "缓存清理间隔",
+        "type": "int",
+        "default": 60,
+        "invisible": true,
+        "hint": "后台清理任务多久跑一次，改动需重载插件后才生效"
+      },
+      "DEBUG_LOG_ENABLED": {
+        "description": "输出调试日志",
+        "type": "bool",
+        "default": true,
+        "invisible": true,
+        "hint": "关闭后只保留警告与错误日志，排查问题时可打开"
       }
     }
   }

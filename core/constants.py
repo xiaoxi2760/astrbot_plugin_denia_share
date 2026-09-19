@@ -46,3 +46,22 @@ class PlatformEnum(str, Enum):
 
     def __str__(self) -> str:
         return self.value
+
+
+# 平台的展示名与固定顺序，供 WebUI 的平台开关与筛选下拉使用。
+# 键必须与 main.py 里 parsers 字典的键、以及 DISABLED_PLATFORMS 的取值一致。
+PLATFORM_DISPLAY_NAMES: Final[dict[str, str]] = {
+    "bilibili": "B站",
+    "douyin": "抖音",
+    "kuaishou": "快手",
+    "weibo": "微博",
+    "xiaohongshu": "小红书",
+    "twitter": "Twitter / X",
+    "nga": "NGA",
+    "acfun": "AcFun",
+    "github": "GitHub",
+    "pixiv": "Pixiv",
+    "steam": "Steam",
+}
+
+PLATFORM_ORDER: Final[tuple[str, ...]] = tuple(PLATFORM_DISPLAY_NAMES)

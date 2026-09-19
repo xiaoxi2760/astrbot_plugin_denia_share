@@ -1,6 +1,10 @@
 """配置管理模块。
 
-精简版：只保留「平台 / B站 / 缓存 / 渲染 / 调试」五组，
+配置项的**唯一来源**是 :data:`CONFIG_META`（分组 + 键 + 类型 + 默认值 + 文案）。
+插件的 WebUI 页面直接从它渲染表单；``_conf_schema.json`` 是同一次定义的**存储契约**
+（AstrBot 加载插件配置时会剔除 schema 之外的键，两者必须保持一致，
+由 :func:`verify_schema_alignment` 在启动时自检并告警）。
+
 相比 rika 原版移除了 Cloudflare 截图 Fallback（20+ 配置项）与 B站 Cookie 监控轮询。
 相比娅娅版移除了 LLM 文本翻译（10 语言 × 10 厂商接口）与「视频仅发送封面」。
 
@@ -9,81 +13,439 @@
 - 视频仅发送封面 / 跳过视频本体
 """
 
+from __future__ import annotations
+
 from pathlib import Path
 from typing import Any
 
 _config = None
 
-# 只保留「会改变可见行为」的配置。 housekeeping 类的（缓存清理间隔、卡片宽度、
-# 封面裁剪、调试日志开关）不再暴露到 WebUI，改用代码内默认值。
+# 配置分组：展示顺序即此处的顺序，常用在前、折腾在后
+CONFIG_GROUPS: tuple[tuple[str, str], ...] = (
+    ("解析设置", "日常最常用到的几项"),
+    ("B站设置", "B站 Cookie 与下载清晰度"),
+    ("Steam 设置", "价格地区与史低数据源"),
+    ("网页截图", "把任意网页截成图片发送"),
+    ("卡片外观", "把解析结果渲染成分享卡片图片"),
+    ("媒体发送", "视频怎么送到消息平台：共享目录或中转链接"),
+    ("高级设置", "一般用不到，按需开启"),
+    ("维护", "缓存与调试，改动后立即生效"),
+)
+
+# 配置项元数据。字段说明：
+#   key/group/label/type/default/hint 必填；type 取值 string | text | int | bool | select
+#   secret=True 表示前端以密码框展示（仅遮罩显示，配置文件里仍是明文，与原生面板一致）
+#   options/labels 仅 select 使用；min/max/unit 仅 int 使用；placeholder 仅输入框使用
+CONFIG_META: tuple[dict[str, Any], ...] = (
+    # ---------------- 解析设置 ---------------- #
+    {
+        "key": "DISABLED_PLATFORMS",
+        "group": "解析设置",
+        "label": "禁用的平台",
+        "type": "string",
+        "default": "",
+        "placeholder": "nga,acfun",
+        "hint": "逗号分隔，留空=全部启用。可用平台见本页下方列表，填错的名字会被忽略",
+    },
+    {
+        "key": "VIDEO_DURATION_MAXIMUM",
+        "group": "解析设置",
+        "label": "视频最大时长",
+        "type": "int",
+        "default": 480,
+        "min": 0,
+        "max": 86400,
+        "unit": "秒",
+        "hint": "超过此时长不下载视频，但仍会返回标题、作者和封面",
+    },
+    {
+        "key": "VIDEO_SIZE_MAXIMUM_MB",
+        "group": "解析设置",
+        "label": "单个视频体积上限",
+        "type": "int",
+        "default": 100,
+        "min": 1,
+        "max": 4096,
+        "unit": "MB",
+        "hint": "下载前按 Content-Length 判断，边下边判。QQ 大文件上传容易失败，建议不超过 60",
+    },
+    {
+        "key": "SEND_ERROR_MESSAGES",
+        "group": "解析设置",
+        "label": "解析失败时发送错误提示",
+        "type": "bool",
+        "default": False,
+        "hint": "关闭则只写日志、不在群里刷报错。排查问题时可临时打开",
+    },
+    # ---------------- B站设置 ---------------- #
+    {
+        "key": "BILI_CK",
+        "group": "B站设置",
+        "label": "哔哩哔哩 Cookie",
+        "type": "text",
+        "default": "",
+        "secret": True,
+        "hint": "推荐用「总览」页的扫码登录自动写入；配了才能下 1080P 及以上",
+    },
+    {
+        "key": "BILI_QUALITY",
+        "group": "B站设置",
+        "label": "B站下载清晰度",
+        "type": "select",
+        "default": "1080P",
+        "options": ["360P", "480P", "720P", "1080P", "1080P+", "4K", "8K"],
+        "hint": "高画质需要对应账号权限；未登录时实际只能拿到 720P",
+    },
+    # ---------------- Steam 设置 ---------------- #
+    {
+        "key": "STEAM_REGION",
+        "group": "Steam 设置",
+        "label": "价格地区代码",
+        "type": "string",
+        "default": "cn",
+        "placeholder": "cn",
+        "hint": "决定官方价格的货币（cn/us/jp 等），同时用作 ITAD 的 country 参数",
+    },
+    {
+        "key": "ITAD_API_KEY",
+        "group": "Steam 设置",
+        "label": "IsThereAnyDeal API Key",
+        "type": "string",
+        "default": "",
+        "secret": True,
+        "hint": "只有想看「历史最低价」才需要，免费申请 https://isthereanydeal.com/apps 。留空时 Steam 解析照常工作，只是不显示史低",
+    },
+    # ---------------- 网页截图 ---------------- #
+    {
+        "key": "SCREENSHOT_BACKEND",
+        "group": "网页截图",
+        "label": "截图后端",
+        "type": "select",
+        "default": "thum",
+        "options": ["thum", "cloudflare"],
+        "labels": ["thum（免 key）", "cloudflare（需账号）"],
+        "hint": "thum=image.thum.io，900×900 视窗图开箱即用；cloudflare 可截长图/等待 JS，但必须有账号",
+    },
+    {
+        "key": "SCREENSHOT_FALLBACK",
+        "group": "网页截图",
+        "label": "匹配不到平台的链接自动截图",
+        "type": "bool",
+        "default": False,
+        "hint": "默认关闭，避免群里刷图。开启后任何解析不了的 http 链接都会尝试截图",
+    },
+    {
+        "key": "CF_ACCOUNT_ID",
+        "group": "网页截图",
+        "label": "Cloudflare Account ID",
+        "type": "string",
+        "default": "",
+        "hint": "仅 cloudflare 后端需要，在 CF 控制台右侧栏可复制",
+    },
+    {
+        "key": "CF_API_TOKEN",
+        "group": "网页截图",
+        "label": "Cloudflare API Token",
+        "type": "string",
+        "default": "",
+        "secret": True,
+        "hint": "仅 cloudflare 后端需要，需带 Browser Rendering 写权限",
+    },
+    # ---------------- 卡片外观 ---------------- #
+    {
+        "key": "RENDER_ENABLED",
+        "group": "卡片外观",
+        "label": "启用卡片渲染",
+        "type": "bool",
+        "default": True,
+        "hint": "关闭则回退为纯文本输出",
+    },
+    {
+        "key": "RENDER_THEME",
+        "group": "卡片外观",
+        "label": "卡片主题",
+        "type": "select",
+        "default": "dark",
+        "options": ["dark", "light"],
+        "labels": ["深色", "浅色"],
+        "hint": "只影响发送出去的卡片图片，与网页界面主题无关",
+    },
+    {
+        "key": "RENDER_LAYOUT",
+        "group": "卡片外观",
+        "label": "卡片布局",
+        "type": "select",
+        "default": "standard",
+        "options": ["standard", "magazine", "immersive", "feed"],
+        "labels": ["standard 标准", "magazine 杂志", "immersive 沉浸", "feed 信息流"],
+        "hint": "切换后可在「解析」页立刻预览效果",
+    },
+    {
+        "key": "RENDER_WIDTH",
+        "group": "卡片外观",
+        "label": "卡片宽度",
+        "type": "int",
+        "default": 800,
+        "min": 520,
+        "max": 1080,
+        "unit": "px",
+        "hint": "520~1080，越宽信息越舒展，但在聊天软件里显示会更小",
+    },
+    {
+        "key": "RENDER_COVER_FULL_SIZE",
+        "group": "卡片外观",
+        "label": "封面按原始尺寸展示",
+        "type": "bool",
+        "default": False,
+        "hint": "开启后不裁切封面，长图会完整铺在卡片顶部",
+    },
+    {
+        "key": "RENDER_FONT_PATH",
+        "group": "卡片外观",
+        "label": "自定义字体文件",
+        "type": "string",
+        "default": "",
+        "hint": "留空自动探测系统字体；卡片出现方块字时才需要指定绝对路径",
+    },
+    # ---------------- 媒体发送 ---------------- #
+    {
+        "key": "CACHE_DIR",
+        "group": "媒体发送",
+        "label": "共享缓存目录",
+        "type": "string",
+        "default": "",
+        "placeholder": "/app/sharedFolder/denia_share/cache",
+        "hint": (
+            "① 本地文件方式：填一个「所有容器都把宿主机同一目录挂到它上面」的容器内路径，"
+            "协议端（NapCat 等）就能直接读走视频。留空=用插件数据目录 —— 分容器部署时协议端读不到，"
+            "视频会发不出去（图片语音不受影响，它们会转成 base64）"
+        ),
+    },
+    {
+        "key": "MEDIA_RELAY_ENABLED",
+        "group": "媒体发送",
+        "label": "启用媒体中转",
+        "type": "bool",
+        "default": False,
+        "hint": (
+            "② 链接方式：把已下载的视频注册成 AstrBot 的临时 HTTP 链接（/api/file/<token>）再发送。"
+            "协议端只要能访问到下面的回调地址即可，不需要共享挂载；注册失败会自动回退本地文件"
+        ),
+    },
+    {
+        "key": "MEDIA_RELAY_CALLBACK_URL",
+        "group": "媒体发送",
+        "label": "AstrBot 回调地址",
+        "type": "string",
+        "default": "",
+        "placeholder": "http://astrbot:6185",
+        "hint": (
+            "留空时回退 AstrBot 全局 callback_api_base。必须填「消息平台所在容器能访问到」的地址，"
+            "同一 Docker 网络内可直接用容器名，如 http://astrbot:6185"
+        ),
+    },
+    {
+        "key": "MEDIA_RELAY_TTL",
+        "group": "媒体发送",
+        "label": "中转链接有效期",
+        "type": "int",
+        "default": 300,
+        "min": 30,
+        "max": 86400,
+        "unit": "秒",
+        "hint": "到期后链接失效。视频越大、链路越慢越要留足时间，建议不低于 120 秒",
+    },
+    # ---------------- 高级设置 ---------------- #
+    {
+        "key": "XHS_CK",
+        "group": "高级设置",
+        "label": "小红书 Cookie",
+        "type": "text",
+        "default": "",
+        "secret": True,
+        "hint": "部分笔记需要登录态才能完整解析，从浏览器复制 xiaohongshu.com 的 cookie",
+    },
+    {
+        "key": "PIXIV_CK",
+        "group": "高级设置",
+        "label": "Pixiv Cookie",
+        "type": "text",
+        "default": "",
+        "secret": True,
+        "hint": "留空也能搜索。填了收录更全，但搜索结果会出现 R18 —— 插件对非全年龄内容有硬性过滤，不会放宽",
+    },
+    {
+        "key": "GITHUB_TOKEN",
+        "group": "高级设置",
+        "label": "GitHub Token",
+        "type": "string",
+        "default": "",
+        "secret": True,
+        "hint": "强烈建议填。免 token 限额 60 次/小时且按出口 IP 计算，共享 IP 下极易被限流；填后 5000 次/小时",
+    },
+    {
+        "key": "PROXY",
+        "group": "高级设置",
+        "label": "全局代理",
+        "type": "string",
+        "default": "",
+        "placeholder": "http://127.0.0.1:7897",
+        "hint": "留空不使用。作用于下载与自建请求（GitHub/Pixiv/截图）。填运行 AstrBot 那台机器上的地址",
+    },
+    {
+        "key": "TWITTER_MEDIA_PROXY_BASE",
+        "group": "高级设置",
+        "label": "Twitter 图片/视频反代根地址",
+        "type": "string",
+        "default": "",
+        "placeholder": "https://your-proxy.example",
+        "hint": "留空=不启用。服务器连不上 twimg 时填写",
+    },
+    # ---------------- 维护 ---------------- #
+    {
+        "key": "CACHE_TTL_HOURS",
+        "group": "维护",
+        "label": "缓存保留时长",
+        "type": "int",
+        "default": 24,
+        "min": 0,
+        "max": 8760,
+        "unit": "小时",
+        "hint": "超过此时间未使用的缓存会被自动清理，设为 0 禁用自动清理",
+    },
+    {
+        "key": "CACHE_CLEANUP_INTERVAL_MINUTES",
+        "group": "维护",
+        "label": "缓存清理间隔",
+        "type": "int",
+        "default": 60,
+        "min": 1,
+        "max": 1440,
+        "unit": "分钟",
+        "hint": "后台清理任务多久跑一次，改动需重载插件后才生效",
+    },
+    {
+        "key": "DEBUG_LOG_ENABLED",
+        "group": "维护",
+        "label": "输出调试日志",
+        "type": "bool",
+        "default": True,
+        "hint": "关闭后只保留警告与错误日志，排查问题时可打开",
+    },
+)
+
+_ITEM_BY_KEY: dict[str, dict[str, Any]] = {item["key"]: item for item in CONFIG_META}
+
 CONFIG_GROUP_KEYS: dict[str, tuple[str, ...]] = {
-    "解析设置": (
-        "DISABLED_PLATFORMS",
-        "VIDEO_DURATION_MAXIMUM",
-        "VIDEO_SIZE_MAXIMUM_MB",
-        "SEND_ERROR_MESSAGES",
-    ),
-    "B站设置": ("BILI_CK", "BILI_QUALITY"),
-    "Steam 设置": ("STEAM_REGION", "ITAD_API_KEY"),
-    "网页截图": (
-        "SCREENSHOT_BACKEND",
-        "SCREENSHOT_FALLBACK",
-        "CF_ACCOUNT_ID",
-        "CF_API_TOKEN",
-    ),
-    "卡片外观": (
-        "RENDER_ENABLED",
-        "RENDER_THEME",
-        "RENDER_LAYOUT",
-    ),
-    "高级设置": (
-        "XHS_CK",
-        "PIXIV_CK",
-        "GITHUB_TOKEN",
-        "PROXY",
-        "CACHE_TTL_HOURS",
-        "RENDER_FONT_PATH",
-        "TWITTER_MEDIA_PROXY_BASE",
-    ),
+    group: tuple(item["key"] for item in CONFIG_META if item["group"] == group)
+    for group, _ in CONFIG_GROUPS
 }
 
 _KEY_GROUP_MAP: dict[str, str] = {
     key: group for group, keys in CONFIG_GROUP_KEYS.items() for key in keys
 }
 
-_DEFAULTS: dict[str, Any] = {
-    "DISABLED_PLATFORMS": "",
-    "VIDEO_DURATION_MAXIMUM": 480,
-    "VIDEO_SIZE_MAXIMUM_MB": 100,
-    "SEND_ERROR_MESSAGES": False,
-    "XHS_CK": "",
-    "PIXIV_CK": "",
-    "GITHUB_TOKEN": "",
-    "PROXY": "",
-    "SCREENSHOT_BACKEND": "thum",
-    "SCREENSHOT_FALLBACK": False,
-    "CF_ACCOUNT_ID": "",
-    "CF_API_TOKEN": "",
-    "BILI_CK": "",
-    "BILI_QUALITY": "1080P",
-    "STEAM_REGION": "cn",
-    "ITAD_API_KEY": "",
-    "CACHE_TTL_HOURS": 24,
-    "RENDER_ENABLED": True,
-    "RENDER_THEME": "dark",
-    "RENDER_LAYOUT": "standard",
-    "RENDER_FONT_PATH": "",
-    "TWITTER_MEDIA_PROXY_BASE": "",
-    # 不再暴露到 WebUI，保留默认值以便旧配置与代码内部引用仍可读
-    "DEBUG_LOG_ENABLED": True,
-    "CACHE_CLEANUP_INTERVAL_MINUTES": 60,
-    "RENDER_WIDTH": 800,
-    "RENDER_COVER_FULL_SIZE": False,
-}
+_DEFAULTS: dict[str, Any] = {item["key"]: item["default"] for item in CONFIG_META}
 
-# 从 WebUI 移除、但仍按固定值生效的配置
-CACHE_CLEANUP_INTERVAL_MINUTES_FIXED = 60
-RENDER_WIDTH_FIXED = 800
+
+def config_meta_payload() -> dict[str, Any]:
+    """返回供 WebUI 渲染的配置元数据（分组 + 全部配置项定义）。"""
+    return {
+        "groups": [
+            {
+                "name": name,
+                "description": description,
+                "keys": list(CONFIG_GROUP_KEYS.get(name, ())),
+            }
+            for name, description in CONFIG_GROUPS
+        ],
+        "items": [dict(item) for item in CONFIG_META],
+    }
+
+
+def coerce_value(item: dict[str, Any], raw: Any) -> tuple[Any, str | None]:
+    """把前端传来的值转成配置要求的类型。
+
+    Returns:
+        (转换后的值, 错误描述)。错误描述非 None 时调用方应丢弃该值。
+    """
+    key = item["key"]
+    label = item.get("label", key)
+    kind = item["type"]
+
+    if kind == "bool":
+        if isinstance(raw, bool):
+            return raw, None
+        if isinstance(raw, str):
+            lowered = raw.strip().lower()
+            if lowered in {"true", "1", "yes", "on"}:
+                return True, None
+            if lowered in {"false", "0", "no", "off", ""}:
+                return False, None
+        return None, f"{label}：需要是开关值"
+
+    if kind == "int":
+        try:
+            value = int(str(raw).strip())
+        except (TypeError, ValueError):
+            return None, f"{label}：需要是整数"
+        low, high = item.get("min"), item.get("max")
+        if low is not None and value < low:
+            return None, f"{label}：不能小于 {low}"
+        if high is not None and value > high:
+            return None, f"{label}：不能大于 {high}"
+        return value, None
+
+    text = "" if raw is None else str(raw).strip()
+    if kind == "select":
+        options = item.get("options") or []
+        if text and text not in options:
+            return None, f"{label}：只能是 {' / '.join(options)} 之一"
+    if kind == "text" and len(text) > 8000:
+        return None, f"{label}：内容过长（超过 8000 字）"
+    return text, None
+
+
+def verify_schema_alignment(schema: dict[str, Any]) -> list[str]:
+    """自检 ``_conf_schema.json`` 与 :data:`CONFIG_META` 的键集合是否一致。
+
+    AstrBot 加载插件配置时会剔除 schema 中不存在的键（``check_config_integrity``），
+    两者一旦不一致，用户保存的值会在下次重载时静默丢失，因此必须显式比对。
+
+    Returns:
+        描述差异的字符串列表，空列表表示一致。
+    """
+    schema_keys: set[str] = set()
+    schema_group_of: dict[str, str] = {}
+    problems: list[str] = []
+
+    for group, node in schema.items():
+        if not isinstance(node, dict):
+            problems.append(f"schema 分组 {group} 不是对象")
+            continue
+        items = node.get("items")
+        if not isinstance(items, dict):
+            problems.append(f"schema 分组 {group} 缺少 items")
+            continue
+        for key in items:
+            schema_keys.add(key)
+            schema_group_of[key] = group
+
+    meta_keys = set(_ITEM_BY_KEY)
+    for key in sorted(schema_keys - meta_keys):
+        problems.append(f"schema 有而 CONFIG_META 缺失的键：{key}")
+    for key in sorted(meta_keys - schema_keys):
+        problems.append(f"CONFIG_META 有而 schema 缺失的键：{key}")
+    for key in sorted(schema_keys & meta_keys):
+        if schema_group_of[key] != _KEY_GROUP_MAP.get(key):
+            problems.append(
+                f"{key} 在 schema 里属于 {schema_group_of[key]} 组，"
+                f"但 CONFIG_META 归到 {_KEY_GROUP_MAP.get(key)} 组"
+            )
+    for group in schema:
+        if group not in CONFIG_GROUP_KEYS:
+            problems.append(f"schema 里存在 CONFIG_GROUPS 未声明的分组：{group}")
+    return problems
 
 
 def migrate_grouped_config(config: Any) -> bool:
@@ -127,6 +489,74 @@ class ParserConfig:
                 return nested_val
         return self._cfg.get(key, default)
 
+    # ---------------- WebUI 读写 ---------------- #
+
+    def current_values(self) -> dict[str, Any]:
+        """返回所有配置项的当前生效值（键 → 值）。"""
+        return {
+            item["key"]: self._cfg_get(item["key"], item["default"])
+            for item in CONFIG_META
+        }
+
+    def apply_updates(self, payload: Any) -> tuple[list[str], list[str]]:
+        """按白名单把 WebUI 提交的值写回配置。
+
+        只接受 :data:`CONFIG_META` 里声明的键；写入分组位置的同时把扁平旧键重置为
+        默认值，避免遗留的旧值把新值盖掉（与 :func:`migrate_grouped_config` 同源）。
+
+        Args:
+            payload: 前端提交的 ``{配置键: 新值}``。
+
+        Returns:
+            (实际变更的键列表, 错误信息列表)。
+        """
+        if not isinstance(payload, dict):
+            return [], ["提交内容不是对象"]
+
+        changed: list[str] = []
+        errors: list[str] = []
+
+        for key, raw in payload.items():
+            item = _ITEM_BY_KEY.get(key)
+            if item is None:
+                errors.append(f"未知配置项：{key}")
+                continue
+            value, error = coerce_value(item, raw)
+            if error is not None:
+                errors.append(error)
+                continue
+            if self._cfg_get(key, item["default"]) == value:
+                continue
+            group_cfg = self._cfg.get(_KEY_GROUP_MAP[key])
+            if not isinstance(group_cfg, dict):
+                group_cfg = {}
+                self._cfg[_KEY_GROUP_MAP[key]] = group_cfg
+            group_cfg[key] = value
+            self._cfg[key] = item["default"]
+            changed.append(key)
+
+        if changed:
+            self.save()
+        return changed, errors
+
+    def reset_to_defaults(self) -> list[str]:
+        """把所有配置项恢复为默认值，返回被改动的键列表。"""
+        changed, _ = self.apply_updates(
+            {item["key"]: item["default"] for item in CONFIG_META}
+        )
+        return changed
+
+    def save(self) -> bool:
+        """持久化配置（AstrBotConfig 提供 save_config，缺失时静默跳过）。"""
+        save = getattr(self._cfg, "save_config", None)
+        if not callable(save):
+            return False
+        try:
+            save()
+            return True
+        except Exception:
+            return False
+
     # ---------------- 平台 ---------------- #
 
     @property
@@ -134,7 +564,7 @@ class ParserConfig:
         raw = self._cfg_get("DISABLED_PLATFORMS", "")
         if not raw:
             return []
-        return [p.strip().lower() for p in raw.split(",") if p.strip()]
+        return [p.strip().lower() for p in str(raw).split(",") if p.strip()]
 
     @property
     def VIDEO_DURATION_MAXIMUM(self) -> int:
@@ -228,8 +658,7 @@ class ParserConfig:
 
     @property
     def CACHE_CLEANUP_INTERVAL_MINUTES(self) -> int:
-        # 已不在 WebUI 暴露，保留读取以便旧配置兼容
-        return int(self._cfg_get("CACHE_CLEANUP_INTERVAL_MINUTES", CACHE_CLEANUP_INTERVAL_MINUTES_FIXED))
+        return int(self._cfg_get("CACHE_CLEANUP_INTERVAL_MINUTES", 60))
 
     # ---------------- 渲染 ---------------- #
 
@@ -249,8 +678,7 @@ class ParserConfig:
 
     @property
     def RENDER_WIDTH(self) -> int:
-        # 已不在 WebUI 暴露，保留读取以便旧配置兼容
-        return max(520, min(1080, int(self._cfg_get("RENDER_WIDTH", RENDER_WIDTH_FIXED))))
+        return max(520, min(1080, int(self._cfg_get("RENDER_WIDTH", 800))))
 
     @property
     def RENDER_FONT_PATH(self) -> str:
@@ -258,8 +686,34 @@ class ParserConfig:
 
     @property
     def RENDER_COVER_FULL_SIZE(self) -> bool:
-        # 已不在 WebUI 暴露，保留读取以便旧配置兼容
         return bool(self._cfg_get("RENDER_COVER_FULL_SIZE", False))
+
+    # ---------------- 媒体发送 ---------------- #
+
+    @property
+    def CACHE_DIR(self) -> str:
+        """Docker 共享缓存目录，留空表示用插件数据目录（默认行为）。
+
+        与 yaya 的差别：那边在容器里会把默认值切成自己约定的
+        ``/app/sharedFolder/...``；这里保守一些 —— 留空始终用插件数据目录，
+        免得用户没挂载却被切到一个不可写路径上，把下载整个搞坏。
+        """
+        return str(self._cfg_get("CACHE_DIR", "") or "").strip()
+
+    @property
+    def MEDIA_RELAY_ENABLED(self) -> bool:
+        """是否把已下载的视频注册成 AstrBot 的临时 HTTP 链接再发送。"""
+        return bool(self._cfg_get("MEDIA_RELAY_ENABLED", False))
+
+    @property
+    def MEDIA_RELAY_CALLBACK_URL(self) -> str:
+        """中转链接用的回调地址；留空时回退 AstrBot 全局 callback_api_base。"""
+        return str(self._cfg_get("MEDIA_RELAY_CALLBACK_URL", "") or "").strip().rstrip("/")
+
+    @property
+    def MEDIA_RELAY_TTL(self) -> int:
+        """中转链接有效期（秒），最小 30。"""
+        return max(30, int(self._cfg_get("MEDIA_RELAY_TTL", 300)))
 
     # ---------------- 行为与调试 ---------------- #
 
@@ -275,7 +729,6 @@ class ParserConfig:
 
     @property
     def DEBUG_LOG_ENABLED(self) -> bool:
-        # 已不在 WebUI 暴露，默认开启
         return bool(self._cfg_get("DEBUG_LOG_ENABLED", True))
 
 
