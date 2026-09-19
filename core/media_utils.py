@@ -1,4 +1,8 @@
-"""工具函数"""
+"""媒体与文件工具函数
+
+涵盖缓存清理、ffmpeg 处理（音视频合并 / 转码 / 抽帧 / 转 GIF）、
+文件名生成，以及时长格式化。
+"""
 
 import re
 import asyncio
@@ -13,6 +17,16 @@ from astrbot.api import logger
 def keep_zh_en_num(text: str) -> str:
     """保留字符串中的中英文和数字"""
     return re.sub(r"[^\u4e00-\u9fa5a-zA-Z0-9\-_]", "", text.replace(" ", "_"))
+
+
+def fmt_duration(duration: float) -> str:
+    """格式化媒体时长，超过 1 小时后显示为 h:mm:ss。"""
+    total_seconds = max(int(duration), 0)
+    hours, remainder = divmod(total_seconds, 3600)
+    minutes, seconds = divmod(remainder, 60)
+    if hours:
+        return f"{hours}:{minutes:02d}:{seconds:02d}"
+    return f"{minutes}:{seconds:02d}"
 
 
 async def safe_unlink(path: Path):

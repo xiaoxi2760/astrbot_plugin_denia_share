@@ -16,7 +16,7 @@ class AcfunParser(BaseParser):
 
     @handle("acfun.cn", r"(?:ac=|/ac)(?P<acid>\d+)")
     async def _parse(self, searched: re.Match[str]):
-        from ..acfun_models.video import decoder as video_decoder
+        from ..models.acfun.video import decoder as video_decoder
 
         acid = int(searched.group("acid"))
         url = f"https://www.acfun.cn/v/ac{acid}"

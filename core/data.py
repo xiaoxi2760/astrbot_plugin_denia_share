@@ -40,7 +40,7 @@ class VideoContent(MediaContent):
 
     @property
     def display_duration(self) -> str | None:
-        from .utils_parser import fmt_duration
+        from .media_utils import fmt_duration
         return f"时长: {fmt_duration(self.duration)}" if self.duration else None
 
     def __repr__(self) -> str:

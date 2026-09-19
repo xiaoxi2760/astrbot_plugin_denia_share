@@ -10,7 +10,7 @@ import httpx
 import aiofiles
 from astrbot.api import logger
 
-from .utils import merge_av, safe_unlink, generate_file_name, is_module_available
+from .media_utils import merge_av, safe_unlink, generate_file_name, is_module_available
 from .constants import COMMON_HEADER, DOWNLOAD_TIMEOUT
 from .exception import IgnoreException, DownloadException
 

@@ -15,8 +15,8 @@ import aiohttp
 from httpx import AsyncClient
 from astrbot.api import logger
 
-from ..base_parser import BaseParser, PlatformEnum, ParseException, handle, COMMON_TIMEOUT
-from ..data import Platform
+from ...base_parser import BaseParser, PlatformEnum, ParseException, handle, COMMON_TIMEOUT
+from ...data import Platform
 
 
 class DouyinParser(BaseParser):
@@ -73,7 +73,7 @@ class DouyinParser(BaseParser):
     # ------------------------------------------------------------------ #
 
     async def parse_video(self, url: str):
-        from ..douyin_models.video import decoder as video_decoder
+        from ...models.douyin.video import decoder as video_decoder
 
         async with AsyncClient(
             headers=self.ios_headers, timeout=COMMON_TIMEOUT,
@@ -101,7 +101,7 @@ class DouyinParser(BaseParser):
         return result
 
     async def parse_slides(self, video_id: str):
-        from ..douyin_models.slides import decoder as slides_decoder
+        from ...models.douyin.slides import decoder as slides_decoder
 
         url = "https://www.iesdouyin.com/web/api/v2/aweme/slidesinfo/"
         params = {"aweme_ids": f"[{video_id}]", "request_source": "200"}
@@ -126,7 +126,7 @@ class DouyinParser(BaseParser):
 
     def _get_web_client(self):
         if self._web_client is None:
-            from ..douyin import DouyinWebClient
+            from .web import DouyinWebClient
 
             self._web_client = DouyinWebClient()
         return self._web_client

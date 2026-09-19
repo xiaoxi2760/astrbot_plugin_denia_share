@@ -135,7 +135,7 @@ class BaseParser:
     def create_video(self, url_or_task: str | asyncio.Task[Path] | PathTask, cover_url: str | None = None, duration: float | None = None, is_gif: bool = False):
         if duration is not None:
             from .config import get_config
-            from .utils_parser import fmt_duration
+            from .media_utils import fmt_duration
             pconfig = get_config()
             if duration > pconfig.VIDEO_DURATION_MAXIMUM:
                 from astrbot.api import logger
@@ -172,7 +172,7 @@ class BaseParser:
             cover_task = self.downloader.download_img(cover_url, ext_headers=self.headers)
         else:
             async def extract_cover():
-                from .utils import extract_video_first_frame
+                from .media_utils import extract_video_first_frame
                 video_path = await path_task.get()
                 return await extract_video_first_frame(video_path)
             cover_task = extract_cover()
@@ -181,7 +181,7 @@ class BaseParser:
 
         if is_gif:
             async def convert_to_gif():
-                from .utils import convert_video_to_gif
+                from .media_utils import convert_video_to_gif
                 video_path = await path_task.get()
                 return await convert_video_to_gif(video_path)
             video_content.gif_path = PathTask(convert_to_gif())
@@ -192,7 +192,7 @@ class BaseParser:
         """检查视频时长，超限时添加 limit_warnings 到 result.extra（参考 B站实现）"""
         if duration is not None:
             from .config import get_config
-            from .utils_parser import fmt_duration
+            from .media_utils import fmt_duration
             pconfig = get_config()
             if duration > pconfig.VIDEO_DURATION_MAXIMUM:
                 from astrbot.api import logger
