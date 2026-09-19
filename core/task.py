@@ -42,6 +42,15 @@ class PathTask:
             return None
 
     @property
+    def resolved(self) -> Path | None:
+        """已完成的本地路径；未完成时返回 None（不阻塞、不触发下载）。
+
+        供「解析记录」等旁路功能使用：看一眼已经落盘的结果，
+        不需要为了记录文件名而把没下载的媒体也拖下来。
+        """
+        return self._path
+
+    @property
     async def uri(self) -> str | None:
         path = await self.safe_get()
         return path.as_uri() if path else None

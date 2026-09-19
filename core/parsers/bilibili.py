@@ -516,6 +516,21 @@ class BilibiliParser(BaseParser):
         self._save_cookie_str(cookie_str)
         logger.info("B站 Cookie 已更新，将在下次请求时重新初始化凭证")
 
+    def clear_cookie(self):
+        """清除运行时与持久化的 Cookie。
+
+        ``update_cookie("")`` 是空值早退的，清不掉内存里的凭据，
+        所以「清除 Cookie」必须走这个方法：连同自己持久化的那份一起删。
+        """
+        self._bili_ck = None
+        self._credential = None
+        if self._cookies_file is not None:
+            try:
+                self._cookies_file.unlink(missing_ok=True)
+            except OSError:
+                logger.warning("删除 B站 Cookie 文件失败", exc_info=True)
+        logger.info("B站 Cookie 已清除")
+
     @property
     async def credential(self) -> Credential | None:
         if self._credential is None:

@@ -4,6 +4,7 @@ AstrBot 链接分享自动解析插件：解析分享链接，渲染成分享卡
 
 支持 **B站 / 抖音 / 快手 / 微博 / 小红书 / Twitter / AcFun / NGA / GitHub / Pixiv / Steam** 十一个平台，
 另有网页截图（`/shot`）与 Pixiv 关键词搜索（`/pixiv`）。
+插件自带 Dashboard 页面：总览状态、手动解析预览卡片、管理解析缓存、维护全部配置。
 
 ## 解析内核：两个插件择优合并
 
@@ -108,6 +109,85 @@ Metacritic: 94
 Steam 评价: Very Positive (94%)
 ```
 
+## 网页界面
+
+插件在 AstrBot Dashboard 里带一个自己的页面（侧边栏「插件 WebUI → 达妮娅分享」，
+或从插件详情页的 Pages 进入），分四个标签：
+
+| 标签 | 内容 |
+| --- | --- |
+| **总览** | 启用平台数、解析记录数、缓存占用、卡片渲染状态；B站扫码登录 / 检测 / 清除；媒体发送方式与风险提示；11 个平台的一键开关 |
+| **解析** | 手动粘贴链接立刻预览卡片（可临时换主题/布局重渲染），另含网页截图小工具 |
+| **缓存** | 解析记录的搜索、平台/来源筛选、分页、卡片预览、单条删除或连文件一起删；过期文件清理、记录与缓存文件的分别清空 |
+| **配置** | 全部 30 个配置项（含原生面板没有的卡片宽度、封面裁剪、缓存清理间隔、调试日志、媒体发送） |
+
+实现方式是 AstrBot 官方的 **Plugin Pages**：页面放在插件目录 `pages/` 下，
+由 Dashboard 以受限 iframe 加载，通过 `window.AstrBotPluginPage` bridge 调用插件注册的
+Web API（`context.register_web_api`）。所以：
+
+- 不需要插件自己起 HTTP 服务，也不引入任何前端框架或 CDN 资源（离线可用）
+- 页面跟随 Dashboard 的亮/暗主题
+- **配置保存后即时生效**，不要求重载插件：解析器、渲染器、截图服务、下载器参数
+  都会按新配置重建（只有「缓存清理间隔」需要重载才生效）
+- 卡片图片不通过 URL 暴露（受限 iframe 带不上鉴权头），预览是把图片缩成
+  base64 随 JSON 返回；要看原图走页面上的「下载」按钮
+
+> 依赖 AstrBot **>= 4.25.3**（Plugin Pages 从 4.24.2 引入，侧边栏入口与主题同步是 4.25.3）。
+> 在更老的版本上插件照常工作，只是没有这个页面。
+
+## 媒体发送：Docker 分容器部署必看
+
+AstrBot 把插件发出去的媒体交给协议端时，各类消息段处理方式并不一样
+（`astrbot/core/platform/sources/aiocqhttp/aiocqhttp_message_event.py`）：
+
+| 消息段 | AstrBot 的处理 | 跨容器 |
+| --- | --- | --- |
+| 图片 / 语音 | 先 `convert_to_base64()` 转成 `base64://` | ✅ 不碰文件系统，没事 |
+| **视频** | `to_dict()` **原样发出**，字段是 `file:///AstrBot/data/...` | ❌ 协议端读不到这个路径 |
+
+也就是说：**astrbot 与 NapCat 等协议端分在不同容器时，图文和语音正常，只有视频发不出去。**
+两种解法，二选一即可（也可都用）：
+
+### ① 共享缓存目录（本地文件方式）
+
+配置「媒体发送 → 共享缓存目录」填一个**容器内路径**，并让所有相关容器都把
+宿主机同一个目录挂到它上面：
+
+```yaml
+services:
+  astrbot:
+    volumes:
+      - /srv/astrbot/data/shared:/app/sharedFolder/denia_share   # 用绝对路径
+  napcat:
+    volumes:
+      - /srv/astrbot/data/shared:/app/sharedFolder/denia_share   # 必须是同一路径
+```
+
+然后配置里填 `/app/sharedFolder/denia_share/cache`。这样插件生成的
+`file:///app/sharedFolder/denia_share/cache/xxx.mp4` 在协议端容器里也成立。
+
+- 一定要写**同一个绝对路径**：两个 compose 文件放在不同目录时，各自的 `./data`
+  指向不同位置，会出现「看着挂了其实不是同一份」
+- 留空 = 用插件数据目录（默认行为不变）；填了但目录不可用/不可写会**打警告并回退**，
+  不会把下载整个搞坏
+
+### ② 媒体中转（链接方式）
+
+配置「媒体发送 → 启用媒体中转」，把已下载的视频注册进 AstrBot 的
+`file_token_service`，拿到 `{回调地址}/api/file/<token>`，用 `Video.fromURL(...)` 发送。
+协议端只要能访问到那个地址就行，**不需要共享挂载**。
+
+- 「AstrBot 回调地址」留空时回退 AstrBot 全局 `callback_api_base`
+- 同一 Docker 网络内可以直接用容器名：`http://astrbot:6185`
+- 地址必须带 `http://` / `https://`，否则不启用（避免生成协议端无法识别的链接）
+- 任何一步失败（没配地址、文件不存在、注册异常）都会**回退成本地文件发送**，
+  不会把视频丢掉
+
+实现移植自作者的另一个插件 [astrbot_plugin_media_parser（娅娅版）](https://github.com/xiaoxi2760)，
+那边的对应配置是 `download.cache_dir` 与 `media_relay.*`。
+
+> 「首页 → 总览」里有一张「媒体发送」卡片，会用 ⚠️ 提示「在容器里但两条路都没铺」的情况。
+
 ## 与 yaya（astrbot_plugin_media_parser）的差异
 
 娅娅版功能面很大（13 平台 + LLM 翻译 + 热评 + 归档 + 媒体中转 + 权限/限流），
@@ -120,11 +200,12 @@ Steam 评价: Very Positive (94%)
 - ✅ 保留：平台解析、卡片渲染、OneBot 合并转发 / 其他平台直发、JSON 卡片（QQ 小程序）提取、B站扫码登录
 - ✅ 网页截图只保留 4 个配置项（娅娅/rika 的 Cloudflare 实现有 20+ 项）
 
-配置项从娅娅版的几十个压到 **22 项**（上游 rika 同期为 40+ 项且仍在增加）。
+配置项从娅娅版的几十个压到 **30 项**（上游 rika 同期为 40+ 项且仍在增加）。
 
 ## 配置项
 
-WebUI 里只有 6 组，常用在前、折腾在后。
+全部 30 项都在网页界面的「配置」标签里维护（原生插件配置面板已隐藏，避免两处入口）。
+分成 8 组，常用在前、折腾在后。
 
 ### 解析设置
 
@@ -165,6 +246,20 @@ WebUI 里只有 6 组，常用在前、折腾在后。
 | `RENDER_ENABLED` | 开 | 关闭回退纯文本 |
 | `RENDER_THEME` | dark | dark / light |
 | `RENDER_LAYOUT` | standard | standard / magazine / immersive / feed |
+| `RENDER_WIDTH` | 800 | 卡片宽度 520~1080 |
+| `RENDER_COVER_FULL_SIZE` | 关 | 封面按原始尺寸铺满，不裁切 |
+| `RENDER_FONT_PATH` | 空 | 卡片出现方块字时才需要指定字体 |
+
+### 媒体发送
+
+| 项 | 默认 | 说明 |
+| --- | --- | --- |
+| `CACHE_DIR` | 空 | 共享缓存目录（容器内路径）。留空=插件数据目录；填了要让各容器挂成同一路径 |
+| `MEDIA_RELAY_ENABLED` | 关 | 把已下载的视频注册成 AstrBot 的临时 HTTP 链接再发送 |
+| `MEDIA_RELAY_CALLBACK_URL` | 空 | 协议端可达的回调地址，如 `http://astrbot:6185`；留空回退全局 `callback_api_base` |
+| `MEDIA_RELAY_TTL` | 300 | 中转链接有效期（秒），最小 30 |
+
+详见上面的「媒体发送：Docker 分容器部署必看」。
 
 ### 高级设置
 
@@ -175,20 +270,33 @@ WebUI 里只有 6 组，常用在前、折腾在后。
 | `GITHUB_TOKEN` | 空 | 建议填，免 token 时 60 次/小时且按出口 IP 计 |
 | `PROXY` | 空 | 全局代理，如 `http://127.0.0.1:7897`，作用于下载与自建请求 |
 | `TWITTER_MEDIA_PROXY_BASE` | 空 | twimg 反代根地址，服务器连不上 X CDN 时填 |
-| `CACHE_TTL_HOURS` | 24 | 缓存保留时长，0 = 不自动清理 |
-| `RENDER_FONT_PATH` | 空 | 卡片出现方块字时才需要指定 |
 
-**为了简洁而移除的旋钮**（改为代码内固定值）：缓存清理间隔（60 分钟）、
-卡片宽度（800）、封面裁剪模式（关闭）、调试日志开关（默认开）。
-这些键仍可从配置文件手动覆盖，只是不再出现在 WebUI。
+### 维护
+
+| 项 | 默认 | 说明 |
+| --- | --- | --- |
+| `CACHE_TTL_HOURS` | 24 | 缓存保留时长，0 = 不自动清理 |
+| `CACHE_CLEANUP_INTERVAL_MINUTES` | 60 | 后台清理任务间隔，改动需重载插件 |
+| `DEBUG_LOG_ENABLED` | 开 | 关闭后只保留警告与错误日志 |
+
+`_conf_schema.json` 由 `tools/gen_conf_schema.py` 从 `core/config.py` 的 `CONFIG_META`
+**单向生成**，不要手改：AstrBot 加载配置时会剔除 schema 之外的键，两边一旦不一致，
+用户保存的值会在下次重载时静默丢失。插件启动时会自检并在不一致时打警告。
 
 ## 目录结构
 
 ```
 astrbot_plugin_denia_share/
-├── main.py                  插件入口：平台分发、命令、发送
+├── main.py                  插件入口：平台分发、命令、发送、WebUI 注册
 ├── metadata.yaml            插件元数据（AstrBot 读取）
-├── _conf_schema.json        WebUI 配置项定义（AstrBot 读取）
+├── _conf_schema.json        配置契约（由 tools/gen_conf_schema.py 生成）
+├── .astrbot-plugin/i18n/    插件页面与元数据的多语言文案
+├── pages/denia/             网页界面（单页面 + 内部标签导航）
+│   ├── index.html
+│   ├── style.css            主题变量、布局与组件样式
+│   ├── ui.js                DOM / 提示条 / 弹窗 / 格式化等通用件
+│   ├── app.js               页面框架：bridge、导航、视图挂载
+│   └── views/               overview / parse / cache / config 四个标签页
 └── core/
     ├── base_parser.py       解析器基类：URL 注册、懒下载、媒体构建
     ├── data.py              解析结果数据模型（ParseResult 等）
@@ -196,7 +304,10 @@ astrbot_plugin_denia_share/
     ├── download.py          下载器：流式下载、体积上限、代理
     ├── card_renderer.py     分享卡片渲染（约 2300 行 Pillow，来自 rika）
     ├── screenshot.py        网页截图（thum / Cloudflare 双后端）
-    ├── config.py            配置读取（分组 + 扁平回退）
+    ├── webui.py             WebUI 的后端接口层（18 个路由）
+    ├── relay.py             媒体中转：本地文件 → 临时 HTTP 链接（file_token_service）
+    ├── history.py           解析记录持久化（history.jsonl）
+    ├── config.py            配置元数据与读写（CONFIG_META 是唯一来源）
     ├── constants.py         常量与平台枚举
     ├── exception.py         异常类型
     ├── media_utils.py       媒体与文件工具（ffmpeg、缓存清理、时长格式化）
@@ -230,7 +341,13 @@ astrbot_plugin_denia_share/
 | 分享卡片渲染（`core/card_renderer.py`） | ✅ 来自 rika |
 | 下载器（`core/download.py`） | ✅ 来自 rika，加了体积上限与代理 |
 | 网页截图（`core/screenshot.py`） | ✅ 双后端，thum 免 key / Cloudflare 需账号 |
-| 配置（`_conf_schema.json`） | ✅ 6 组 22 项 |
+| 网页界面（`pages/` + `core/webui.py`） | ✅ 总览 / 解析 / 缓存 / 配置 四个标签 |
+| 媒体发送（`core/relay.py`） | ✅ 共享缓存目录 + 媒体中转两套，移植自娅娅版 |
+| 解析记录（`core/history.py`） | ✅ JSONL 落盘，默认保留 500 条 |
+| 配置（`_conf_schema.json` + `core/config.py`） | ✅ 8 组 30 项，页面内维护、保存即生效 |
+
+自检脚本：`test/webui/selfcheck.py`（离线，stub 掉 astrbot 环境后真跑插件构造与 18 个接口），
+报告输出到 `test/webui/selfcheck_result.txt`，当前 **93 项全部通过**。
 
 ## 命令
 

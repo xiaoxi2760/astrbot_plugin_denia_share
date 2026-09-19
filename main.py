@@ -12,7 +12,9 @@ Steam 历史最低价需配置 ITAD_API_KEY（免费申请），未配置时只�
 有意不实现的能力：LLM 文本翻译、视频仅发送封面。
 """
 
+import os
 import re
+import io
 import json
 import asyncio
 from pathlib import Path
@@ -25,10 +27,13 @@ from astrbot.api.event import filter, AstrMessageEvent, MessageEventResult, Mess
 import astrbot.api.message_components as Comp
 from astrbot.api.star import Context, Star, register, StarTools
 
-from .core.media_utils import cleanup_cache_dir
-from .core.config import init_config, get_config
+from .core.media_utils import cleanup_cache_dir, is_docker_environment
+from .core.config import init_config, get_config, verify_schema_alignment
 from .core.download import StreamDownloader
 from .core.data import ParseResult, ImageContent, VideoContent, AudioContent
+from .core.history import HistoryStore, ParseRecord
+from .core.relay import register_file
+from .core.constants import PLATFORM_DISPLAY_NAMES, PLATFORM_ORDER
 from .core.exception import (
     ParseException, IgnoreException, DownloadException, SilentException,
 )
@@ -86,7 +91,7 @@ class _EventUrlWrapper:
 
 
 @register("达妮娅分享", "xiaoxi2760",
-          "链接分享自动解析，支持 B站|抖音|快手|微博|小红书|Twitter|AcFun|NGA|GitHub|Pixiv|Steam", "0.5.0")
+          "链接分享自动解析，支持 B站|抖音|快手|微博|小红书|Twitter|AcFun|NGA|GitHub|Pixiv|Steam", "0.6.0")
 class DeniaSharePlugin(Star):
 
     @staticmethod
@@ -97,18 +102,60 @@ class DeniaSharePlugin(Star):
         except Exception:
             return False
 
+    @staticmethod
+    def _resolve_cache_dir(data_dir: Path, configured: str) -> tuple[Path, str]:
+        """决定媒体缓存目录。
+
+        留空用插件数据目录；填了「共享缓存目录」就用它，让协议端容器也能按
+        同一个容器内路径读到下载下来的视频。
+
+        与 yaya 的差别：那边在容器里会把默认值切成自己约定的
+        ``/app/sharedFolder/...``；这里在目录不可用时**回退**插件数据目录而不是
+        拒绝下载 —— 用户没挂载却被切到不可写路径时，至少功能还是通的。
+
+        Returns:
+            (缓存目录, 来源说明)，来源取 ``default`` / ``configured`` / ``fallback``。
+        """
+        if not configured:
+            return data_dir / "cache", "default"
+
+        candidate = Path(configured).expanduser()
+        try:
+            candidate.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            logger.warning(
+                f"[denia_share] 共享缓存目录不可用（{configured}）：{exc}；"
+                f"已回退到插件数据目录"
+            )
+            return data_dir / "cache", "fallback"
+
+        if not os.access(candidate, os.W_OK):
+            logger.warning(
+                f"[denia_share] 共享缓存目录不可写（{candidate}），已回退到插件数据目录"
+            )
+            return data_dir / "cache", "fallback"
+
+        return candidate.resolve(), "configured"
+
     def __init__(self, context: Context, config: AstrBotConfig):
         super().__init__(context)
         self.config = config
 
         data_dir = _get_plugin_data_dir()
         data_dir.mkdir(parents=True, exist_ok=True)
-        self.cache_dir = data_dir / "cache"
-        self.cache_dir.mkdir(parents=True, exist_ok=True)
+        self._data_dir = data_dir
         self.config_dir = data_dir / "config"
         self.config_dir.mkdir(parents=True, exist_ok=True)
 
-        pconfig = init_config(config, self.cache_dir, self.config_dir)
+        pconfig = init_config(config, data_dir / "cache", self.config_dir)
+
+        # 缓存目录可被「共享缓存目录」配置项接管：Docker 分容器部署时，
+        # 协议端要按同一个容器内路径才能读到下载下来的视频
+        self.cache_dir, self.cache_dir_source = self._resolve_cache_dir(
+            data_dir, pconfig.CACHE_DIR
+        )
+        self.cache_dir.mkdir(parents=True, exist_ok=True)
+        pconfig.cache_dir = self.cache_dir
 
         try:
             from .core.config import migrate_grouped_config
@@ -148,14 +195,59 @@ class DeniaSharePlugin(Star):
         self._bili_cookie: str = ""
         self._bili_http_session: aiohttp.ClientSession | None = None
         self._bili_login_tasks: Dict[str, asyncio.Task] = {}
+        self._bili_login_states: Dict[str, dict[str, Any]] = {}
         self._bili_data_dir = StarTools.get_data_dir(PLUGIN_NAME)
         self._bili_data_dir.mkdir(parents=True, exist_ok=True)
         self._bili_cookie_file = self._bili_data_dir / "bili_cookie.json"
 
+        # ========== 解析记录（WebUI「缓存」页的数据源） ==========
+        self.history = HistoryStore(data_dir / "history.jsonl")
+
+        self._check_schema_alignment()
+        self._register_webui()
+
         logger.info(
             f"[denia_share] 已启用平台: {', '.join(self.parsers.keys()) or '无'}；"
-            f"卡片渲染: {'开' if self._renderer.enabled else '关'}"
+            f"卡片渲染: {'开' if self._renderer.enabled else '关'}；"
+            f"媒体缓存: {self.cache_dir}"
+            f"{'（共享目录）' if self.cache_dir_source == 'configured' else ''}"
+            f"{'（配置的共享目录不可用，已回退）' if self.cache_dir_source == 'fallback' else ''}；"
+            f"媒体中转: {'开' if pconfig.MEDIA_RELAY_ENABLED else '关'}"
+            f"{'（容器内）' if is_docker_environment() else ''}"
         )
+
+    def _check_schema_alignment(self):
+        """自检 _conf_schema.json 与 CONFIG_META 是否一致（不一致会导致配置静默丢失）。"""
+        try:
+            schema_path = Path(__file__).with_name("_conf_schema.json")
+            schema = json.loads(schema_path.read_text(encoding="utf-8"))
+        except Exception:
+            logger.warning("[denia_share] 无法读取 _conf_schema.json，跳过一致性自检", exc_info=True)
+            return
+        problems = verify_schema_alignment(schema)
+        for problem in problems:
+            logger.warning(f"[denia_share] 配置 schema 不一致：{problem}")
+
+    def _register_webui(self):
+        """注册插件 WebUI 的后端接口。
+
+        AstrBot < 4.24.2 没有 register_web_api，此时静默跳过——
+        聊天命令与解析功能都不受影响，只是没有网页界面。
+        """
+        if not hasattr(self.context, "register_web_api"):
+            logger.info("[denia_share] 当前 AstrBot 不支持插件页面，跳过 WebUI 注册")
+            self._webui_ready = False
+            return
+        try:
+            from .core.webui import WebUIApi
+
+            self._webui = WebUIApi(self)
+            self._webui.register()
+            self._webui_ready = True
+            logger.info("[denia_share] WebUI 接口已注册（插件页面 pages/denia）")
+        except Exception:
+            self._webui_ready = False
+            logger.warning("[denia_share] WebUI 接口注册失败", exc_info=True)
 
     def _init_parsers(self):
         pconfig = get_config()
@@ -331,6 +423,9 @@ class DeniaSharePlugin(Star):
                 self._result_cache[cache_key] = result
             async for r in self._deliver(event, result, cache_key):
                 yield r
+            await self._record_history(
+                result, self._render_cache.get(cache_key), via="command"
+            )
         except IgnoreException as e:
             yield event.plain_result(f"ℹ️ {e.message}")
         except ParseException as e:
@@ -374,6 +469,9 @@ class DeniaSharePlugin(Star):
 
             async for r in self._deliver(event, result, cache_key):
                 yield r
+
+            # 交付完成后再记录：此时媒体都已落盘，记录里能带上真实文件名
+            await self._record_history(result, self._render_cache.get(cache_key))
 
         except SilentException:
             return
@@ -431,6 +529,125 @@ class DeniaSharePlugin(Star):
 
         async for r in self._try_send_media(event, result):
             yield r
+
+    # ==================== 解析记录 ====================
+
+    async def _record_history(
+        self,
+        result: ParseResult,
+        render_path: Path | None,
+        *,
+        via: str = "auto",
+        elapsed_ms: int | None = None,
+    ) -> ParseRecord | None:
+        """把一次成功的解析写入历史，供 WebUI 查看与管理。
+
+        这是纯旁路：任何异常都只记日志，绝不影响正常的解析与发送。
+        """
+        try:
+            media_files: list[str] = []
+            for cont in result.contents:
+                path = cont.path_task.resolved
+                if path is not None:
+                    media_files.append(path.name)
+
+            record = ParseRecord.create(
+                url=result.url or "",
+                platform=result.platform.name,
+                platform_display=result.platform.display_name,
+                content_type=result.content_type,
+                title=result.title or "",
+                author=result.author.name if result.author else "",
+                via=via,
+                card_file=render_path.name if render_path else None,
+                media_files=media_files,
+                detail=self._history_detail(result),
+                elapsed_ms=elapsed_ms,
+            )
+            await asyncio.to_thread(self.history.add, record)
+            return record
+        except Exception:
+            logger.warning("[denia_share] 写入解析记录失败", exc_info=True)
+            return None
+
+    @staticmethod
+    def _history_detail(result: ParseResult) -> dict[str, Any]:
+        """挑出适合展示在记录详情里的字段（不含媒体本体）。"""
+        extra = result.extra or {}
+        return {
+            "stats_line": extra.get("stats_line") or "",
+            "duration": extra.get("duration") or "",
+            "online": extra.get("online") or "",
+            "info": extra.get("info") or "",
+            "text": (result.text or "")[:300],
+            "image_count": len(result.img_contents),
+            "video_count": len(result.video_contents),
+            "audio_count": len(result.audio_contents),
+            "warnings": list(extra.get("limit_warnings") or []),
+        }
+
+    # ==================== 配置热生效 ====================
+
+    async def apply_runtime_config(self) -> dict[str, Any]:
+        """按最新配置重建运行时组件。
+
+        ``ParserConfig`` 直接读取 AstrBotConfig，所以配置值本身是实时的；
+        这里负责重建那些「构造时把配置读死」的对象（解析器表、渲染器、截图服务、
+        下载器参数），让网页端保存后不需要重载插件。
+        """
+        pconfig = get_config()
+        summary: dict[str, Any] = {"rebuilt": False}
+
+        self.disabled_platforms = pconfig.DISABLED_PLATFORMS
+        self._send_errors = pconfig.SEND_ERROR_MESSAGES
+
+        # 共享缓存目录可能被改了：换目录后旧的内存缓存全部失效
+        new_cache_dir, source = self._resolve_cache_dir(
+            self._data_dir, pconfig.CACHE_DIR
+        )
+        self.cache_dir_source = source
+        if new_cache_dir != self.cache_dir:
+            self.cache_dir = new_cache_dir
+            self.cache_dir.mkdir(parents=True, exist_ok=True)
+            pconfig.cache_dir = self.cache_dir
+            self._result_cache.clear()
+            self._render_cache.clear()
+            logger.info(f"[denia_share] 媒体缓存目录已切换到 {self.cache_dir}")
+        summary["cache_dir"] = str(self.cache_dir)
+        summary["cache_dir_source"] = self.cache_dir_source
+
+        try:
+            await self.downloader.reconfigure(
+                proxies=pconfig.PROXY or None,
+                max_size_mb=pconfig.VIDEO_SIZE_MAXIMUM_MB,
+                cache_dir=self.cache_dir,
+            )
+        except Exception:
+            logger.warning("[denia_share] 更新下载器参数失败", exc_info=True)
+
+        self.parsers = {}
+        self._init_parsers()
+
+        bili_cookie = self._bili_cookie or (pconfig.BILI_CK or "")
+        if bili_cookie:
+            self._bili_apply_cookie_to_parser(bili_cookie)
+
+        self._renderer = ShareCardRenderer(
+            self.cache_dir,
+            enabled=pconfig.RENDER_ENABLED,
+            width=pconfig.RENDER_WIDTH,
+            theme=pconfig.RENDER_THEME,
+            font_path=pconfig.RENDER_FONT_PATH or None,
+            layout=pconfig.RENDER_LAYOUT,
+            cover_full_size=pconfig.RENDER_COVER_FULL_SIZE,
+        )
+        # 渲染参数进了产物文件名，配置变了就得让旧缓存失效
+        self._render_cache.clear()
+
+        summary["rebuilt"] = True
+        summary["platforms"] = sorted(self.parsers)
+        summary["render_enabled"] = self._renderer.enabled
+        return summary
 
     # ==================== 网页截图 ====================
 
@@ -545,16 +762,42 @@ class DeniaSharePlugin(Star):
             yield event.chain_result(parts)
 
     async def _try_send_media(self, event: AstrMessageEvent, result: ParseResult):
-        """单独发送视频 / 音频。图片已在文本节点中，不重复发送。"""
+        """单独发送视频 / 音频。图片已在文本节点中，不重复发送。
+
+        **视频为什么需要特殊处理**：AstrBot 把 ``Video`` 段的 ``file:///...``
+        原样交给协议端（图片 / 语音会先转成 base64，所以没这个问题），
+        而那个路径是 astrbot 容器内的路径。协议端在另一个容器里读不到，
+        视频就发不出去。
+
+        所以开了「媒体中转」就先把文件注册成 ``{回调地址}/api/file/<token>``
+        用 URL 发送；没开、注册失败、或地址不合法时，回退成原来的本地文件发送。
+        """
+        pconfig = get_config()
+        relay_enabled = pconfig.MEDIA_RELAY_ENABLED
+        callback_base = pconfig.MEDIA_RELAY_CALLBACK_URL
+        ttl = pconfig.MEDIA_RELAY_TTL
+
         for cont in result.contents:
             if not isinstance(cont, (VideoContent, AudioContent)):
                 continue
             path = await cont.path_task.safe_get()
             if path is None:
                 continue
+
             if isinstance(cont, VideoContent):
-                yield event.chain_result([Comp.Video.fromFileSystem(str(path))])
+                url = None
+                if relay_enabled:
+                    url = await register_file(path, callback_base, ttl)
+                    if url is None:
+                        logger.info(
+                            f"[denia_share] 视频中转不可用，回退本地文件发送: {path.name}"
+                        )
+                if url:
+                    yield event.chain_result([Comp.Video.fromURL(url)])
+                else:
+                    yield event.chain_result([Comp.Video.fromFileSystem(str(path))])
             else:
+                # 语音走 base64，不依赖文件系统，无需中转
                 yield event.chain_result([Comp.Record(file=str(path))])
 
     # ==================== B站扫码登录 ====================
@@ -569,24 +812,7 @@ class DeniaSharePlugin(Star):
             return
 
         try:
-            if not self._bili_http_session:
-                self._bili_http_session = aiohttp.ClientSession()
-
-            async with self._bili_http_session.get(
-                BILI_QR_GENERATE_URL, headers=self._bili_headers(),
-                timeout=aiohttp.ClientTimeout(total=15),
-            ) as resp:
-                data = await resp.json()
-
-            if data.get("code") != 0:
-                yield event.plain_result(f"❌ 获取二维码失败: {data.get('message', '未知错误')}")
-                return
-
-            qrcode_url = data["data"]["url"]
-            qrcode_key = data["data"]["qrcode_key"]
-            if not qrcode_key:
-                yield event.plain_result("❌ 获取 qrcode_key 失败")
-                return
+            qrcode_url, qrcode_key = await self.bili_qr_create()
 
             try:
                 qr_image = qrcode.make(qrcode_url)
@@ -601,9 +827,11 @@ class DeniaSharePlugin(Star):
                 "📱 请使用 **B站App** 扫描上方二维码\n⏱️ 有效期约3分钟\n📋 扫码后请在手机上点击「确认登录」"
             )
 
-            self._bili_login_tasks[sender_id] = asyncio.create_task(
-                self._bili_poll_qr_login(sender_id, qrcode_key, qr_path)
+            self.bili_login_start(
+                sender_id, qrcode_key, notify_umo=sender_id, qr_path=qr_path
             )
+        except ParseException as e:
+            yield event.plain_result(f"❌ {e.message}")
         except Exception as e:
             logger.exception("扫码登录出错")
             yield event.plain_result(f"❌ 生成二维码失败: {e}")
@@ -622,6 +850,129 @@ class DeniaSharePlugin(Star):
         else:
             yield event.plain_result(f"❌ B站Cookie失效\n错误: {result.get('error', '未知错误')}")
 
+    # ---------- 扫码登录：WebUI 与聊天命令共用的实现 ----------
+
+    async def bili_qr_create(self) -> tuple[str, str]:
+        """向 B站申请扫码登录二维码。
+
+        Returns:
+            (扫码 URL, qrcode_key)
+
+        Raises:
+            ParseException: 申请失败或返回内容不完整。
+        """
+        if not self._bili_http_session or self._bili_http_session.closed:
+            self._bili_http_session = aiohttp.ClientSession()
+
+        async with self._bili_http_session.get(
+            BILI_QR_GENERATE_URL, headers=self._bili_headers(),
+            timeout=aiohttp.ClientTimeout(total=15),
+        ) as resp:
+            data = await resp.json()
+
+        if data.get("code") != 0:
+            raise ParseException(f"获取二维码失败: {data.get('message', '未知错误')}")
+
+        payload = data.get("data") or {}
+        qrcode_url = payload.get("url")
+        qrcode_key = payload.get("qrcode_key")
+        if not qrcode_url or not qrcode_key:
+            raise ParseException("B站未返回二维码地址或 qrcode_key")
+        return str(qrcode_url), str(qrcode_key)
+
+    @staticmethod
+    def render_qr_png(data: str) -> bytes:
+        """把文本渲染成 PNG 字节，供 WebUI 拼成 data URL 展示。"""
+        buffer = io.BytesIO()
+        qrcode.make(data).save(buffer, "PNG")
+        return buffer.getvalue()
+
+    def bili_login_state(self, task_id: str) -> dict[str, Any]:
+        """读取扫码登录任务的当前状态（WebUI 轮询用）。"""
+        state = self._bili_login_states.get(task_id)
+        if state is None:
+            return {"state": "unknown", "message": "登录任务不存在或已结束"}
+        return dict(state)
+
+    def bili_login_start(
+        self,
+        task_id: str,
+        qrcode_key: str,
+        *,
+        notify_umo: str | None = None,
+        qr_path: Path | None = None,
+    ) -> None:
+        """启动后台轮询任务。
+
+        Args:
+            task_id: 任务标识，聊天命令用发送者 ID，WebUI 用随机串。
+            qrcode_key: ``bili_qr_create`` 返回的轮询凭据。
+            notify_umo: 需要把登录结果发到聊天时填会话标识，WebUI 场景传 None。
+            qr_path: 临时二维码文件，任务结束时删除（WebUI 不落盘，传 None）。
+        """
+        existing = self._bili_login_tasks.get(task_id)
+        if existing is not None and not existing.done():
+            return
+
+        import time as _time
+
+        self._bili_login_states[task_id] = {
+            "state": "waiting",
+            "message": "等待扫码",
+            "username": "",
+            "uid": 0,
+            "started_at": _time.time(),
+            "expires_in": QR_CODE_EXPIRE_TIME,
+        }
+        self._bili_login_tasks[task_id] = asyncio.create_task(
+            self._bili_poll_qr_login(
+                task_id, qrcode_key, notify_umo=notify_umo, qr_path=qr_path
+            )
+        )
+
+    async def bili_cookie_status(self) -> dict[str, Any]:
+        """检查当前 Cookie 是否仍有效。
+
+        会真实请求 B站接口，仅在用户主动点「检测」时调用，不要放进总览的自动刷新里。
+        """
+        if not self._bili_cookie:
+            return {"configured": False, "valid": False, "error": "尚未配置 Cookie"}
+        result = await self._bili_check_cookie_valid()
+        return {
+            "configured": True,
+            "valid": bool(result.get("valid")),
+            "username": result.get("username", ""),
+            "uid": result.get("uid", 0),
+            "error": result.get("error", ""),
+        }
+
+    async def bili_logout(self) -> bool:
+        """清除本地保存的 B站 Cookie（不会撤销 B站侧的登录态）。
+
+        要清三处，少一处都会「看起来清了、实际还在用」：
+        主模块的 ``bili_cookie.json``、解析器自己持久化的 ``bilibili_cookies.json``、
+        以及配置项 ``BILI_CK``（否则重建解析器时又被读回来）。
+        """
+        self._bili_cookie = ""
+
+        parser = self.parsers.get("bilibili")
+        if parser is not None and hasattr(parser, "clear_cookie"):
+            parser.clear_cookie()
+
+        pconfig = get_config()
+        try:
+            if str(pconfig.BILI_CK or "").strip():
+                pconfig.apply_updates({"BILI_CK": ""})
+        except Exception:
+            logger.warning("[denia_share] 清除配置里的 B站 Cookie 失败", exc_info=True)
+
+        try:
+            self._bili_cookie_file.unlink(missing_ok=True)
+            return True
+        except OSError:
+            logger.warning("[denia_share] 删除 bili_cookie.json 失败", exc_info=True)
+            return False
+
     # ---------- 内部方法 ----------
 
     @staticmethod
@@ -635,8 +986,25 @@ class DeniaSharePlugin(Star):
             "Accept": "application/json, text/plain, */*",
         }
 
-    async def _bili_poll_qr_login(self, sender_id: str, qrcode_key: str, qr_path: Path):
+    async def _bili_poll_qr_login(
+        self,
+        task_id: str,
+        qrcode_key: str,
+        *,
+        notify_umo: str | None = None,
+        qr_path: Path | None = None,
+    ):
+        """轮询扫码结果，成功后写入并持久化 Cookie。
+
+        状态写进 ``self._bili_login_states``，WebUI 通过 ``bili_login_state`` 读取；
+        聊天命令则靠 ``notify_umo`` 收结果。两条路径共用这一份实现。
+        """
         import time as _time
+
+        state = self._bili_login_states.get(task_id)
+        if state is None:
+            state = {"state": "waiting", "message": "等待扫码", "username": "", "uid": 0}
+            self._bili_login_states[task_id] = state
 
         start = _time.time()
         try:
@@ -656,8 +1024,13 @@ class DeniaSharePlugin(Star):
 
                 code = poll_data.get("data", {}).get("code", -1)
                 if code == QR_CODE_EXPIRED:
+                    state["state"] = "expired"
+                    state["message"] = "二维码已过期，请重新获取"
                     break
-                if code == QR_CODE_SUCCESS:
+                if code == QR_CODE_SCANNED:
+                    state["state"] = "scanned"
+                    state["message"] = "已扫码，请在手机上确认登录"
+                elif code == QR_CODE_SUCCESS:
                     cookie_dict: dict[str, str] = {}
                     for header in set_cookie_headers:
                         part = header.split(";")[0].strip()
@@ -665,6 +1038,8 @@ class DeniaSharePlugin(Star):
                             k, v = part.split("=", 1)
                             cookie_dict[k.strip()] = v.strip()
                     if not cookie_dict:
+                        state["state"] = "failed"
+                        state["message"] = "B站未返回 Cookie，请重试"
                         break
                     cookie_str = "; ".join(f"{k}={v}" for k, v in cookie_dict.items())
                     self._bili_cookie = cookie_str
@@ -672,19 +1047,34 @@ class DeniaSharePlugin(Star):
                     self._bili_apply_cookie_to_parser(cookie_str)
                     result = await self._bili_check_cookie_valid()
                     if result["valid"]:
-                        await self._bili_notify(
-                            sender_id,
-                            f"🎉 登录成功！\n👤 用户: {result.get('username')}\n🆔 UID: {result.get('uid', 0)}",
-                        )
+                        state["state"] = "success"
+                        state["username"] = result.get("username", "")
+                        state["uid"] = result.get("uid", 0)
+                        state["message"] = "登录成功"
+                        if notify_umo:
+                            await self._bili_notify(
+                                notify_umo,
+                                f"🎉 登录成功！\n👤 用户: {result.get('username')}\n🆔 UID: {result.get('uid', 0)}",
+                            )
+                    else:
+                        state["state"] = "failed"
+                        state["message"] = f"Cookie 已保存但校验失败：{result.get('error', '未知错误')}"
                     break
                 await asyncio.sleep(POLL_INTERVAL)
+            else:
+                state["state"] = "expired"
+                state["message"] = "二维码已过期，请重新获取"
         except asyncio.CancelledError:
-            pass
-        except Exception:
+            state["state"] = "cancelled"
+            state["message"] = "登录任务已取消"
+            raise
+        except Exception as e:
             logger.exception("扫码轮询出错")
+            state["state"] = "failed"
+            state["message"] = f"轮询出错：{str(e)[:120]}"
         finally:
-            self._bili_login_tasks.pop(sender_id, None)
-            if qr_path.exists():
+            self._bili_login_tasks.pop(task_id, None)
+            if qr_path is not None and qr_path.exists():
                 try:
                     qr_path.unlink()
                 except Exception:

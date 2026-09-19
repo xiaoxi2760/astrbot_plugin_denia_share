@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>达妮娅分享</title>
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <div class="app">
+      <aside class="rail">
+        <div class="rail-brand">
+          <span class="rail-logo">达</span>
+          <span class="rail-brand-text">
+            <strong>达妮娅分享</strong>
+            <em id="brand-version">—</em>
+          </span>
+        </div>
+        <nav class="rail-nav" id="rail-nav">
+          <button class="rail-item is-active" data-view="overview" type="button">
+            <span class="rail-icon" aria-hidden="true"></span>
+            <span class="rail-label">总览</span>
+          </button>
+          <button class="rail-item" data-view="parse" type="button">
+            <span class="rail-icon" aria-hidden="true"></span>
+            <span class="rail-label">解析</span>
+          </button>
+          <button class="rail-item" data-view="cache" type="button">
+            <span class="rail-icon" aria-hidden="true"></span>
+            <span class="rail-label">缓存</span>
+            <span class="rail-badge" id="cache-badge" hidden>0</span>
+          </button>
+          <button class="rail-item" data-view="config" type="button">
+            <span class="rail-icon" aria-hidden="true"></span>
+            <span class="rail-label">配置</span>
+          </button>
+        </nav>
+        <div class="rail-foot" id="rail-foot">
+          <span class="dot" id="rail-dot"></span>
+          <span id="rail-status">连接中…</span>
+        </div>
+      </aside>
+
+      <main class="stage">
+        <header class="stage-head">
+          <div class="stage-title">
+            <h1 id="view-title">总览</h1>
+            <p id="view-sub">插件运行状态一览</p>
+          </div>
+          <div class="stage-actions">
+            <span class="pill" id="head-pill" hidden></span>
+            <button class="btn" id="btn-reload" type="button">刷新</button>
+          </div>
+        </header>
+        <div class="stage-body" id="stage-body"></div>
+      </main>
+    </div>
+
+    <div class="toast-host" id="toast-host" aria-live="polite"></div>
+    <div class="modal-host" id="modal-host" hidden></div>
+
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>
