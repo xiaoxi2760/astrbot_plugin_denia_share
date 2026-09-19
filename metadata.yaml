@@ -1,13 +1,15 @@
 name: astrbot_plugin_denia_share
 display_name: "达妮娅分享"
-short_desc: 链接分享自动解析，支持 B站|抖音|快手|微博|小红书|Twitter|AcFun|NGA
+short_desc: 链接分享自动解析，支持 B站|抖音|快手|微博|小红书|Twitter|AcFun|NGA|GitHub|Pixiv
 desc: |
   # 达妮娅分享
 
   自动解析各平台分享链接，渲染为分享卡片发送。
 
   支持：**B站**（视频/动态/直播/专栏/收藏夹）、**抖音**、**快手**、**微博**（含长文）、
-  **小红书**、**Twitter/X**、**AcFun**、**NGA**。
+  **小红书**、**Twitter/X**、**AcFun**、**NGA**、**GitHub**（仓库）、**Pixiv**（作品）。
+
+  另有网页截图（`/shot`，thum.io 与 Cloudflare 双后端）与 Pixiv 关键词搜索（`/pixiv`）。
 
   ## 解析内核
 
@@ -26,14 +28,23 @@ desc: |
 
   ## 命令
 
+  - `/shot <网址>` 网页截图
+  - `/pixiv <关键词>` Pixiv 搜索（结果强制过滤非全年龄内容）
   - `/bili_login` 扫码登录 B站（管理员）
   - `/bili_check` 检查 B站 Cookie 是否有效
   - `/denia_status` 查看插件运行状态（管理员）
+  - `/denia_clear` 清空解析缓存（管理员）
 
   ## 说明
 
   本插件**不提供** LLM 文本翻译与「视频仅发送封面」能力。
-version: 0.4.0
+
+  Pixiv 模块对非全年龄内容（`xRestrict != 0`）做硬性过滤，不提供开关，
+  配置 Cookie 不会放宽该限制。
+
+  建议填写 `GITHUB_TOKEN`：免 token 时 GitHub API 限额 60 次/小时且按出口 IP 计算，
+  共享 IP 下极易被限流。
+version: 0.5.0
 astrbot_version: ">=4.25.0"
 author: xiaoxi2760
 repo: https://github.com/xiaoxi2760/astrbot_plugin_denia_share
