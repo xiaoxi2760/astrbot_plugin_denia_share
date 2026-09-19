@@ -1,8 +1,9 @@
 """
 达妮娅分享 - 链接分享自动解析插件
 
-支持 B站 | 抖音 | 快手 | 微博 | 小红书 | Twitter | AcFun | NGA | GitHub | Pixiv
+支持 B站 | 抖音 | 快手 | 微博 | 小红书 | Twitter | AcFun | NGA | GitHub | Pixiv | Steam
 另有网页截图（thum.io / Cloudflare 双后端）与 Pixiv 关键词搜索。
+Steam 历史最低价需配置 ITAD_API_KEY（免费申请），未配置时只显示当前价与折扣。
 
 解析内核合并自两个插件，取各自更强的一版：
 - astrbot_plugin_rika_share（架构 / 渲染 / B站 / 微博 / 小红书 / AcFun / NGA）
@@ -36,7 +37,7 @@ from .core.screenshot import ScreenshotService, is_probably_screenshotable
 from .core.parsers import (
     BilibiliParser, DouyinParser, KuaiShouParser, WeiBoParser,
     XiaoHongShuParser, TwitterParser, NGAParser, AcfunParser,
-    GitHubParser, PixivParser,
+    GitHubParser, PixivParser, SteamParser,
 )
 
 PLUGIN_NAME = "astrbot_plugin_denia_share"
@@ -68,6 +69,7 @@ NGA_PATTERN = re.compile(r"(nga\.178\.com|ngabbs\.com|bbs\.nga\.cn)")
 ACFUN_PATTERN = re.compile(r"acfun\.cn")
 GITHUB_PATTERN = re.compile(r"github\.com/[\w.\-]+/[\w.\-]+")
 PIXIV_PATTERN = re.compile(r"pixiv\.net")
+STEAM_PATTERN = re.compile(r"store\.steampowered\.com")
 
 URL_PATTERN = re.compile(r"https?://[^\s'\"<>]+")
 
@@ -84,7 +86,7 @@ class _EventUrlWrapper:
 
 
 @register("达妮娅分享", "xiaoxi2760",
-          "链接分享自动解析，支持 B站|抖音|快手|微博|小红书|Twitter|AcFun|NGA|GitHub|Pixiv", "0.5.0")
+          "链接分享自动解析，支持 B站|抖音|快手|微博|小红书|Twitter|AcFun|NGA|GitHub|Pixiv|Steam", "0.5.0")
 class DeniaSharePlugin(Star):
 
     @staticmethod
@@ -180,6 +182,12 @@ class DeniaSharePlugin(Star):
             self.parsers["github"] = GitHubParser(self.downloader, token=pconfig.GITHUB_TOKEN)
         if "pixiv" not in disabled:
             self.parsers["pixiv"] = PixivParser(self.downloader, cookie=pconfig.PIXIV_CK)
+        if "steam" not in disabled:
+            self.parsers["steam"] = SteamParser(
+                self.downloader,
+                itad_key=pconfig.ITAD_API_KEY,
+                region=pconfig.STEAM_REGION,
+            )
 
         self.screenshot = ScreenshotService(
             self.cache_dir,
@@ -272,6 +280,11 @@ class DeniaSharePlugin(Star):
     @filter.regex(PIXIV_PATTERN)
     async def pixiv_handler(self, event: AstrMessageEvent, matched: re.Match | None = None):
         async for r in self._dispatch(event, "pixiv"):
+            yield r
+
+    @filter.regex(STEAM_PATTERN)
+    async def steam_handler(self, event: AstrMessageEvent, matched: re.Match | None = None):
+        async for r in self._dispatch(event, "steam"):
             yield r
 
     # ==================== 网页截图 ====================

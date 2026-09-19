@@ -2,7 +2,7 @@
 
 AstrBot 链接分享自动解析插件：解析分享链接，渲染成分享卡片发送。
 
-支持 **B站 / 抖音 / 快手 / 微博 / 小红书 / Twitter / AcFun / NGA / GitHub / Pixiv** 十个平台，
+支持 **B站 / 抖音 / 快手 / 微博 / 小红书 / Twitter / AcFun / NGA / GitHub / Pixiv / Steam** 十一个平台，
 另有网页截图（`/shot`）与 Pixiv 关键词搜索（`/pixiv`）。
 
 ## 解析内核：两个插件择优合并
@@ -20,6 +20,7 @@ AstrBot 链接分享自动解析插件：解析分享链接，渲染成分享卡
 | AcFun / NGA | rika | 娅娅无此平台 |
 | GitHub | 本仓库新增 | 官方 REST API，仓库卡片（星标 / 分支 / 语言 / 许可 / topics） |
 | Pixiv | 本仓库新增 | 官方 Ajax 接口，作品解析 + 关键词搜索 |
+| Steam | 本仓库新增 | 官方 appdetails + CheapShark 折扣 + ITAD 史低（可选 key） |
 
 **抖音**保留了双路径：先试零成本的 HTML 直取，失败再退到签名接口。
 **Twitter**同理：两家第三方镜像都失败后才走官方 GraphQL。
@@ -72,6 +73,41 @@ B站的清晰度上限由服务端按登录态决定，与用什么库无关。�
 但配置 Cookie 后收录更全的同时也会开始出现 R18 —— 过滤逻辑与是否登录无关，
 配 Cookie 不会放宽。这是为了不在群里发出违规内容。
 
+### Steam 与「历史价格」
+
+三层数据源，任何一层失败都不影响其它层：
+
+| 层 | 来源 | 凭据 | 提供 |
+| --- | --- | --- | --- |
+| 1 | Steam 官方 `appdetails` | 免 key | 名称 / 简介 / 开发商 / 发行日期 / 类型 / **国区价格** |
+| 2 | CheapShark | 免 key | Metacritic、Steam 好评率、当前折扣率 |
+| 3 | IsThereAnyDeal | **需 key** | 真史低 `historyLow`（全部 / 近一年 / 近三月） |
+
+关于史低的实测结论（2026-09-19）：
+
+- Steam 官方接口**不提供**任何历史价格
+- SteamDB 的 `steamdb.info/api` 已 403 被 Cloudflare 拦死，社区也明确禁止爬取
+- CheapShark 的 `cheapestPriceEver` 字段**实测三个游戏恒为 None**，已废弃不可依赖
+- 所以真史低只能用 ITAD，且必须申请 key（免费：isthereanydeal.com/apps）
+
+**没填 key 时插件照常工作，只是不显示史低这一行。**
+
+注意价格显示：国区价来自官方接口（¥），折扣率那行的美元价来自 CheapShark，
+两者不同源，已标注「美元区」避免混淆。
+
+CheapShark 有个坑：必须带描述性 User-Agent，用 httpx 默认 UA 或浏览器 UA
+都会返回 400 `Missing or generic User-Agent header detected`。代码里已处理。
+
+实测样例（2026-09-19，国区）：
+
+```
+艾尔登法环  FromSoftware, Inc.
+价格: ¥ 298.00
+当前折扣: -10%（美元区 $53.88 / 原价 $59.99）
+Metacritic: 94
+Steam 评价: Very Positive (94%)
+```
+
 ## 与 yaya（astrbot_plugin_media_parser）的差异
 
 娅娅版功能面很大（13 平台 + LLM 翻译 + 热评 + 归档 + 媒体中转 + 权限/限流），
@@ -84,11 +120,11 @@ B站的清晰度上限由服务端按登录态决定，与用什么库无关。�
 - ✅ 保留：平台解析、卡片渲染、OneBot 合并转发 / 其他平台直发、JSON 卡片（QQ 小程序）提取、B站扫码登录
 - ✅ 网页截图只保留 4 个配置项（娅娅/rika 的 Cloudflare 实现有 20+ 项）
 
-配置项从娅娅版的几十个压到 **20 项**（上游 rika 同期为 40+ 项且仍在增加）。
+配置项从娅娅版的几十个压到 **22 项**（上游 rika 同期为 40+ 项且仍在增加）。
 
 ## 配置项
 
-WebUI 里只有 5 组，常用在前、折腾在后。
+WebUI 里只有 6 组，常用在前、折腾在后。
 
 ### 解析设置
 
@@ -105,6 +141,13 @@ WebUI 里只有 5 组，常用在前、折腾在后。
 | --- | --- | --- |
 | `BILI_CK` | 空 | 建议用 `/bili_login` 扫码；配了才能下 1080P+ |
 | `BILI_QUALITY` | 1080P | 360P ~ 8K |
+
+### Steam 设置
+
+| 项 | 默认 | 说明 |
+| --- | --- | --- |
+| `STEAM_REGION` | cn | 价格地区，决定官方价格的货币，同时用作 ITAD 的 country |
+| `ITAD_API_KEY` | 空 | 只有要「历史最低价」才需要，免费申请。留空不显示史低，其余照常 |
 
 ### 网页截图
 
@@ -144,11 +187,11 @@ WebUI 里只有 5 组，常用在前、折腾在后。
 | 模块 | 状态 |
 | --- | --- |
 | 仓库骨架 / 插件注册 | ✅ |
-| 解析层（`core/parsers/`） | ✅ 10 平台（3 个为合并改写，2 个为新增） |
+| 解析层（`core/parsers/`） | ✅ 11 平台（3 个为合并改写，3 个为新增） |
 | 分享卡片渲染（`core/render.py`） | ✅ 来自 rika |
 | 下载器（`core/download.py`） | ✅ 来自 rika，加了体积上限与代理 |
 | 网页截图（`core/screenshot.py`） | ✅ 双后端，thum 免 key / Cloudflare 需账号 |
-| 配置（`_conf_schema.json`） | ✅ 5 组 20 项 |
+| 配置（`_conf_schema.json`） | ✅ 6 组 22 项 |
 
 ## 命令
 

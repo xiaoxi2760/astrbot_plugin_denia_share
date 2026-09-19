@@ -1,13 +1,14 @@
 name: astrbot_plugin_denia_share
 display_name: "达妮娅分享"
-short_desc: 链接分享自动解析，支持 B站|抖音|快手|微博|小红书|Twitter|AcFun|NGA|GitHub|Pixiv
+short_desc: 链接分享自动解析，支持 B站|抖音|快手|微博|小红书|Twitter|AcFun|NGA|GitHub|Pixiv|Steam
 desc: |
   # 达妮娅分享
 
   自动解析各平台分享链接，渲染为分享卡片发送。
 
   支持：**B站**（视频/动态/直播/专栏/收藏夹）、**抖音**、**快手**、**微博**（含长文）、
-  **小红书**、**Twitter/X**、**AcFun**、**NGA**、**GitHub**（仓库）、**Pixiv**（作品）。
+  **小红书**、**Twitter/X**、**AcFun**、**NGA**、**GitHub**（仓库）、**Pixiv**（作品）、
+  **Steam**（商店页，含当前价与折扣；配置 ITAD key 后可显示历史最低价）。
 
   另有网页截图（`/shot`，thum.io 与 Cloudflare 双后端）与 Pixiv 关键词搜索（`/pixiv`）。
 
@@ -44,6 +45,10 @@ desc: |
 
   建议填写 `GITHUB_TOKEN`：免 token 时 GitHub API 限额 60 次/小时且按出口 IP 计算，
   共享 IP 下极易被限流。
+
+  Steam 的历史最低价需要 `ITAD_API_KEY`（免费申请 https://isthereanydeal.com/apps）：
+  Steam 官方接口不提供历史价格，SteamDB 已被 Cloudflare 拦死，
+  CheapShark 的史低字段实测恒为空。未填 key 时只是不显示史低，其余功能照常。
 version: 0.5.0
 astrbot_version: ">=4.25.0"
 author: xiaoxi2760

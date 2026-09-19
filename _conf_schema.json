@@ -53,6 +53,26 @@
       }
     }
   },
+  "Steam 设置": {
+    "type": "object",
+    "description": "价格地区与史低数据源",
+    "items": {
+      "STEAM_REGION": {
+        "description": "价格地区代码",
+        "type": "string",
+        "default": "cn",
+        "hint": "决定官方价格的货币（cn/us/jp 等），同时用作 ITAD 的 country 参数",
+        "obvious_hint": true
+      },
+      "ITAD_API_KEY": {
+        "description": "IsThereAnyDeal API Key（可选）",
+        "type": "string",
+        "default": "",
+        "hint": "只有想看「历史最低价」才需要，免费申请 https://isthereanydeal.com/apps 。留空时 Steam 解析照常工作，只是不显示史低",
+        "obvious_hint": true
+      }
+    }
+  },
   "网页截图": {
     "type": "object",
     "description": "把任意网页截成图片发送",
