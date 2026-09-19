@@ -253,7 +253,9 @@ class HistoryStore:
                 fp.flush()
                 os.fsync(fp.fileno())
             os.replace(tmp, self.path)
-        except OSError:
+        except OSError as exc:
+            from astrbot.api import logger as _logger
+            _logger.warning(f"[denia_share] 解析记录写入失败: {exc}")
             try:
                 tmp.unlink(missing_ok=True)
             except OSError:

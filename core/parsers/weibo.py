@@ -81,7 +81,8 @@ class WeiBoParser(BaseParser):
         from ..models.weibo.show import decoder as show_decoder
 
         req_url = f"https://h5.video.weibo.com/api/component?page=/show/{fid}"
-        headers = {"Referer": f"https://h5.video.weibo.com/show/{fid}", "Content-Type": "application/x-www-form-urlencoded", **self.headers}
+        # self.headers 里是小写 referer，这里必须同键名小写覆盖，否则会发出两个 Referer
+        headers = {**self.headers, "referer": f"https://h5.video.weibo.com/show/{fid}", "Content-Type": "application/x-www-form-urlencoded"}
         post_content = 'data={"Component_Play_Playinfo":{"oid":"' + fid + '"}}'
         async with AsyncClient(headers=headers, timeout=self.timeout) as client:
             response = await client.post(req_url, content=post_content)
@@ -98,7 +99,9 @@ class WeiBoParser(BaseParser):
     async def parse_weibo_id(self, weibo_id: str):
         from ..models.weibo.common import decoder as weibo_decoder
 
+        # 通用头在前、专用头在后：self.headers 里的 accept/referer 会把前面的覆盖掉
         headers = {
+            **self.headers,
             "accept": "application/json, text/plain, */*",
             "referer": f"https://m.weibo.cn/detail/{weibo_id}",
             "origin": "https://m.weibo.cn",
@@ -107,7 +110,6 @@ class WeiBoParser(BaseParser):
             "sec-fetch-site": "same-origin",
             "sec-fetch-mode": "cors",
             "sec-fetch-dest": "empty",
-            **self.headers,
         }
         ts = int(time() * 1000)
         url = f"https://m.weibo.cn/statuses/show?id={weibo_id}&_={ts}"

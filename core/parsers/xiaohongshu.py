@@ -43,7 +43,7 @@ class XiaoHongShuParser(BaseParser):
         url = f"https://{searched.group(0)}"
         return await self.parse_with_redirect(url, self.ios_headers)
 
-    @handle("xiaohongshu.com", r"(explore|discovery/item)/(?P<query>(?P<xhs_id>[0-9a-zA-Z]+)\?[A-Za-z0-9._%&+=/#@-]+)")
+    @handle("xiaohongshu.com", r"(explore|discovery/item)/(?P<query>(?P<xhs_id>[0-9a-zA-Z]+)(?:\?[A-Za-z0-9._%&+=/#@-]*)?)")
     async def _parse_common(self, searched: re.Match[str]):
         xhs_domain = "https://www.xiaohongshu.com"
         query, xhs_id = searched.group("query", "xhs_id")
@@ -59,7 +59,7 @@ class XiaoHongShuParser(BaseParser):
 
         async with AsyncClient(headers=self.headers, timeout=self.timeout) as client:
             response = await client.get(url)
-            if response.status_code > 400:
+            if response.status_code >= 400:
                 response.raise_for_status()
 
         html = response.text

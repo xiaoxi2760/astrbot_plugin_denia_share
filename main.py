@@ -17,6 +17,7 @@ import re
 import io
 import json
 import asyncio
+import hashlib
 from pathlib import Path
 from typing import Any, AsyncGenerator, Dict
 
@@ -69,11 +70,11 @@ DOUYIN_PATTERN = re.compile(r"(v\.douyin\.com|douyin\.com|iesdouyin\.com|m\.douy
 KUAISHOU_PATTERN = re.compile(r"(v\.kuaishou\.com|kuaishou\.com|chenzhongtech\.com)")
 WEIBO_PATTERN = re.compile(r"(weibo\.com|weibo\.cn|m\.weibo\.cn|video\.weibo\.com|mapp\.api\.weibo\.cn)")
 XHS_PATTERN = re.compile(r"(xhslink\.com|xhslink\.cn|xiaohongshu\.com)")
-TWITTER_PATTERN = re.compile(r"(x\.com|twitter\.com)")
+TWITTER_PATTERN = re.compile(r"(?:^|[\s./@])x\.com(?:[/:\s]|$)|twitter\.com")
 NGA_PATTERN = re.compile(r"(nga\.178\.com|ngabbs\.com|bbs\.nga\.cn)")
 ACFUN_PATTERN = re.compile(r"acfun\.cn")
 GITHUB_PATTERN = re.compile(r"github\.com/[\w.\-]+/[\w.\-]+")
-PIXIV_PATTERN = re.compile(r"pixiv\.net")
+PIXIV_PATTERN = re.compile(r"pixiv\.net/(?:artworks|i/|member_illust)")
 STEAM_PATTERN = re.compile(r"store\.steampowered\.com")
 
 URL_PATTERN = re.compile(r"https?://[^\s'\"<>]+")
@@ -196,6 +197,8 @@ class DeniaSharePlugin(Star):
         self._bili_http_session: aiohttp.ClientSession | None = None
         self._bili_login_tasks: Dict[str, asyncio.Task] = {}
         self._bili_login_states: Dict[str, dict[str, Any]] = {}
+        # 二维码临时文件的延迟清理任务，terminate() 时一并取消
+        self._delayed_cleanup_tasks: list[asyncio.Task] = []
         self._bili_data_dir = StarTools.get_data_dir(PLUGIN_NAME)
         self._bili_data_dir.mkdir(parents=True, exist_ok=True)
         self._bili_cookie_file = self._bili_data_dir / "bili_cookie.json"
@@ -297,14 +300,17 @@ class DeniaSharePlugin(Star):
             interval = max(pconfig.CACHE_CLEANUP_INTERVAL_MINUTES, 1) * 60
 
             async def _cache_cleanup_loop():
-                try:
-                    while True:
+                while True:
+                    try:
                         await cleanup_cache_dir(self.cache_dir, ttl_hours=ttl)
                         self._result_cache.clear()
                         self._render_cache.clear()
-                        await asyncio.sleep(interval)
-                except asyncio.CancelledError:
-                    raise
+                    except asyncio.CancelledError:
+                        raise
+                    except Exception:
+                        # 一次清理失败（如磁盘满/文件占用）不应杀死整个循环
+                        logger.warning("[denia_share] 缓存清理失败，下轮重试", exc_info=True)
+                    await asyncio.sleep(interval)
 
             self._cache_cleanup_task = asyncio.create_task(_cache_cleanup_loop())
 
@@ -455,12 +461,22 @@ class DeniaSharePlugin(Star):
 
     # ==================== 核心流程 ====================
 
+    @staticmethod
+    def result_cache_key(url: str) -> str:
+        """解析结果缓存键：全量 URL 的短哈希。
+
+        直接截断 URL 前 64 字符会让不同链接撞成同一个 key（小红书 / 微博的
+        分享链常带长参数），撞上就会把 A 链接的解析结果当成 B 链接的返回。
+        WebUI 的手动解析也必须用同一个键，否则同一链接在两条链路上各缓存一份。
+        """
+        return hashlib.md5(url.encode()).hexdigest()[:16]
+
     async def _process_url(
         self, event: AstrMessageEvent, parser: Any
     ) -> AsyncGenerator[MessageEventResult, None]:
         url = event.message_str.strip()
         try:
-            cache_key = url[:64]
+            cache_key = self.result_cache_key(url)
             result = self._result_cache.get(cache_key)
             if result is None:
                 keyword, searched = parser.search_url(url)
@@ -701,10 +717,19 @@ class DeniaSharePlugin(Star):
         sender_name = event.get_sender_name()
         sender_id = event.get_sender_id()
         nodes = Comp.Nodes([])
+
+        def _node(content):
+            # AstrBot 4.x 的 Node.__init__(content, **_) 会把 uin/name 吞进 **_ 丢弃，
+            # 必须构造后赋值属性，否则合并转发里昵称与 QQ 号全空
+            node = Comp.Node(content=content)
+            node.uin = sender_id
+            node.name = sender_name
+            return node
+
         if header:
-            nodes.nodes.append(Comp.Node(uin=sender_id, name=sender_name, content=[Comp.Plain(header)]))
+            nodes.nodes.append(_node([Comp.Plain(header)]))
         for item in items:
-            nodes.nodes.append(Comp.Node(uin=sender_id, name=sender_name, content=item))
+            nodes.nodes.append(_node(item))
         return event.chain_result([nodes])
 
     async def _build_output(self, result: ParseResult) -> tuple[str, list[list]]:
@@ -828,7 +853,7 @@ class DeniaSharePlugin(Star):
             )
 
             self.bili_login_start(
-                sender_id, qrcode_key, notify_umo=sender_id, qr_path=qr_path
+                sender_id, qrcode_key, notify_umo=event.unified_msg_origin, qr_path=qr_path
             )
         except ParseException as e:
             yield event.plain_result(f"❌ {e.message}")
@@ -1074,11 +1099,27 @@ class DeniaSharePlugin(Star):
             state["message"] = f"轮询出错：{str(e)[:120]}"
         finally:
             self._bili_login_tasks.pop(task_id, None)
-            if qr_path is not None and qr_path.exists():
-                try:
-                    qr_path.unlink()
-                except Exception:
-                    pass
+            if qr_path is not None:
+                self._schedule_qr_cleanup(qr_path)
+
+    def _schedule_qr_cleanup(self, qr_path: Path, delay: int = 120) -> None:
+        """延迟删除二维码临时文件。
+
+        二维码图片已经 yield 进消息管线，真正读取它的时刻在发送阶段，
+        轮询一结束就删会与发送竞争、导致图片发不出去；所以推迟到
+        ``delay`` 秒后再清理。顺带回收已完成的旧任务，避免列表无限增长。
+        """
+        async def _delayed_unlink() -> None:
+            try:
+                await asyncio.sleep(delay)
+                qr_path.unlink(missing_ok=True)
+            except Exception:
+                logger.debug("清理二维码临时文件失败", exc_info=True)
+
+        self._delayed_cleanup_tasks = [
+            task for task in self._delayed_cleanup_tasks if not task.done()
+        ]
+        self._delayed_cleanup_tasks.append(asyncio.create_task(_delayed_unlink()))
 
     def _bili_apply_cookie_to_parser(self, cookie_str: str):
         parser = self.parsers.get("bilibili")
@@ -1124,12 +1165,14 @@ class DeniaSharePlugin(Star):
         except Exception as e:
             logger.error(f"保存B站 Cookie 失败: {e}")
 
-    async def _bili_notify(self, sender_id: str, message: str):
+    async def _bili_notify(self, session: str, message: str):
         try:
-            umo = sender_id if ":" in sender_id else f"default:FriendMessage:{sender_id}"
+            # session 期望是 unified_msg_origin（平台:消息类型:会话ID 三段式）；
+            # 对历史调用方只传裸 QQ 号的情况做兼容兜底
+            umo = session if ":" in session else f"default:FriendMessage:{session}"
             await self.context.send_message(umo, MessageChain().message(message))
         except Exception as e:
-            logger.error(f"发送消息给 {sender_id} 失败: {e}")
+            logger.error(f"发送消息到 {session} 失败: {e}")
 
     # ==================== JSON 卡片工具 ====================
 
@@ -1241,6 +1284,11 @@ class DeniaSharePlugin(Star):
             if not task.done():
                 task.cancel()
         self._bili_login_tasks.clear()
+
+        for task in list(self._delayed_cleanup_tasks):
+            if not task.done():
+                task.cancel()
+        self._delayed_cleanup_tasks.clear()
 
         if self._bili_http_session and not self._bili_http_session.closed:
             await self._bili_http_session.close()

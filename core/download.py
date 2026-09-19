@@ -274,11 +274,21 @@ class StreamDownloader:
                         async for chunk in response.aiter_bytes(chunk_size=1024 * 1024):
                             await f.write(chunk)
 
+        except DownloadException:
+            await safe_unlink(video_path)
+            raise
         except httpx.HTTPError:
             await safe_unlink(video_path)
             from .config import get_config
             if get_config().DEBUG_LOG_ENABLED:
                 logger.exception(f"m3u8 视频下载失败 | url: {m3u8_url}")
+            raise DownloadException("m3u8 视频下载失败")
+        except Exception:
+            # 写盘失败等意外异常也要清理半截文件，避免留下坏缓存被后续命中
+            await safe_unlink(video_path)
+            from .config import get_config
+            if get_config().DEBUG_LOG_ENABLED:
+                logger.exception(f"m3u8 视频下载异常 | url: {m3u8_url}")
             raise DownloadException("m3u8 视频下载失败")
 
         return video_path

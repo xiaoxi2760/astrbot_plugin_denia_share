@@ -844,6 +844,11 @@ textarea.input {
   border-left-color: var(--err);
 }
 
+/* hidden 属性必须压过下面的 display:flex，否则遮罩常驻导致整页发暗且无法点击 */
+.modal-host[hidden] {
+  display: none;
+}
+
 .modal-host {
   position: fixed;
   inset: 0;

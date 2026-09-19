@@ -50,8 +50,12 @@ class PathTask:
         """
         return self._path
 
-    @property
-    async def uri(self) -> str | None:
+    async def get_uri(self) -> str | None:
+        """获取已下载文件的 file:// URI；下载失败返回 None。
+
+        注意是 async 方法而非 property：属性访问无法 await，
+        写成 property 会诱导调用方拿到未执行的协程对象。
+        """
         path = await self.safe_get()
         return path.as_uri() if path else None
 

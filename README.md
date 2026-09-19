@@ -347,7 +347,7 @@ astrbot_plugin_denia_share/
 | 配置（`_conf_schema.json` + `core/config.py`） | ✅ 8 组 30 项，页面内维护、保存即生效 |
 
 自检脚本：`test/webui/selfcheck.py`（离线，stub 掉 astrbot 环境后真跑插件构造与 18 个接口），
-报告输出到 `test/webui/selfcheck_result.txt`，当前 **93 项全部通过**。
+报告输出到 `test/webui/selfcheck_result.txt`，当前 **109 项全部通过**。
 
 ## 命令
 

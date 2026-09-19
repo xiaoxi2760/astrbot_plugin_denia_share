@@ -143,7 +143,13 @@ async def merge_av(
         str(output_path),
     ]
 
-    await exec_ffmpeg_cmd(cmd)
+    try:
+        await exec_ffmpeg_cmd(cmd)
+    except RuntimeError:
+        # 失败时删掉可能残留的 0 字节/残缺输出，避免被 encode_video_to_h264
+        # 等下游的 exists() 缓存命中当成成品
+        await safe_unlink(output_path)
+        raise
     await asyncio.gather(safe_unlink(v_path), safe_unlink(a_path))
     logger.info(f"Merged {output_path.name}, {fmt_size(output_path)}")
 
@@ -180,8 +186,11 @@ async def merge_av_h264(
         "1:a:0",
         str(output_path),
     ]
-
-    await exec_ffmpeg_cmd(cmd)
+    try:
+        await exec_ffmpeg_cmd(cmd)
+    except RuntimeError:
+        await safe_unlink(output_path)
+        raise
     await asyncio.gather(safe_unlink(v_path), safe_unlink(a_path))
     logger.info(f"Merged {output_path.name} with H.264, {fmt_size(output_path)}")
 
@@ -204,7 +213,11 @@ async def encode_video_to_h264(video_path: Path) -> Path:
         "23",
         str(output_path),
     ]
-    await exec_ffmpeg_cmd(cmd)
+    try:
+        await exec_ffmpeg_cmd(cmd)
+    except RuntimeError:
+        await safe_unlink(output_path)
+        raise
     logger.info(f"视频重新编码为 H.264 成功: {output_path}, {fmt_size(output_path)}")
     await safe_unlink(video_path)
     return output_path
