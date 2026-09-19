@@ -24,6 +24,7 @@ CONFIG_GROUP_KEYS: dict[str, tuple[str, ...]] = {
         "SEND_ERROR_MESSAGES",
     ),
     "B站设置": ("BILI_CK", "BILI_QUALITY"),
+    "Steam 设置": ("STEAM_REGION", "ITAD_API_KEY"),
     "网页截图": (
         "SCREENSHOT_BACKEND",
         "SCREENSHOT_FALLBACK",
@@ -65,6 +66,8 @@ _DEFAULTS: dict[str, Any] = {
     "CF_API_TOKEN": "",
     "BILI_CK": "",
     "BILI_QUALITY": "1080P",
+    "STEAM_REGION": "cn",
+    "ITAD_API_KEY": "",
     "CACHE_TTL_HOURS": 24,
     "RENDER_ENABLED": True,
     "RENDER_THEME": "dark",
@@ -200,6 +203,22 @@ class ParserConfig:
     @property
     def BILI_QUALITY(self) -> str:
         return str(self._cfg_get("BILI_QUALITY", "1080P"))
+
+    # ---------------- Steam ---------------- #
+
+    @property
+    def STEAM_REGION(self) -> str:
+        """Steam 价格地区代码（同时用于 ITAD 的 country 参数）。"""
+        return str(self._cfg_get("STEAM_REGION", "cn") or "cn").strip().lower()
+
+    @property
+    def ITAD_API_KEY(self) -> str:
+        """IsThereAnyDeal API key（可选）。
+
+        只有想要「历史最低价」才需要。免费申请：https://isthereanydeal.com/apps
+        留空时 Steam 解析照常工作，只是不显示史低。
+        """
+        return str(self._cfg_get("ITAD_API_KEY", "") or "").strip()
 
     # ---------------- 缓存 ---------------- #
 
