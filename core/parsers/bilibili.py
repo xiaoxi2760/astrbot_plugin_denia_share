@@ -17,7 +17,7 @@ from bilibili_api.login_v2 import QrCodeLogin, QrCodeLoginEvents
 from msgspec import convert
 
 from ..base_parser import BaseParser, PlatformEnum, ParseException, IgnoreException, DownloadException, handle
-from ..data import Platform, ImageContent, MediaContent
+from ..data import Platform, ImageContent, MediaContent, platform_of
 from ..cookie_utils import ck2dict
 from ..media_utils import fmt_duration
 
@@ -30,7 +30,7 @@ except Exception:
 
 
 class BilibiliParser(BaseParser):
-    platform: ClassVar[Platform] = Platform(name=PlatformEnum.BILIBILI, display_name="哔哩哔哩")
+    platform: ClassVar[Platform] = platform_of(PlatformEnum.BILIBILI)
 
     @staticmethod
     def _is_transient_api_error(error: Exception) -> bool:

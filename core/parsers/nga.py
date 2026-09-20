@@ -19,11 +19,11 @@ from ..base_parser import (
     ParseException,
     handle,
 )
-from ..data import Platform
+from ..data import Platform, platform_of
 
 
 class NGAParser(BaseParser):
-    platform: ClassVar[Platform] = Platform(name=PlatformEnum.NGA, display_name="NGA")
+    platform: ClassVar[Platform] = platform_of(PlatformEnum.NGA)
 
     def __init__(self, downloader):
         super().__init__(downloader)

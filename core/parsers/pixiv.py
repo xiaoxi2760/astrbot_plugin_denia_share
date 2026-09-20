@@ -22,7 +22,7 @@ from astrbot.api import logger
 from ..base_parser import (
     BaseParser, PlatformEnum, ParseException, IgnoreException, handle,
 )
-from ..data import Platform
+from ..data import Platform, platform_of
 
 AJAX_BASE = "https://www.pixiv.net/ajax"
 PIXIV_REFERER = "https://www.pixiv.net/"
@@ -38,7 +38,7 @@ MAX_SEARCH_IMAGES = 6
 
 
 class PixivParser(BaseParser):
-    platform: ClassVar[Platform] = Platform(name=PlatformEnum.PIXIV, display_name="Pixiv")
+    platform: ClassVar[Platform] = platform_of(PlatformEnum.PIXIV)
 
     def __init__(self, downloader, cookie: str = ""):
         super().__init__(downloader)

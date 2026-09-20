@@ -13,7 +13,7 @@ from astrbot.api import logger
 
 from ..base_parser import BaseParser, PlatformEnum, ParseException, handle
 from ..config import get_config
-from ..data import Platform
+from ..data import Platform, platform_of
 
 API_BASE = "https://api.github.com"
 
@@ -33,7 +33,7 @@ def _fmt_count(n: int | None) -> str:
 
 
 class GitHubParser(BaseParser):
-    platform: ClassVar[Platform] = Platform(name=PlatformEnum.GITHUB, display_name="GitHub")
+    platform: ClassVar[Platform] = platform_of(PlatformEnum.GITHUB)
 
     def __init__(self, downloader, token: str = ""):
         super().__init__(downloader)

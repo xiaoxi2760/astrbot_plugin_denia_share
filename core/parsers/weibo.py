@@ -16,11 +16,11 @@ from ..base_parser import (
     ParseException,
     handle,
 )
-from ..data import Platform, ImageContent
+from ..data import Platform, ImageContent, platform_of
 
 
 class WeiBoParser(BaseParser):
-    platform: ClassVar[Platform] = Platform(name=PlatformEnum.WEIBO, display_name="微博")
+    platform: ClassVar[Platform] = platform_of(PlatformEnum.WEIBO)
 
     def __init__(self, downloader):
         super().__init__(downloader)

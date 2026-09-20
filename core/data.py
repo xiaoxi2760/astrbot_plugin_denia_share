@@ -14,6 +14,7 @@ from dataclasses import field, dataclass
 from collections.abc import Iterator, Awaitable
 
 from .task import PathTask
+from .constants import PlatformEnum, platform_meta
 
 
 @dataclass(repr=False, slots=True)
@@ -66,6 +67,18 @@ class ImageContent(MediaContent):
 class Platform:
     name: str
     display_name: str
+
+
+def platform_of(key: str | PlatformEnum) -> Platform:
+    """按平台键构造 ``Platform``。
+
+    展示名一律取自 ``constants.PLATFORMS`` —— 那是平台名的唯一真相。
+    **不要在解析器或 main.py 里再手写展示名字面量**：以前那样散着写，
+    改一个名字要翻三四处，漏一处就出现「卡片写哔哩哔哩、列表写 B站」，
+    而且不会有任何报错。
+    """
+    meta = platform_meta(key)
+    return Platform(name=meta.key, display_name=meta.label)
 
 
 @dataclass(repr=False, slots=True)
