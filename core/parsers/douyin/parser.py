@@ -47,21 +47,24 @@ class DouyinParser(BaseParser):
     async def _parse_douyin(self, searched: re.Match[str]):
         ty, vid = searched.group("ty"), searched.group("vid")
 
-        # 1) 先走零成本的 HTML 路径
-        if ty == "slides":
+        # 1) 图文页先试零成本的 slidesinfo 接口。
+        #    note 与 slides 都是图文页（抖音自己的链接两种写法都有），
+        #    原先只把 slides 路由过来，note 白白错过这条路径。
+        if ty in ("slides", "note"):
             try:
                 return await self.parse_slides(vid)
             except Exception as e:
-                logger.debug(f"[douyin] slides HTML 路径失败，转签名接口: {e}")
-        else:
-            for url in (self._build_m_douyin_url(ty, vid), self._build_iesdouyin_url(ty, vid)):
-                try:
-                    return await self.parse_video(url)
-                except ParseException as e:
-                    logger.debug(f"[douyin] HTML 路径失败 {url}: {e}")
-                    continue
+                logger.debug(f"[douyin] slidesinfo 路径失败，转 HTML: {e}")
 
-        # 2) 兜底：签名 Web API
+        # 2) HTML _ROUTER_DATA 路径
+        for url in (self._build_m_douyin_url(ty, vid), self._build_iesdouyin_url(ty, vid)):
+            try:
+                return await self.parse_video(url)
+            except ParseException as e:
+                logger.debug(f"[douyin] HTML 路径失败 {url}: {e}")
+                continue
+
+        # 3) 兜底：签名 Web API
         return await self.parse_by_web_api(vid)
 
     @staticmethod
@@ -118,11 +121,15 @@ class DouyinParser(BaseParser):
         author = self.create_author(slides_data.name, slides_data.avatar_url)
         result = self.result(title=slides_data.desc, author=author, timestamp=slides_data.create_time)
 
-        if dynamic_urls := slides_data.dynamic_urls:
-            for dynamic_url in dynamic_urls:
-                result.contents.append(self.create_gif(dynamic_url))
-        elif image_urls := slides_data.image_urls:
+        # **静态图优先。** 实拍图集（slides）里每张图都同时带一份静态图和一段内嵌视频，
+        # 原先是「有内嵌视频就用内嵌视频」，于是整条图集被当成一串视频发出去 ——
+        # 用户看到的就是「解析图集变成了视频」，而静态图全被丢掉。
+        # 内嵌视频只在**没有任何静态图**时才用，那种作品本质就是视频。
+        if image_urls := slides_data.image_urls:
             result.contents.extend(self.create_images(image_urls))
+        elif dynamic_urls := slides_data.dynamic_urls:
+            for dynamic_url in dynamic_urls:
+                result.contents.append(self.create_video(dynamic_url))
         return result
 
     # ------------------------------------------------------------------ #
@@ -163,7 +170,10 @@ class DouyinParser(BaseParser):
         for item in candidates:
             if str(item.get("aweme_id") or item.get("id") or "") == str(item_id):
                 return item
-        return candidates[0] if candidates else None
+        # 匹配不上就返回 None，让调用方报错。
+        # 旧实现在这里兜底返回 candidates[0]，会把「响应里没有目标作品」伪装成成功，
+        # 静默解析出一条**完全不相干的作品**（实测会把另一个视频当成本次结果发出去）。
+        return None
 
     # ---- 媒体 URL 提取 ---- #
 
@@ -204,12 +214,30 @@ class DouyinParser(BaseParser):
 
     @classmethod
     def _image_urls(cls, item: dict) -> list[str]:
+        """返回作品里的**静态图**直链。
+
+        不要把 ``images[].video.play_addr`` 混进来：实拍图集里每张图都带一段内嵌
+        视频，混进图片列表后会被当图片下载与渲染，实际落地的是 mp4 ——
+        表现就是「图集里冒出视频」，卡片上则是打不开的空图。
+        内嵌视频段另有用途，见 ``_slide_video_urls``。
+        """
         urls: list[str] = []
         for image in item.get("images") or []:
             if found := cls._first_url(image.get("url_list") or image):
                 urls.append(found)
-            # 图文里的内嵌视频段（slides）
-            if isinstance(image, dict) and (found := cls._first_url((image.get("video") or {}).get("play_addr"))):
+        return list(dict.fromkeys(urls))
+
+    @classmethod
+    def _slide_video_urls(cls, item: dict) -> list[str]:
+        """图文帖里内嵌的实拍视频段（已去水印）。
+
+        只在**没有静态图**时才该拿来用 —— 见 ``parse_slides`` 的说明。
+        """
+        urls: list[str] = []
+        for image in item.get("images") or []:
+            if not isinstance(image, dict):
+                continue
+            if found := cls._first_url((image.get("video") or {}).get("play_addr")):
                 urls.append(cls._no_watermark(found))
         return list(dict.fromkeys(urls))
 
@@ -247,12 +275,19 @@ class DouyinParser(BaseParser):
         image_urls = self._image_urls(item)
         video_urls = self._video_urls(item)
 
-        if video_urls:
+        # **图片优先，与 parse_video 的判定保持一致。**
+        # 图文帖（note / slides）的 item 里也有顶层 video —— 抖音会给图文生成一段
+        # 轮播视频 —— 先判视频会把整条图文作品当成视频，图片全被丢掉。
+        if image_urls:
+            result.contents.extend(self.create_images(image_urls))
+        elif video_urls:
             duration = self._duration(item)
             self._add_limit_warning(result, duration)
             result.video = self.create_video(video_urls[0], self._cover_url(item), duration)
-        elif image_urls:
-            result.contents.extend(self.create_images(image_urls))
+        elif slide_videos := self._slide_video_urls(item):
+            # 没有任何静态图、只有内嵌视频段：这种作品本质就是视频
+            for slide_url in slide_videos:
+                result.contents.append(self.create_video(slide_url))
         else:
             raise ParseException("未从作品中提取到媒体内容")
 

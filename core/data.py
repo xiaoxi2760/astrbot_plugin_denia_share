@@ -40,8 +40,10 @@ class VideoContent(MediaContent):
     """视频内容"""
     cover: PathTask | None = None
     duration: float | None = None
+    # 标记「这是一段动图」。Twitter 用它表达「动图不算视频作品」——
+    # ``ParseResult.video`` 会跳过它，于是卡片按图文处理。
+    # （原有一个 gif_path 字段用于存放 ffmpeg 转出的 GIF，全仓无读取点，已删除）
     is_gif: bool = False
-    gif_path: PathTask | None = None
 
     @property
     def display_duration(self) -> str | None:
@@ -277,10 +279,12 @@ class ParseResult:
         if content_type is None:
             if self.video:
                 return "视频"
-            elif self.graphics:
+            # 图片既可能放在 graphics（微博/NGA 那种混排），也可能放在 contents
+            # （抖音/小红书/快手/微博图集）。只看 graphics 会让后者掉到「动态」——
+            # 卡片头把一条图集标成「动态」，是另一种「产物在撒谎」。
+            if self.img_contents or self.graphics:
                 return "图文"
-            else:
-                return "动态"
+            return "动态"
         return content_type
 
     def __repr__(self) -> str:
