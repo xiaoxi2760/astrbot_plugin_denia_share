@@ -40,6 +40,10 @@ class DouyinWebClient:
         self._ttwid = ""
         self._ttwid_expires_at = 0.0
         self._ttwid_lock = asyncio.Lock()
+        # 最近一次失败的真实原因，供上层区分「风控拦截」和「内容确实没了」。
+        # 原先上层一律报"分享已删除或资源直链提取失败"，把 403 风控说成内容消失，
+        # 排查方向会被完全带偏。
+        self.last_error = ""
 
     @staticmethod
     def _build_params(item_id: str) -> Dict[str, Any]:
@@ -193,13 +197,21 @@ class DouyinWebClient:
                 timeout=REQUEST_TIMEOUT,
             ) as response:
                 if response.status in {401, 403}:
+                    # 实测本机 IP 稳定拿到 403
+                    # "Blocked by ArgusSecurityPlugin Uifid Not Found"
+                    self.last_error = (
+                        f"抖音风控拦截（HTTP {response.status}），"
+                        "稍后再试或更换网络出口"
+                    )
                     return None, True
                 if response.status >= 400:
+                    self.last_error = f"抖音接口返回 HTTP {response.status}"
                     return None, False
                 body = await response.text()
         except asyncio.CancelledError:
             raise
         except (aiohttp.ClientError, asyncio.TimeoutError):
+            self.last_error = "请求抖音接口超时或网络异常"
             return None, False
         if not body or not body.lstrip().startswith("{"):
             return None, True
@@ -223,10 +235,14 @@ class DouyinWebClient:
         referer: str = "",
     ) -> Optional[Dict[str, Any]]:
         """最多请求两次；只有会话类失败才刷新一次 ttwid。"""
+        # last_error 会被上层读出来当报错文案，而客户端实例是跨消息复用的 ——
+        # 不清掉就会把上一次的失败原因当成这一次的。
+        self.last_error = ""
         ttwid = await self._get_ttwid(session)
         if not ttwid:
             ttwid = await self._get_ttwid(session, force_refresh=True)
         if not ttwid:
+            self.last_error = "无法取得抖音会话凭证（ttwid），可能是网络问题"
             return None
 
         try:
@@ -250,6 +266,7 @@ class DouyinWebClient:
             stale_ttwid=ttwid,
         )
         if not refreshed_ttwid:
+            self.last_error = "刷新抖音会话凭证失败，可能是网络问题"
             return None
         try:
             data, _ = await self._request_once(
