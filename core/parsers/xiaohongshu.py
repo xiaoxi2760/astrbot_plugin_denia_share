@@ -118,9 +118,14 @@ class XiaoHongShuParser(BaseParser):
         )
         if note_data.is_video:
             video_url, duration = note_data.url_and_duration
-            if preload_data:
+            # 封面可能缺失（视频笔记没带封面图，或 preload 里没有）：直接 [0] 会
+            # IndexError，而它是 Exception 子类、会被 _process_url 的最后一级接住 ——
+            # 日志只剩「解析异常」+ 堆栈，看不出是封面缺失。降级为 None，
+            # create_video 在没有封面时会自动抽首帧。
+            cover_url = None
+            if preload_data and preload_data.image_urls:
                 cover_url = preload_data.image_urls[0]
-            else:
+            elif note_data.image_urls:
                 cover_url = note_data.image_urls[0]
             self._add_limit_warning(result, duration)
             result.video = self.create_video(video_url, self._no_watermark(cover_url), duration)

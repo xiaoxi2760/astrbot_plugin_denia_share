@@ -308,6 +308,13 @@ class WebUIApi:
     async def reset_config(self):
         pconfig = get_config()
         changed = pconfig.reset_to_defaults()
+        # 「恢复默认」的确认文案承诺了「包括 Cookie、Token」—— 而 B站扫码登录态
+        # 不在配置项里（它有自己的 bili_cookie.json），只重置配置清不掉它。
+        # bili_logout 本来就会把三处一起清，只是一直没人调它。
+        try:
+            await self.plugin.bili_logout()
+        except Exception:
+            logger.warning("[denia_share] 恢复默认时清除 B站登录态失败", exc_info=True)
         runtime: dict[str, Any] = {}
         errors: list[str] = []
         runtime_ok = True
