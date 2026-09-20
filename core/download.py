@@ -196,8 +196,11 @@ class StreamDownloader:
                             )
             except IgnoreException:
                 raise
-            except Exception:
-                # 下载中断时清掉半截文件，避免下次命中缓存拿到坏文件
+            except BaseException:
+                # 下载中断时清掉半截文件，避免下次命中缓存拿到坏文件。
+                # 必须写 BaseException：CancelledError 不是 Exception 的子类，
+                # 只捕 Exception 时「任务被取消」留下的半截 .part 会一直躺在缓存目录里
+                # （靠 cleanup_cache_dir 的 TTL 兜底能清掉，但那是事后补救，不如当场删）。
                 await safe_unlink(part)
                 raise
             await self._validate_downloaded_bytes(part, str(response.url), received_bytes)

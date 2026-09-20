@@ -140,7 +140,6 @@ class WeiBoParser(BaseParser):
                 headers=headers,
                 follow_redirects=False,
                 cookies=Cookies(),
-                trust_env=False,
             )
         ) as client:
             response = await client.get(url)

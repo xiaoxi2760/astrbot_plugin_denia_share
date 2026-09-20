@@ -100,6 +100,11 @@ class BaseParser:
         kwargs: dict[str, object] = {
             "timeout": COMMON_TIMEOUT,
             "verify": cls.verify_ssl_enabled(),
+            # 代理来源有两处：插件配置的 PROXY（下面显式传 proxy）与环境变量
+            # （httpx 的 trust_env）。**这里显式写 True 并要求调用方别各写各的**：
+            # 原先微博/小红书写了 trust_env=False，于是「只在环境变量里配代理」的部署中，
+            # 这两个平台会悄悄直连 —— 表现为「就它俩解析失败」，排查时极难想到。
+            "trust_env": True,
         }
         if proxy := cls.global_proxy():
             kwargs["proxy"] = proxy

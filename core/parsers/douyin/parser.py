@@ -119,6 +119,11 @@ class DouyinParser(BaseParser):
         elif video_url := video_data.video_url:
             self._add_limit_warning(result, video_data.duration)
             result.video = self.create_video(video_url, video_data.cover_url, video_data.duration)
+        else:
+            # 既没有图片也没有视频：多半是 SSR 结构变了、或命中了另一种页面变体。
+            # 必须抛出去让 _parse_douyin 继续走后面的路径与兜底接口 —— 返回一个
+            # 「只有标题、零媒体、零警告」的空结果，用户会收到一张空卡片却不知道为什么。
+            raise ParseException("分享页里既没有图片也没有视频")
         return result
 
     async def parse_slides(self, video_id: str):
@@ -145,6 +150,10 @@ class DouyinParser(BaseParser):
         elif dynamic_urls := slides_data.dynamic_urls:
             for dynamic_url in dynamic_urls:
                 result.contents.append(self.create_video(dynamic_url))
+        else:
+            # 静态图与内嵌视频段都没有：这条接口没给媒体。抛出去让 _parse_douyin
+            # 接着走签名 Web API 兜底，而不是返回一个零媒体的空结果。
+            raise ParseException("图文接口里既没有图片也没有视频段")
         return result
 
     # ------------------------------------------------------------------ #

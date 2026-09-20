@@ -310,25 +310,6 @@ async def extract_video_first_frame(video_path: Path) -> Path:
     return first_frame_path
 
 
-async def convert_video_to_gif(video_path: Path) -> Path:
-    """将视频转换为 GIF"""
-    gif_path = video_path.with_suffix(".gif")
-    if gif_path.exists():
-        return gif_path
-
-    cmd = [
-        "ffmpeg",
-        "-y",
-        "-i",
-        str(video_path),
-        "-c:v",
-        "gif",
-        str(gif_path),
-    ]
-    await exec_ffmpeg_cmd(cmd)
-    return gif_path
-
-
 def fmt_size(file_path: Path) -> str:
     """格式化文件大小"""
     return f"大小: {file_path.stat().st_size / 1024 / 1024:.2f} MB"
