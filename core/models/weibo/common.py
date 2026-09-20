@@ -58,6 +58,14 @@ class WeiboData(Struct):
     pics: list[Pic] | None = None
     page_info: PageInfo | None = None
     retweeted_status: "WeiboData | None" = None
+    # 以下四个字段只为「返回的作品是不是被请求的那条」这个校验而声明
+    # （见 parsers/weibo.py 的 _assert_status_matches_requested）。
+    # **类型一律放宽成 int | str**：写死类型后远端换个类型就会让整条解码失败，
+    # 那比不校验更糟 —— 校验的收益是防「发出一条不相干的作品」，不是引入新故障。
+    id: int | str | None = None
+    idstr: int | str | None = None
+    mid: int | str | None = None
+    mblogid: int | str | None = None
 
     @property
     def title(self) -> str | None:

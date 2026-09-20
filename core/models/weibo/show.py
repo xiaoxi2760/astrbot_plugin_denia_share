@@ -26,6 +26,11 @@ class PlayInfo(Struct):
     real_date: int
     urls: dict[str, str]
     duration_time: float
+    # 只为「返回的播放数据是不是被请求的那个对象」这个校验而声明。
+    # 类型放宽成 int | str：写死会在远端换类型时让整条解码失败。
+    oid: int | str | None = None
+    fid: int | str | None = None
+    object_id: int | str | None = None
 
     @property
     def name(self) -> str:
