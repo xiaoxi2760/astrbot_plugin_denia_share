@@ -221,6 +221,13 @@
         "invisible": true,
         "hint": "关闭后作者行只保留昵称与签名，不绘制头像圆（头像也不会再被加载）"
       },
+      "RENDER_SHOW_PLAY_BUTTON": {
+        "description": "封面播放按钮",
+        "type": "bool",
+        "default": true,
+        "invisible": true,
+        "hint": "视频封面中央的毛玻璃播放按钮。关闭后封面更干净（yaya 那边默认是关的，这里默认开以保持现有观感）"
+      },
       "RENDER_GRADIENT_TOP": {
         "description": "背景渐变·顶部色",
         "type": "string",

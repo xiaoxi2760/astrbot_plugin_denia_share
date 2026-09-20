@@ -483,6 +483,7 @@ class ShareCardRenderer:
         watermark: str | None = None,
         desc_max_lines: int = 0,
         show_avatar: bool = True,
+        show_play_button: bool = True,
         gradient_top: str | None = None,
         gradient_bottom: str | None = None,
     ):
@@ -499,6 +500,8 @@ class ShareCardRenderer:
         self.watermark = WATERMARK_TAG if watermark is None else str(watermark).strip()[:12]
         self.desc_max_lines = max(0, min(12, int(desc_max_lines)))
         self.show_avatar = bool(show_avatar)
+        # 视频封面中央的毛玻璃播放按钮；关掉后封面更干净
+        self.show_play_button = bool(show_play_button)
         self.gradient_top = normalize_hex_color(gradient_top)
         self.gradient_bottom = normalize_hex_color(gradient_bottom)
         self._regular_font: str | None = None
@@ -795,7 +798,8 @@ class ShareCardRenderer:
             (
                 f"{self.theme_name}|{self.width}|{self.layout_name}|{self.cover_full_size}"
                 f"|{self.accent_color or ''}|{self.watermark}|{self.desc_max_lines}"
-                f"|{int(self.show_avatar)}|{self.gradient_top or ''}|{self.gradient_bottom or ''}"
+                f"|{int(self.show_avatar)}|{int(self.show_play_button)}"
+                f"|{self.gradient_top or ''}|{self.gradient_bottom or ''}"
                 f"|{payload}|{warnings_str}"
             ).encode("utf-8")
         ).hexdigest()[:16]
@@ -1139,7 +1143,7 @@ class ShareCardRenderer:
                 )
 
             # 视频播放按钮（毛玻璃圆环）
-            if is_video_hero:
+            if is_video_hero and self.show_play_button:
                 play_r = _L.PLAY_R
                 cx, cy = self.width // 2, hero_h // 2
                 box = (cx - play_r, cy - play_r, cx + play_r, cy + play_r)
@@ -2025,7 +2029,7 @@ class ShareCardRenderer:
                 ).convert("RGBA")
                 ph.alpha_composite(Image.new("RGBA", (cover_w, cover_h), (*accent_rgb, 40)))
                 canvas.alpha_composite(self._rounded_image(ph, 20), (pad, y))
-            if d["is_video_hero"]:
+            if d["is_video_hero"] and self.show_play_button:
                 r_ = 38
                 cx, cy = pad + cover_w // 2, y + cover_h // 2
                 self._glass(canvas, (cx - r_, cy - r_, cx + r_, cy + r_), r_,
@@ -2173,7 +2177,7 @@ class ShareCardRenderer:
                                   font_size=_L.F_TIME, bold=False)
 
         # 播放按钮
-        if d["is_video_hero"]:
+        if d["is_video_hero"] and self.show_play_button:
             r_ = _L.PLAY_R
             cx = self.width // 2
             cy = max(_L.HERO_BADGE_TOP + _L.HERO_BADGE_H + r_ + 20, content_top // 2 + 30)
@@ -2352,7 +2356,7 @@ class ShareCardRenderer:
             self._draw_hero_badge(canvas, pad + 14, y + 14, 34, chip_w,
                                   text=d["content_type"], accent_rgb=accent_rgb, dot=False,
                                   font_size=18)
-            if d["is_video_hero"]:
+            if d["is_video_hero"] and self.show_play_button:
                 r_ = _L.PLAY_R
                 cx, cy = self.width // 2, y + media_h // 2
                 self._glass(canvas, (cx - r_, cy - r_, cx + r_, cy + r_), r_,
