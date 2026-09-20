@@ -31,7 +31,7 @@ from astrbot.api.star import Context, Star, register, StarTools
 from .core.media_utils import cleanup_cache_dir, is_docker_environment
 from .core.config import init_config, get_config, verify_schema_alignment
 from .core.download import StreamDownloader
-from .core.data import ParseResult, ImageContent, VideoContent, AudioContent
+from .core.data import ParseResult, ImageContent, VideoContent, AudioContent, Platform, Author
 from .core.history import HistoryStore, ParseRecord
 from .core.relay import register_file
 from .core.constants import PLATFORM_DISPLAY_NAMES, PLATFORM_ORDER
@@ -92,7 +92,7 @@ class _EventUrlWrapper:
 
 
 @register("达妮娅分享", "xiaoxi2760",
-          "链接分享自动解析，支持 B站|抖音|快手|微博|小红书|Twitter|AcFun|NGA|GitHub|Pixiv|Steam", "0.6.1")
+          "链接分享自动解析，支持 B站|抖音|快手|微博|小红书|Twitter|AcFun|NGA|GitHub|Pixiv|Steam", "0.6.2")
 class DeniaSharePlugin(Star):
 
     @staticmethod
@@ -182,15 +182,7 @@ class DeniaSharePlugin(Star):
         self._render_cache: dict[str, Path] = {}
         self._cache_cleanup_task: asyncio.Task | None = None
 
-        self._renderer = ShareCardRenderer(
-            self.cache_dir,
-            enabled=pconfig.RENDER_ENABLED,
-            width=pconfig.RENDER_WIDTH,
-            theme=pconfig.RENDER_THEME,
-            font_path=pconfig.RENDER_FONT_PATH or None,
-            layout=pconfig.RENDER_LAYOUT,
-            cover_full_size=pconfig.RENDER_COVER_FULL_SIZE,
-        )
+        self._renderer = ShareCardRenderer(self.cache_dir, **pconfig.renderer_options())
 
         # ========== B站 Cookie ==========
         self._bili_cookie: str = ""
@@ -648,15 +640,7 @@ class DeniaSharePlugin(Star):
         if bili_cookie:
             self._bili_apply_cookie_to_parser(bili_cookie)
 
-        self._renderer = ShareCardRenderer(
-            self.cache_dir,
-            enabled=pconfig.RENDER_ENABLED,
-            width=pconfig.RENDER_WIDTH,
-            theme=pconfig.RENDER_THEME,
-            font_path=pconfig.RENDER_FONT_PATH or None,
-            layout=pconfig.RENDER_LAYOUT,
-            cover_full_size=pconfig.RENDER_COVER_FULL_SIZE,
-        )
+        self._renderer = ShareCardRenderer(self.cache_dir, **pconfig.renderer_options())
         # 渲染参数进了产物文件名，配置变了就得让旧缓存失效
         self._render_cache.clear()
 
@@ -681,6 +665,76 @@ class DeniaSharePlugin(Star):
             except Exception:
                 continue
         return None
+
+    # ==================== 示例卡片（外观页离线预览） ==================== #
+
+    def _sample_image(self, kind: str) -> Path:
+        """合成/复用一张离线示例图（渐变 + 几何图形），不联网。"""
+        from PIL import Image as _Image, ImageDraw as _Draw
+
+        path = self.cache_dir / f"_sample_{kind}.png"
+        if path.is_file():
+            return path
+        if kind == "hero":
+            w, h = 1280, 720
+            img = _Image.new("RGB", (w, h))
+            top, bottom = (58, 76, 128), (16, 20, 32)
+            for yy in range(h):
+                t = yy / max(h - 1, 1)
+                img.paste(tuple(round(top[i] + (bottom[i] - top[i]) * t) for i in range(3)),
+                          (0, yy, w, yy + 1))
+            dr = _Draw.Draw(img, "RGBA")
+            dr.ellipse((int(w * 0.62), -h // 3, int(w * 1.25), h // 2), fill=(139, 124, 246, 90))
+            dr.ellipse((-w // 5, int(h * 0.55), w // 3, int(h * 1.4)), fill=(46, 196, 182, 70))
+            dr.rounded_rectangle((int(w * 0.08), int(h * 0.6), int(w * 0.5), int(h * 0.78)),
+                                 radius=28, fill=(255, 255, 255, 26))
+        else:  # avatar
+            size = 256
+            img = _Image.new("RGB", (size, size), (36, 43, 63))
+            dr = _Draw.Draw(img, "RGBA")
+            # 椭圆要的是 (x0, y0, x1, y1) 四个坐标，少一个会被 Pillow 判为参数错误
+            dr.ellipse((28, 28, size - 28, size - 28), fill=(251, 114, 153, 255))
+            dr.ellipse((88, 96, 168, 176), fill=(255, 255, 255, 235))
+            dr.arc((64, 150, 192, 236), start=15, end=165, fill=(255, 255, 255, 235), width=14)
+        try:
+            img.save(path, "PNG")
+        except OSError:
+            logger.warning("[denia_share] 示例图写入失败", exc_info=True)
+        return path
+
+    def build_sample_result(self) -> ParseResult:
+        """构造离线示例解析结果（视频卡片：封面 + 头像 + 统计），供外观页实时预览。"""
+        from .core.task import PathTask
+
+        async def _static(path: Path) -> Path:
+            return path
+
+        hero_path = self._sample_image("hero")
+        avatar_path = self._sample_image("avatar")
+        video = VideoContent(
+            path_task=PathTask(_static(hero_path)),
+            cover=PathTask(_static(hero_path)),
+            duration=309,
+        )
+        return ParseResult(
+            platform=Platform("bilibili", "哔哩哔哩"),
+            author=Author(
+                name="达妮娅示例频道",
+                avatar=PathTask(_static(avatar_path)),
+                description="本卡片为离线示例，用于预览外观效果",
+            ),
+            title="示例：全新外观设计器效果预览",
+            text="这是一条用于预览的示例简介。调整左侧的主题、布局、强调色、水印等参数，"
+                 "卡片会立刻按新外观重新渲染，无需发送任何真实链接。",
+            timestamp=1760000000,
+            url="https://www.bilibili.com/video/BV1uth56uEz3",
+            contents=[video],
+            extra={
+                "content_type": "视频",
+                "stats_line": "👍 12.3万 🪙 3.4万 ⭐ 5.6万 👀 210.5万",
+                "duration": "05:09",
+            },
+        )
 
     async def _do_screenshot(self, event: AstrMessageEvent, url: str):
         if not is_probably_screenshotable(url):
