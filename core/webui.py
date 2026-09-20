@@ -560,7 +560,7 @@ class WebUIApi:
                 "url": url,
                 "backend": service.backend,
                 "file": path.name,
-                "size_text": fmt_size(path),
+                "size_text": fmt_size_bytes(path.stat().st_size),
                 "data_url": data_url,
             }
         )
