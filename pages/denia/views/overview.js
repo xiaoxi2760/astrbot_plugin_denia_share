@@ -198,8 +198,16 @@ export function createOverviewView(ctx) {
     const risky = media.docker && !media.relay_enabled && !media.shared_dir_configured;
 
     const notes = [];
-    if (media.cache_dir_source === "fallback") {
-      notes.push("配置的共享缓存目录不可用，已回退到插件数据目录。");
+    // 回退是「静默降级」里最容易被漏掉的一种：功能看着还通，但分容器部署下
+    // 协议端已经读不到视频了。所以既给整卡状态色，也把后果说清楚。
+    const fellBack = media.cache_dir_source === "fallback";
+    if (fellBack) {
+      notes.push(
+        `配置的共享缓存目录不可用，已回退到插件数据目录（${media.cache_dir || data.cache.dir}）。` +
+          "分容器部署时协议端读不到这个路径，视频会发不出去。常见原因是目录不存在、" +
+          "没挂载、或该目录已有内容却没有 .denia_share_cache 哨兵 —— " +
+          "确认要把它当缓存目录，在该目录下建一个空的 .denia_share_cache 文件即可。",
+      );
     }
     if (risky) {
       notes.push(
@@ -208,6 +216,8 @@ export function createOverviewView(ctx) {
           "去「配置 → 媒体发送」二选一即可。",
       );
     }
+    // 回退优先于 risky：它已经是「配了但没生效」的状态，比「没配」更需要处理
+    const tone = fellBack ? "warn" : risky ? "warn" : "";
 
     return card(
       "媒体发送",
@@ -230,6 +240,7 @@ export function createOverviewView(ctx) {
         : media.shared_dir_configured
           ? pill("共享目录", "ok")
           : pill(risky ? "可能有风险" : "默认", risky ? "warn" : ""),
+      tone,
     );
   }
 

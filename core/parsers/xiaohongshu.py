@@ -61,7 +61,7 @@ class XiaoHongShuParser(BaseParser):
     async def parse_explore(self, url: str, xhs_id: str):
         from ..models.xiaohongshu.explore import decoder as explore_decoder
 
-        async with AsyncClient(headers=self.headers, timeout=self.timeout) as client:
+        async with AsyncClient(**self.client_kwargs(headers=self.headers)) as client:
             response = await client.get(url)
             if response.status_code >= 400:
                 response.raise_for_status()
@@ -91,11 +91,12 @@ class XiaoHongShuParser(BaseParser):
         from ..models.xiaohongshu.discovery import decoder as discovery_decoder
 
         async with AsyncClient(
-            headers=self.ios_headers,
-            timeout=self.timeout,
-            follow_redirects=True,
-            cookies=Cookies(),
-            trust_env=False,
+            **self.client_kwargs(
+                headers=self.ios_headers,
+                follow_redirects=True,
+                cookies=Cookies(),
+                trust_env=False,
+            )
         ) as client:
             response = await client.get(url)
             response.raise_for_status()

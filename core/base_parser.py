@@ -77,15 +77,47 @@ class BaseParser:
         except Exception:
             return True
 
+    @staticmethod
+    def global_proxy() -> str | None:
+        """全局代理地址（读不到配置就返回 None，由调用方决定怎么兜）。"""
+        try:
+            from .config import get_config
+            return get_config().PROXY or None
+        except Exception:
+            return None
+
+    @classmethod
+    def client_kwargs(cls, **overrides) -> dict:
+        """默认 httpx 客户端参数：超时 / 证书校验 / 全局代理。
+
+        给那些**自己 new AsyncClient** 的解析器用（微博 / 小红书 / NGA / AcFun /
+        快手 / 抖音）。这些地方原先只传 headers 与 timeout，于是「全局代理」对它们
+        完全无效 —— 在直连不通的服务器上表现为「这几个平台解析失败」，而媒体下载
+        却是通的（下载器有代理），排查方向很容易被带偏。
+
+        调用方传的键覆盖默认值，所以 ``follow_redirects=False`` 这类特例照常可用。
+        """
+        kwargs: dict[str, object] = {
+            "timeout": COMMON_TIMEOUT,
+            "verify": cls.verify_ssl_enabled(),
+        }
+        if proxy := cls.global_proxy():
+            kwargs["proxy"] = proxy
+        kwargs.update(overrides)
+        return kwargs
+
     def new_client(self, **kwargs) -> "AsyncClient":
         """创建带代理与默认超时的 httpx 客户端。"""
         from httpx import AsyncClient
-        kwargs.setdefault("timeout", self.timeout)
-        kwargs.setdefault("follow_redirects", True)
-        kwargs.setdefault("verify", self.verify_ssl_enabled())
+        merged = self.client_kwargs(
+            timeout=self.timeout,
+            follow_redirects=True,
+            verify=self.verify_ssl_enabled(),
+        )
         if self.proxies:
-            kwargs.setdefault("proxy", self.proxies)
-        return AsyncClient(**kwargs)
+            merged["proxy"] = self.proxies
+        merged.update(kwargs)
+        return AsyncClient(**merged)
 
     def __init_subclass__(cls, **kwargs):
         super().__init_subclass__(**kwargs)
@@ -139,10 +171,10 @@ class BaseParser:
         from httpx import AsyncClient
         headers = headers or COMMON_HEADER.copy()
         async with AsyncClient(
-            headers=headers,
-            verify=BaseParser.verify_ssl_enabled(),
-            follow_redirects=False,
-            timeout=COMMON_TIMEOUT,
+            **BaseParser.client_kwargs(
+                headers=headers,
+                follow_redirects=False,
+            )
         ) as client:
             response = await client.get(url)
             if response.status_code >= 400:
@@ -154,10 +186,10 @@ class BaseParser:
         from httpx import AsyncClient
         headers = headers or COMMON_HEADER.copy()
         async with AsyncClient(
-            headers=headers,
-            verify=BaseParser.verify_ssl_enabled(),
-            follow_redirects=True,
-            timeout=COMMON_TIMEOUT,
+            **BaseParser.client_kwargs(
+                headers=headers,
+                follow_redirects=True,
+            )
         ) as client:
             response = await client.get(url)
             if response.status_code >= 400:

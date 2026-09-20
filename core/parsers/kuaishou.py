@@ -53,7 +53,9 @@ class KuaiShouParser(BaseParser):
     # ------------------------------------------------------------------ #
 
     async def _fetch_html(self, url: str) -> str:
-        async with AsyncClient(headers=self.ios_headers, timeout=self.timeout, follow_redirects=True) as client:
+        async with AsyncClient(
+            **self.client_kwargs(headers=self.ios_headers, follow_redirects=True)
+        ) as client:
             response = await client.get(url)
             response.raise_for_status()
             return response.text

@@ -63,7 +63,7 @@ class WeiBoParser(BaseParser):
 
         url = "https://card.weibo.com/article/m/aj/detail"
         params = {"_rid": str(uuid4()), "id": _id, "_t": int(time() * 1000)}
-        async with AsyncClient(headers=self.headers, timeout=self.timeout) as client:
+        async with AsyncClient(**self.client_kwargs(headers=self.headers)) as client:
             response = await client.get(url, params=params)
             response.raise_for_status()
 
@@ -99,7 +99,7 @@ class WeiBoParser(BaseParser):
         # self.headers 里是小写 referer，这里必须同键名小写覆盖，否则会发出两个 Referer
         headers = {**self.headers, "referer": f"https://h5.video.weibo.com/show/{fid}", "Content-Type": "application/x-www-form-urlencoded"}
         post_content = 'data={"Component_Play_Playinfo":{"oid":"' + fid + '"}}'
-        async with AsyncClient(headers=headers, timeout=self.timeout) as client:
+        async with AsyncClient(**self.client_kwargs(headers=headers)) as client:
             response = await client.post(req_url, content=post_content)
             response.raise_for_status()
 
@@ -120,7 +120,8 @@ class WeiBoParser(BaseParser):
     async def parse_weibo_id(self, weibo_id: str):
         from ..models.weibo.common import decoder as weibo_decoder
 
-        # 通用头在前、专用头在后：self.headers 里的 accept/referer 会把前面的覆盖掉
+        # 通用头在前、专用头在后：字典字面量里**后写的键覆盖先写的**，
+        # 所以下面的 accept/referer 会盖掉 self.headers 里的同名键。
         headers = {
             **self.headers,
             "accept": "application/json, text/plain, */*",
@@ -134,7 +135,14 @@ class WeiBoParser(BaseParser):
         }
         ts = int(time() * 1000)
         url = f"https://m.weibo.cn/statuses/show?id={weibo_id}&_={ts}"
-        async with AsyncClient(headers=headers, timeout=self.timeout, follow_redirects=False, cookies=Cookies(), trust_env=False) as client:
+        async with AsyncClient(
+            **self.client_kwargs(
+                headers=headers,
+                follow_redirects=False,
+                cookies=Cookies(),
+                trust_env=False,
+            )
+        ) as client:
             response = await client.get(url)
             if response.status_code != 200:
                 if response.status_code in (403, 418):

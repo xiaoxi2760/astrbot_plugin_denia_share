@@ -19,7 +19,7 @@ import aiohttp
 from httpx import AsyncClient
 from astrbot.api import logger
 
-from ...base_parser import BaseParser, PlatformEnum, ParseException, handle, COMMON_TIMEOUT
+from ...base_parser import BaseParser, PlatformEnum, ParseException, handle
 from ...data import Platform
 
 
@@ -80,8 +80,7 @@ class DouyinParser(BaseParser):
         from ...models.douyin.video import decoder as video_decoder
 
         async with AsyncClient(
-            headers=self.ios_headers, timeout=COMMON_TIMEOUT,
-            follow_redirects=False, verify=self.verify_ssl_enabled(),
+            **self.client_kwargs(headers=self.ios_headers, follow_redirects=False)
         ) as client:
             response = await client.get(url)
             if response.status_code != 200:
@@ -110,7 +109,7 @@ class DouyinParser(BaseParser):
         url = "https://www.iesdouyin.com/web/api/v2/aweme/slidesinfo/"
         params = {"aweme_ids": f"[{video_id}]", "request_source": "200"}
         async with AsyncClient(
-            headers=self.android_headers, verify=self.verify_ssl_enabled()
+            **self.client_kwargs(headers=self.android_headers)
         ) as client:
             response = await client.get(url, params=params)
             response.raise_for_status()

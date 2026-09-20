@@ -7,7 +7,7 @@ import re
 from typing import ClassVar
 from httpx import AsyncClient
 from astrbot.api import logger
-from ..base_parser import BaseParser, PlatformEnum, ParseException, IgnoreException, handle, COMMON_TIMEOUT
+from ..base_parser import BaseParser, PlatformEnum, ParseException, IgnoreException, handle
 from ..data import Platform
 
 
@@ -26,7 +26,7 @@ class AcfunParser(BaseParser):
         url = f"https://www.acfun.cn/v/ac{acid}"
         query_url = f"{url}?quickViewId=videoInfo_new&ajaxpipe=1"
 
-        async with AsyncClient(headers=self.headers, timeout=COMMON_TIMEOUT) as client:
+        async with AsyncClient(**self.client_kwargs(headers=self.headers)) as client:
             response = await client.get(query_url)
             response.raise_for_status()
             raw = response.text

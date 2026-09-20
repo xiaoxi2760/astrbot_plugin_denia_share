@@ -46,14 +46,25 @@ export function clear(node) {
   return node;
 }
 
-/** 卡片块：标题 + 说明 + 内容。 */
-export function card(title, subtitle, children, actions = null) {
+/**
+ * 卡片块：标题 + 说明 + 内容。
+ *
+ * tone 为 "warn" / "err" 时给整张卡加一道状态色边框与角标 —— 用于「这张卡里
+ * 有需要用户处理的事」，例如缓存目录回退。只写在正文小字里容易被划过去，
+ * 而这类状态往往决定了视频发不发得出去。
+ */
+export function card(title, subtitle, children, actions = null, tone = "") {
   const head = h("div", { class: "card-head" }, [
     h("h2", { text: title || "" }),
+    tone ? h("span", { class: `pill ${tone}`, text: tone === "err" ? "异常" : "需处理" }) : null,
     subtitle ? h("span", { class: "sub", text: subtitle }) : null,
     actions || null,
   ]);
-  return h("section", { class: "card" }, [head, append(h("div"), children)]);
+  return h(
+    "section",
+    { class: `card${tone ? ` card-${tone}` : ""}` },
+    [head, append(h("div"), children)],
+  );
 }
 
 export function statCard(label, value, meta) {
