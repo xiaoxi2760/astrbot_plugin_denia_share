@@ -6,8 +6,10 @@
 
 双路径取数，任一成功即可：
 
-1. **轻量 HTML 路径**（rika 原实现）：抓取 iesdouyin / m.douyin 分享页的
-   ``window._ROUTER_DATA``。零签名成本，但近年该入口逐渐收紧，常返回空页面。
+1. **轻量 HTML 路径**：抓取 iesdouyin / m.douyin 分享页的
+   ``window._ROUTER_DATA``。零签名成本，是首选路径。抖音只在请求带有效
+   ``ttwid`` 时才把作品数据放进 SSR，所以抓取必须走 :mod:`.session` 里的会话
+   （保持 cookie + 重试），不能每次新建 client 只发一次请求。
 2. **签名 Web API 路径**（娅娅版移植）：``/aweme/v1/web/aweme/detail/`` 配合
    a_bogus 签名 + ttwid 会话，稳定性更好，是 HTML 路径失败后的兜底。
 """
@@ -47,22 +49,29 @@ class DouyinParser(BaseParser):
     async def _parse_douyin(self, searched: re.Match[str]):
         ty, vid = searched.group("ty"), searched.group("vid")
 
-        # 1) 图文页先试零成本的 slidesinfo 接口。
-        #    note 与 slides 都是图文页（抖音自己的链接两种写法都有），
-        #    原先只把 slides 路由过来，note 白白错过这条路径。
+        # 1) HTML _ROUTER_DATA 路径。零签名成本，配会话 cookie 后最稳。
+        #    slides 类型也试 /share/note/<id>/ —— 抖音两种写法都有，
+        #    而 /share/slides/<id>/ 现在不返回 _ROUTER_DATA。
+        html_types = (ty, "note") if ty == "slides" else (ty,)
+        for html_type in html_types:
+            for url in (
+                self._build_m_douyin_url(html_type, vid),
+                self._build_iesdouyin_url(html_type, vid),
+            ):
+                try:
+                    return await self.parse_video(url)
+                except ParseException as e:
+                    logger.debug(f"[douyin] HTML 路径失败 {url}: {e}")
+                    continue
+
+        # 2) 图文页再试 slidesinfo 接口。
+        #    注意：该接口 2026-09 起对绝大多数作品返回 aweme_details=null、
+        #    filter_list reason=8，实际已失效，只作为兜底保留。
         if ty in ("slides", "note"):
             try:
                 return await self.parse_slides(vid)
             except Exception as e:
-                logger.debug(f"[douyin] slidesinfo 路径失败，转 HTML: {e}")
-
-        # 2) HTML _ROUTER_DATA 路径
-        for url in (self._build_m_douyin_url(ty, vid), self._build_iesdouyin_url(ty, vid)):
-            try:
-                return await self.parse_video(url)
-            except ParseException as e:
-                logger.debug(f"[douyin] HTML 路径失败 {url}: {e}")
-                continue
+                logger.debug(f"[douyin] slidesinfo 路径失败，转签名接口: {e}")
 
         # 3) 兜底：签名 Web API
         return await self.parse_by_web_api(vid)
@@ -81,21 +90,27 @@ class DouyinParser(BaseParser):
 
     async def parse_video(self, url: str):
         from ...models.douyin.video import decoder as video_decoder
+        from .session import get_share_session, looks_like_challenge
 
-        async with AsyncClient(
-            **self.client_kwargs(headers=self.ios_headers, follow_redirects=False)
-        ) as client:
-            response = await client.get(url)
-            if response.status_code != 200:
-                raise ParseException(f"status: {response.status_code}")
-            text = response.text
+        text = await get_share_session(type(self)).fetch(url, self.ios_headers)
+
+        if looks_like_challenge(text):
+            raise ParseException("抖音风控挑战未通过，稍后再试")
 
         pattern = re.compile(pattern=r"window\._ROUTER_DATA\s*=\s*(.*?)</script>", flags=re.DOTALL)
         matched = pattern.search(text)
         if not matched or not matched.group(1):
             raise ParseException("can't find _ROUTER_DATA in html")
 
-        video_data = video_decoder.decode(matched.group(1).strip()).video_data
+        try:
+            video_data = video_decoder.decode(matched.group(1).strip()).video_data
+        except ParseException:
+            raise
+        except Exception as e:
+            # msgspec 的 ValidationError 也走这里：SSR 结构变了就落到下一条路径，
+            # 而不是抛一个非 ParseException 把整条解析链路炸掉
+            raise ParseException(f"分享页数据结构无法识别({type(e).__name__})") from e
+
         author = self.create_author(video_data.author.nickname, video_data.avatar_url)
         result = self.result(title=video_data.desc, author=author, timestamp=video_data.create_time)
 
@@ -149,7 +164,12 @@ class DouyinParser(BaseParser):
             data = await client.fetch_detail(session, item_id)
 
         if not data:
-            raise ParseException("分享已删除或资源直链提取失败, 请稍后再试")
+            # 让 web.py 把真实原因带出来（403 风控 / 网络失败 / 内容确实没了）。
+            # 一律报"分享已删除"会把排查方向带偏 —— 实测本机就是被 403 风控拦的。
+            raise ParseException(
+                getattr(client, "last_error", "")
+                or "分享已删除或资源直链提取失败, 请稍后再试"
+            )
 
         item = self._pick_item(data, item_id)
         if item is None:

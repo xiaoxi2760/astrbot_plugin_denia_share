@@ -47,7 +47,8 @@ class VideoData(Struct):
 
     @property
     def image_urls(self) -> list[str]:
-        return [choice(image.url_list) for image in self.images] if self.images else []
+        # 跳过 url_list 为空的条目：choice([]) 会抛 IndexError 把整条解析炸掉
+        return [choice(image.url_list) for image in self.images if image.url_list] if self.images else []
 
     @property
     def video_url(self) -> str | None:
@@ -82,11 +83,27 @@ class VideoInfoRes(Struct):
 
 class VideoOrNotePage(Struct):
     video_info_res: VideoInfoRes = field(name="videoInfoRes", default_factory=VideoInfoRes)
+    # 图文页的另外两种写法。**必须与 session.has_work_data 认的字段名一致**：
+    # 那边用「有没有 item_list」决定要不要继续重试，这边负责真正读出来。
+    # 两边不一致的后果是「会话以为拿到了数据 → 停止重试 → 解析却读不出来」，
+    # 明明在页面里的作品就这么丢了。
+    slides_info_res: VideoInfoRes = field(name="slidesInfoRes", default_factory=VideoInfoRes)
+    note_detail_res: VideoInfoRes = field(name="noteDetailRes", default_factory=VideoInfoRes)
+
+    @property
+    def work(self) -> VideoInfoRes:
+        """三个字段里第一个真带 item_list 的；都没有就返回 videoInfoRes 那个空的，
+        由 ``video_data`` 抛出统一的「找不到数据」。"""
+        for candidate in (self.video_info_res, self.slides_info_res, self.note_detail_res):
+            if candidate.item_list:
+                return candidate
+        return self.video_info_res
 
 
 class LoaderData(Struct):
     video_page: VideoOrNotePage | None = field(name="video_(id)/page", default=None)
     note_page: VideoOrNotePage | None = field(name="note_(id)/page", default=None)
+    slides_page: VideoOrNotePage | None = field(name="slides_(id)/page", default=None)
 
 
 class RouterData(Struct):
@@ -95,10 +112,13 @@ class RouterData(Struct):
 
     @property
     def video_data(self) -> VideoData:
-        if page := self.loader_data.video_page:
-            return page.video_info_res.video_data
-        elif page := self.loader_data.note_page:
-            return page.video_info_res.video_data
+        for page in (
+            self.loader_data.video_page,
+            self.loader_data.note_page,
+            self.loader_data.slides_page,
+        ):
+            if page is not None:
+                return page.work.video_data
         raise ParseException("can't find video_(id)/page or note_(id)/page in router data")
 
 
