@@ -192,6 +192,48 @@
         "default": "",
         "invisible": true,
         "hint": "留空自动探测系统字体；卡片出现方块字时才需要指定绝对路径"
+      },
+      "RENDER_ACCENT_COLOR": {
+        "description": "自定义强调色",
+        "type": "string",
+        "default": "",
+        "invisible": true,
+        "hint": "留空=每个平台用自己的品牌色。填 #RRGGBB 后所有卡片统一用这个强调色（徽章/光晕/水印圆点）"
+      },
+      "RENDER_WATERMARK": {
+        "description": "卡片水印文字",
+        "type": "string",
+        "default": "希望解析",
+        "invisible": true,
+        "hint": "卡片右下角的水印文字，留空则不显示水印，最长 12 个字符"
+      },
+      "RENDER_DESC_MAX_LINES": {
+        "description": "正文最大行数",
+        "type": "int",
+        "default": 0,
+        "invisible": true,
+        "hint": "0=按布局默认（4~6 行）。简介超长时按此行数截断，卡片更紧凑"
+      },
+      "RENDER_SHOW_AVATAR": {
+        "description": "显示作者头像",
+        "type": "bool",
+        "default": true,
+        "invisible": true,
+        "hint": "关闭后作者行只保留昵称与签名，不绘制头像圆（头像也不会再被加载）"
+      },
+      "RENDER_GRADIENT_TOP": {
+        "description": "背景渐变·顶部色",
+        "type": "string",
+        "default": "",
+        "invisible": true,
+        "hint": "留空=跟随卡片主题。填 #RRGGBB 覆盖卡片背景渐变的顶部颜色"
+      },
+      "RENDER_GRADIENT_BOTTOM": {
+        "description": "背景渐变·底部色",
+        "type": "string",
+        "default": "",
+        "invisible": true,
+        "hint": "留空=跟随卡片主题。填 #RRGGBB 覆盖卡片背景渐变的底部颜色"
       }
     }
   },

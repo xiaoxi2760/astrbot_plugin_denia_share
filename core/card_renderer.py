@@ -270,6 +270,19 @@ def _hex_to_rgb(value: str) -> tuple[int, int, int]:
     return tuple(int(value[i : i + 2], 16) for i in (0, 2, 4))  # type: ignore[return-value]
 
 
+_HEX_COLOR_RE = re.compile(r"^#?[0-9a-fA-F]{6}$")
+
+
+def normalize_hex_color(value: str | None) -> str | None:
+    """把 '#fb7299' / 'FB7299' 规整成 '#FB7299'；不合法返回 None。"""
+    if not value:
+        return None
+    text = str(value).strip()
+    if not _HEX_COLOR_RE.match(text):
+        return None
+    return "#" + text.lstrip("#").upper()
+
+
 def _with_alpha(rgb: tuple[int, int, int], alpha: int) -> tuple[int, int, int, int]:
     return (rgb[0], rgb[1], rgb[2], alpha)
 
@@ -466,6 +479,12 @@ class ShareCardRenderer:
         font_path: str | None = None,
         layout: str = "standard",
         cover_full_size: bool = False,
+        accent_color: str | None = None,
+        watermark: str | None = None,
+        desc_max_lines: int = 0,
+        show_avatar: bool = True,
+        gradient_top: str | None = None,
+        gradient_bottom: str | None = None,
     ):
         self.cache_dir = cache_dir
         self.enabled = enabled and Image is not None
@@ -474,6 +493,14 @@ class ShareCardRenderer:
         self.layout_name = layout if layout in LAYOUT_NAMES else "standard"
         self.font_path = font_path
         self.cover_full_size = cover_full_size
+        # 自定义外观（None/空 = 跟随默认行为）
+        self.accent_color = normalize_hex_color(accent_color)
+        # watermark 为 None 表示跟随全局默认 WATERMARK_TAG；空串表示不显示
+        self.watermark = WATERMARK_TAG if watermark is None else str(watermark).strip()[:12]
+        self.desc_max_lines = max(0, min(12, int(desc_max_lines)))
+        self.show_avatar = bool(show_avatar)
+        self.gradient_top = normalize_hex_color(gradient_top)
+        self.gradient_bottom = normalize_hex_color(gradient_bottom)
         self._regular_font: str | None = None
         self._bold_font: str | None = None
         self._fonts_loaded = False
@@ -482,6 +509,37 @@ class ShareCardRenderer:
         # 渲染跑在 to_thread 线程池里，可能并发；字体缓存与 _measure 需要锁保护
         import threading
         self._font_lock = threading.Lock()
+
+    # ---------- 主题与外观覆盖 ---------- #
+
+    def _theme(self) -> "_Theme":
+        """当前主题；配置了自定义背景渐变时返回覆盖了渐变色的副本。"""
+        base = _THEMES[self.theme_name]
+        if not self.gradient_top and not self.gradient_bottom:
+            return base
+        import copy
+
+        theme = copy.copy(base)
+        if self.gradient_top:
+            theme.gradient_top = _hex_to_rgb(self.gradient_top)
+        if self.gradient_bottom:
+            theme.gradient_bottom = _hex_to_rgb(self.gradient_bottom)
+        return theme
+
+    def _accent(self, result: ParseResult) -> tuple[str, tuple[int, int, int]]:
+        """返回 (hex, rgb) 强调色：自定义优先，否则按平台品牌色。"""
+        if self.accent_color:
+            return self.accent_color, _hex_to_rgb(self.accent_color)
+        color = PLATFORM_COLORS.get(result.platform.name, PLATFORM_COLORS["default"])
+        return color, _hex_to_rgb(color)
+
+    def _desc_line_cap(self, default: int) -> int:
+        """正文截断行数：配置了上限时取「布局默认」与「自定义上限」的较小值。"""
+        return min(default, self.desc_max_lines) if self.desc_max_lines > 0 else default
+
+    def _avatar_visible(self, images: dict[str, Any]) -> bool:
+        """作者行是否需要给头像留位置（关闭时作者行不收窄、不画头像圆）。"""
+        return bool(self.show_avatar and images.get("avatar"))
 
     # ---------- 字体 ----------
 
@@ -734,7 +792,12 @@ class ShareCardRenderer:
             or f"{result.platform.name}|{result.title}|{result.timestamp}|{result.url}"
         )
         digest = hashlib.md5(
-            f"{self.theme_name}|{self.width}|{self.layout_name}|{self.cover_full_size}|{payload}|{warnings_str}".encode("utf-8")
+            (
+                f"{self.theme_name}|{self.width}|{self.layout_name}|{self.cover_full_size}"
+                f"|{self.accent_color or ''}|{self.watermark}|{self.desc_max_lines}"
+                f"|{int(self.show_avatar)}|{self.gradient_top or ''}|{self.gradient_bottom or ''}"
+                f"|{payload}|{warnings_str}"
+            ).encode("utf-8")
         ).hexdigest()[:16]
         return self.cache_dir / f"card_{digest}.png"
 
@@ -743,7 +806,7 @@ class ShareCardRenderer:
         images: dict[str, Any] = {"avatar": None, "hero": None, "grid": []}
 
         tasks: list[tuple[str, PathTask]] = []
-        if result.author and result.author.avatar:
+        if self.show_avatar and result.author and result.author.avatar:
             tasks.append(("avatar", result.author.avatar))
 
         video = result.video
@@ -879,9 +942,8 @@ class ShareCardRenderer:
         out_path: Path,
     ) -> Path:
         """标准布局：顶部全宽横幅 + 纵向信息流。"""
-        theme = _THEMES[self.theme_name]
-        accent = PLATFORM_COLORS.get(result.platform.name, PLATFORM_COLORS["default"])
-        accent_rgb = _hex_to_rgb(accent)
+        theme = self._theme()
+        accent, accent_rgb = self._accent(result)
 
         pad = _L.PAD
         inner_w = self.width - pad * 2
@@ -925,11 +987,13 @@ class ShareCardRenderer:
         text = strip_emoji(result.text)
         desc_lines: list[str] = []
         if text:
-            desc_lines = self._fit_lines(text, desc_font, inner_w, 6)
+            desc_lines = self._fit_lines(text, desc_font, inner_w, self._desc_line_cap(6))
 
         # 作者
         author = result.author
         avatar_size = _L.AVATAR
+        avatar_visible = self._avatar_visible(images)
+        author_row_h = avatar_size if avatar_visible else 46
         name = strip_emoji(author.name) or "未知作者" if author else ""
         author_desc = strip_emoji(author.description or "")[:40] if author else ""
 
@@ -950,7 +1014,7 @@ class ShareCardRenderer:
         else:
             y = _L.HEAD_BAR_TOP + _L.HEAD_BAR_H + 18 + _L.HEAD_PILL_H + 18
         if author:
-            y += avatar_size + 20
+            y += author_row_h + 20
         else:
             y += 12
         if not hero and title_lines:
@@ -1162,15 +1226,16 @@ class ShareCardRenderer:
 
         # ============ 作者行 ============
         if author:
-            avatar_path = images.get("avatar")
             avatar = None
-            if avatar_path:
-                try:
-                    avatar = self._circle_avatar(
-                        self._open_image(avatar_path), avatar_size
-                    )
-                except Exception:
-                    avatar = None
+            if avatar_visible:
+                avatar_path = images.get("avatar")
+                if avatar_path:
+                    try:
+                        avatar = self._circle_avatar(
+                            self._open_image(avatar_path), avatar_size
+                        )
+                    except Exception:
+                        avatar = None
             if avatar is not None:
                 canvas.alpha_composite(avatar, (pad, y))
                 ring = Image.new("RGBA", (avatar_size, avatar_size), (0, 0, 0, 0))
@@ -1179,8 +1244,8 @@ class ShareCardRenderer:
                     outline=_with_alpha(accent_rgb, 170), width=_L.AVATAR_RING_W,
                 )
                 canvas.alpha_composite(ring, (pad, y))
-            else:
-                # 无头像时绘制 accent 渐变首字母占位圆
+            elif avatar_visible:
+                # 头像加载失败时绘制 accent 渐变首字母占位圆（仅在头像可见时）
                 placeholder = self._gradient(
                     (avatar_size, avatar_size),
                     accent_rgb, _mix(accent_rgb, (0, 0, 0), 0.35),
@@ -1199,16 +1264,30 @@ class ShareCardRenderer:
                     (pad + (avatar_size - fw) // 2, y + (avatar_size - self._line_height(f_font)) // 2),
                     first, _L.F_INITIAL, "#FFFFFF", bold=True,
                 )
-            name_x = pad + avatar_size + 20
-            self._draw_text(
-                draw, (name_x, y + 6), name, _L.F_NAME, theme.text_primary, bold=True
-            )
-            if author_desc:
+            name_x = pad + avatar_size + 20 if avatar_visible else pad
+            if avatar_visible:
                 self._draw_text(
-                    draw, (name_x, y + avatar_size - 26),
-                    author_desc, _L.F_SIGN, theme.text_tertiary,
+                    draw, (name_x, y + 6), name, _L.F_NAME, theme.text_primary, bold=True
                 )
-            y += avatar_size + 20
+                if author_desc:
+                    self._draw_text(
+                        draw, (name_x, y + avatar_size - 26),
+                        author_desc, _L.F_SIGN, theme.text_tertiary,
+                    )
+            else:
+                # 头像关闭：名字与签名同一行垂直居中，行更紧凑
+                name_font = self._font(_L.F_NAME, bold=True)
+                sign_font = self._font(_L.F_SIGN)
+                row_mid = y + author_row_h // 2
+                name_y = row_mid - self._line_height(name_font) // 2
+                self._draw_text(draw, (name_x, name_y), name, _L.F_NAME,
+                                theme.text_primary, bold=True)
+                if author_desc:
+                    name_w = self._text_width(name, name_font)
+                    sign_y = row_mid - self._line_height(sign_font) // 2 + 3
+                    self._draw_text(draw, (name_x + name_w + 16, sign_y),
+                                    author_desc, _L.F_SIGN, theme.text_tertiary)
+            y += author_row_h + 20
         else:
             y += 12
 
@@ -1363,23 +1442,25 @@ class ShareCardRenderer:
         canvas.alpha_composite(divider_layer, (pad, y + 12))
         foot_y = y + 28
 
-        wm_text = WATERMARK_TAG
+        wm_text = self.watermark
         wm_font = self._font(_L.F_FOOT, bold=True)
-        wm_text_w = self._text_width(wm_text, wm_font)
-        wm_lh = self._line_height(wm_font)
-        dot_d = _L.WM_DOT
-        wm_group_w = dot_d + _L.WM_DOT_GAP + wm_text_w
-        wm_x = self.width - pad - wm_group_w
-        # 水印：accent 小圆点 + 文字
-        dot_cy = foot_y + wm_lh // 2
-        draw.ellipse(
-            (wm_x, dot_cy - dot_d // 2, wm_x + dot_d, dot_cy + dot_d // 2),
-            fill=(*accent_rgb, 255),
-        )
-        self._draw_text(
-            draw, (wm_x + dot_d + _L.WM_DOT_GAP, foot_y),
-            wm_text, _L.F_FOOT, accent, bold=True,
-        )
+        wm_x = self.width - pad
+        if wm_text:
+            wm_text_w = self._text_width(wm_text, wm_font)
+            wm_lh = self._line_height(wm_font)
+            dot_d = _L.WM_DOT
+            wm_group_w = dot_d + _L.WM_DOT_GAP + wm_text_w
+            wm_x = self.width - pad - wm_group_w
+            # 水印：accent 小圆点 + 文字
+            dot_cy = foot_y + wm_lh // 2
+            draw.ellipse(
+                (wm_x, dot_cy - dot_d // 2, wm_x + dot_d, dot_cy + dot_d // 2),
+                fill=(*accent_rgb, 255),
+            )
+            self._draw_text(
+                draw, (wm_x + dot_d + _L.WM_DOT_GAP, foot_y),
+                wm_text, _L.F_FOOT, accent, bold=True,
+            )
 
         url_text = short_url(result.url)
         if url_text:
@@ -1484,7 +1565,7 @@ class ShareCardRenderer:
         if text:
             body += f"：{text}"
         max_w = inner_w - 18 * 2 - _L.QUOTE_BAR_W - 16
-        lines = self._fit_lines(body, q_font, max_w, 4)
+        lines = self._fit_lines(body, q_font, max_w, self._desc_line_cap(4))
         return max(80, len(lines) * _L.F_QUOTE_LINE_H + 32)
 
     def _draw_quote_text(
@@ -1502,7 +1583,7 @@ class ShareCardRenderer:
         body = f"@{author}"
         if text:
             body += f"：{text}"
-        lines = self._fit_lines(body, q_font, max_width, 4)
+        lines = self._fit_lines(body, q_font, max_width, self._desc_line_cap(4))
         for line in lines:
             self._draw_text(draw, (x, y), line, _L.F_QUOTE, theme.text_secondary)
             y += _L.F_QUOTE_LINE_H
@@ -1598,7 +1679,9 @@ class ShareCardRenderer:
 
     def _avatar_block(self, canvas, draw, x: int, y: int, size: int,
                       images: dict, d: dict, accent_rgb) -> None:
-        """绘制头像（含 accent 描边环或渐变首字母占位）。"""
+        """绘制头像（含 accent 描边环或渐变首字母占位）。关闭头像显示时不画。"""
+        if not self.show_avatar:
+            return
         avatar_path = images.get("avatar")
         avatar = None
         if avatar_path:
@@ -1771,7 +1854,7 @@ class ShareCardRenderer:
     def _footer_block(self, canvas, draw, theme: _Theme, accent: str, accent_rgb,
                       result: ParseResult, y: int, inner_w: int,
                       on_image: bool = False) -> None:
-        """页脚：分隔线 + 左链接 + 右「圆点 希望解析」水印。"""
+        """页脚：分隔线 + 左链接 + 右「圆点 水印」。水印文字留空时整块省略。"""
         pad = _L.PAD
         divider_layer = Image.new("RGBA", (inner_w, 1), (0, 0, 0, 0))
         ImageDraw.Draw(divider_layer).line(
@@ -1782,18 +1865,22 @@ class ShareCardRenderer:
         )
         canvas.alpha_composite(divider_layer, (pad, y + 12))
         foot_y = y + 28
+        wm_text = self.watermark
         wm_font = self._font(_L.F_FOOT, bold=True)
-        wm_text_w = self._text_width(WATERMARK_TAG, wm_font)
-        wm_group_w = _L.WM_DOT + _L.WM_DOT_GAP + wm_text_w
-        wm_x = self.width - pad - wm_group_w
-        wm_lh = self._line_height(wm_font)
-        dot_cy = foot_y + wm_lh // 2
-        draw.ellipse(
-            (wm_x, dot_cy - _L.WM_DOT // 2, wm_x + _L.WM_DOT, dot_cy + _L.WM_DOT // 2),
-            fill=(*accent_rgb, 255),
-        )
-        self._draw_text(draw, (wm_x + _L.WM_DOT + _L.WM_DOT_GAP, foot_y),
-                        WATERMARK_TAG, _L.F_FOOT, accent, bold=True)
+        wm_group_w = 0
+        wm_x = self.width - pad
+        if wm_text:
+            wm_text_w = self._text_width(wm_text, wm_font)
+            wm_group_w = _L.WM_DOT + _L.WM_DOT_GAP + wm_text_w
+            wm_x = self.width - pad - wm_group_w
+            wm_lh = self._line_height(wm_font)
+            dot_cy = foot_y + wm_lh // 2
+            draw.ellipse(
+                (wm_x, dot_cy - _L.WM_DOT // 2, wm_x + _L.WM_DOT, dot_cy + _L.WM_DOT // 2),
+                fill=(*accent_rgb, 255),
+            )
+            self._draw_text(draw, (wm_x + _L.WM_DOT + _L.WM_DOT_GAP, foot_y),
+                            wm_text, _L.F_FOOT, accent, bold=True)
         url_text = short_url(result.url)
         if url_text:
             url_font = self._font(_L.F_FOOT)
@@ -1875,9 +1962,8 @@ class ShareCardRenderer:
 
     def _render_magazine(self, result, images, out_path) -> Path:
         """双栏杂志：封面缩为左侧方块，标题/作者在右侧栏。"""
-        theme = _THEMES[self.theme_name]
-        accent = PLATFORM_COLORS.get(result.platform.name, PLATFORM_COLORS["default"])
-        accent_rgb = _hex_to_rgb(accent)
+        theme = self._theme()
+        accent, accent_rgb = self._accent(result)
         pad = _L.PAD
         inner_w = self.width - pad * 2
         gap = _L.GRID_GAP
@@ -1894,7 +1980,7 @@ class ShareCardRenderer:
             if d["title"] else []
         )
         desc_font = self._font(_L.F_DESC)
-        desc_lines = self._fit_lines(d["text"], desc_font, inner_w, 4) if d["text"] else []
+        desc_lines = self._fit_lines(d["text"], desc_font, inner_w, self._desc_line_cap(4)) if d["text"] else []
         stats_h, stat_rows = self._stat_rows_height(d, inner_w)
         warnings_h = self._warning_block_height(d["warnings"], inner_w)
         grid_h = self._grid_metrics(len(d["grid"]), inner_w, gap)[0]
@@ -2004,9 +2090,8 @@ class ShareCardRenderer:
         if images.get("hero") is None and not images.get("grid"):
             return self._render_standard(result, images, out_path)
 
-        theme = _THEMES[self.theme_name]
-        accent = PLATFORM_COLORS.get(result.platform.name, PLATFORM_COLORS["default"])
-        accent_rgb = _hex_to_rgb(accent)
+        theme = self._theme()
+        accent, accent_rgb = self._accent(result)
         pad = _L.PAD
         inner_w = self.width - pad * 2
         d = self._prep(result, images)
@@ -2161,9 +2246,8 @@ class ShareCardRenderer:
 
     def _render_feed(self, result, images, out_path) -> Path:
         """社交动态：作者行最前，媒体为内嵌圆角块。"""
-        theme = _THEMES[self.theme_name]
-        accent = PLATFORM_COLORS.get(result.platform.name, PLATFORM_COLORS["default"])
-        accent_rgb = _hex_to_rgb(accent)
+        theme = self._theme()
+        accent, accent_rgb = self._accent(result)
         pad = _L.PAD
         inner_w = self.width - pad * 2
         gap = _L.GRID_GAP
@@ -2172,7 +2256,7 @@ class ShareCardRenderer:
         title_font = self._font(34, bold=True)
         title_lines = self._fit_lines(d["title"], title_font, inner_w, 3) if d["title"] else []
         desc_font = self._font(_L.F_DESC)
-        desc_lines = self._fit_lines(d["text"], desc_font, inner_w, 5) if d["text"] else []
+        desc_lines = self._fit_lines(d["text"], desc_font, inner_w, self._desc_line_cap(5)) if d["text"] else []
         media_h = round(inner_w * 9 / 16) if d["hero"] else 0
         if d["hero"] and self.cover_full_size:
             media_h = self._hero_aspect_height(d["hero"], inner_w, media_h)

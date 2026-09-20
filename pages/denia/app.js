@@ -9,6 +9,7 @@ import { createOverviewView } from "./views/overview.js";
 import { createParseView } from "./views/parse.js";
 import { createCacheView } from "./views/cache.js";
 import { createConfigView } from "./views/config.js";
+import { createAppearanceView } from "./views/appearance.js";
 
 const bridge = window.AstrBotPluginPage;
 
@@ -27,6 +28,11 @@ const VIEWS = {
     title: "缓存",
     sub: "解析记录与缓存文件的管理台",
     factory: createCacheView,
+  },
+  appearance: {
+    title: "外观",
+    sub: "界面主题与分享卡片样式设计，实时预览",
+    factory: createAppearanceView,
   },
   config: {
     title: "配置",
@@ -48,6 +54,87 @@ export const api = {
   },
 };
 
+/* ---------------- 界面外观偏好 ---------------- */
+
+const ACCENT_PRESETS = {
+  "": null, // 跟随默认
+  "#2F6FDD": { a: "#2F6FDD", b: "#7A5CFF", dark: ["#6EA6F5", "#9A7CFF"] },
+  "#FB7299": { a: "#FB7299", b: "#FF9A6C", dark: ["#FB8AB0", "#FF9A6C"] },
+  "#2EC4B6": { a: "#2EC4B6", b: "#5C8AFF", dark: ["#4FD8CB", "#7FA3FF"] },
+  "#F59E0B": { a: "#F59E0B", b: "#EF6351", dark: ["#F7B84B", "#F2806E"] },
+  "#8B5CF6": { a: "#8B5CF6", b: "#EC4899", dark: ["#A78BFA", "#F472B6"] },
+  "#10B981": { a: "#10B981", b: "#3B82F6", dark: ["#34D399", "#60A5FA"] },
+};
+
+const prefs = {
+  accent: "",
+  accent_custom: "",
+  radius: "m",
+  compact: false,
+  animations: true,
+  theme_override: "follow",
+};
+
+function isDark() {
+  return document.documentElement.dataset.theme === "dark";
+}
+
+function hexToRgb(hex) {
+  const v = hex.replace("#", "");
+  return [0, 2, 4].map((i) => parseInt(v.slice(i, i + 2), 16));
+}
+
+function applyPrefs() {
+  const root = document.documentElement;
+  root.dataset.radius = prefs.radius || "m";
+  root.dataset.compact = prefs.compact ? "1" : "0";
+  root.dataset.motion = prefs.animations ? "1" : "0";
+
+  const key = prefs.accent || "";
+  const custom = prefs.accent_custom || "";
+  const src = key === "custom" ? custom : key;
+  const preset = ACCENT_PRESETS[key];
+  let a;
+  let b;
+  if (preset) {
+    [a, b] = isDark() ? preset.dark : [preset.a, preset.b];
+  } else if (src && /^#[0-9a-fA-F]{6}$/.test(src)) {
+    a = src;
+    b = src;
+  }
+  if (a) {
+    const [r, g, bl] = hexToRgb(a);
+    const dark = isDark();
+    root.style.setProperty("--accent", a);
+    root.style.setProperty("--accent-2", b);
+    root.style.setProperty("--accent-soft", `rgba(${r},${g},${bl},${dark ? 0.18 : 0.13})`);
+    root.style.setProperty("--accent-ring", `rgba(${r},${g},${bl},0.4)`);
+    root.style.setProperty("--accent-text", dark ? "#0d1420" : "#ffffff");
+    root.style.setProperty("--bg-grad-a", `rgba(${r},${g},${bl},${dark ? 0.09 : 0.07})`);
+  } else {
+    for (const name of ["--accent", "--accent-2", "--accent-soft", "--accent-ring", "--accent-text", "--bg-grad-a"]) {
+      root.style.removeProperty(name);
+    }
+  }
+}
+
+async function loadPrefs() {
+  try {
+    const payload = await api.get("appearance");
+    const saved = (payload && payload.prefs) || {};
+    for (const key of Object.keys(prefs)) {
+      if (saved[key] !== undefined && saved[key] !== null) prefs[key] = saved[key];
+    }
+  } catch (error) {
+    console.warn("读取外观偏好失败，使用默认值", error);
+  }
+  // 主题覆盖：follow 时不碰 data-theme（跟随 Dashboard）
+  if (prefs.theme_override === "light" || prefs.theme_override === "dark") {
+    document.documentElement.dataset.theme = prefs.theme_override;
+  }
+  applyPrefs();
+}
+
 const state = {
   view: "overview",
   instance: null,
@@ -65,6 +152,18 @@ const state = {
 /** 提供给视图的控制台上下文。 */
 const ctx = {
   api,
+  prefs,
+  accentPresets: ACCENT_PRESETS,
+  applyPrefs,
+  async savePrefs(patch) {
+    Object.assign(prefs, patch);
+    applyPrefs();
+    try {
+      await api.post("appearance", { prefs: patch });
+    } catch (error) {
+      toast(`外观偏好保存失败：${error.message || error}`, "err");
+    }
+  },
   setHead(text, kind = "") {
     if (!text) {
       state.pill.hidden = true;
@@ -180,6 +279,18 @@ async function boot() {
   } catch (error) {
     console.error("等待 bridge 上下文失败", error);
   }
+
+  // Dashboard 主题切换时重算偏好派生色；theme_override 为 follow 时直接跟随
+  if (typeof bridge.onContext === "function") {
+    bridge.onContext(() => {
+      if (prefs.theme_override !== "follow") {
+        document.documentElement.dataset.theme = prefs.theme_override;
+      }
+      applyPrefs();
+    });
+  }
+
+  await loadPrefs();
 
   ctx.setConnection(true, "已连接");
   await switchView("overview");

@@ -15,10 +15,13 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Any
 
 _config = None
+
+_HEX_COLOR_RE = re.compile(r"^#[0-9a-fA-F]{6}$")
 
 # 配置分组：展示顺序即此处的顺序，常用在前、折腾在后
 CONFIG_GROUPS: tuple[tuple[str, str], ...] = (
@@ -206,6 +209,64 @@ CONFIG_META: tuple[dict[str, Any], ...] = (
         "type": "string",
         "default": "",
         "hint": "留空自动探测系统字体；卡片出现方块字时才需要指定绝对路径",
+    },
+    {
+        "key": "RENDER_ACCENT_COLOR",
+        "group": "卡片外观",
+        "label": "自定义强调色",
+        "type": "string",
+        "default": "",
+        "placeholder": "#FB7299",
+        "pattern": "^#[0-9a-fA-F]{6}$",
+        "hint": "留空=每个平台用自己的品牌色。填 #RRGGBB 后所有卡片统一用这个强调色（徽章/光晕/水印圆点）",
+    },
+    {
+        "key": "RENDER_WATERMARK",
+        "group": "卡片外观",
+        "label": "卡片水印文字",
+        "type": "string",
+        "default": "希望解析",
+        "max_length": 12,
+        "hint": "卡片右下角的水印文字，留空则不显示水印，最长 12 个字符",
+    },
+    {
+        "key": "RENDER_DESC_MAX_LINES",
+        "group": "卡片外观",
+        "label": "正文最大行数",
+        "type": "int",
+        "default": 0,
+        "min": 0,
+        "max": 12,
+        "unit": "行",
+        "hint": "0=按布局默认（4~6 行）。简介超长时按此行数截断，卡片更紧凑",
+    },
+    {
+        "key": "RENDER_SHOW_AVATAR",
+        "group": "卡片外观",
+        "label": "显示作者头像",
+        "type": "bool",
+        "default": True,
+        "hint": "关闭后作者行只保留昵称与签名，不绘制头像圆（头像也不会再被加载）",
+    },
+    {
+        "key": "RENDER_GRADIENT_TOP",
+        "group": "卡片外观",
+        "label": "背景渐变·顶部色",
+        "type": "string",
+        "default": "",
+        "placeholder": "#242B3F",
+        "pattern": "^#[0-9a-fA-F]{6}$",
+        "hint": "留空=跟随卡片主题。填 #RRGGBB 覆盖卡片背景渐变的顶部颜色",
+    },
+    {
+        "key": "RENDER_GRADIENT_BOTTOM",
+        "group": "卡片外观",
+        "label": "背景渐变·底部色",
+        "type": "string",
+        "default": "",
+        "placeholder": "#12161F",
+        "pattern": "^#[0-9a-fA-F]{6}$",
+        "hint": "留空=跟随卡片主题。填 #RRGGBB 覆盖卡片背景渐变的底部颜色",
     },
     # ---------------- 媒体发送 ---------------- #
     {
@@ -403,6 +464,15 @@ def coerce_value(item: dict[str, Any], raw: Any) -> tuple[Any, str | None]:
             return None, f"{label}：只能是 {' / '.join(options)} 之一"
     if kind == "text" and len(text) > 8000:
         return None, f"{label}：内容过长（超过 8000 字）"
+    max_length = item.get("max_length")
+    if max_length is not None and len(text) > int(max_length):
+        return None, f"{label}：不能超过 {max_length} 个字符"
+    pattern = item.get("pattern")
+    if pattern and text:
+        import re
+
+        if not re.match(pattern, text):
+            return None, f"{label}：格式不正确（需要 {pattern}）"
     return text, None
 
 
@@ -687,6 +757,57 @@ class ParserConfig:
     @property
     def RENDER_COVER_FULL_SIZE(self) -> bool:
         return bool(self._cfg_get("RENDER_COVER_FULL_SIZE", False))
+
+    @property
+    def RENDER_ACCENT_COLOR(self) -> str:
+        """自定义强调色（#RRGGBB），留空表示按平台品牌色。"""
+        value = str(self._cfg_get("RENDER_ACCENT_COLOR", "") or "").strip()
+        return value if _HEX_COLOR_RE.match(value) else ""
+
+    @property
+    def RENDER_WATERMARK(self) -> str:
+        """卡片右下角水印文字，留空表示不显示。"""
+        return str(self._cfg_get("RENDER_WATERMARK", "希望解析") or "").strip()[:12]
+
+    @property
+    def RENDER_DESC_MAX_LINES(self) -> int:
+        """正文最大行数，0 表示按布局默认。"""
+        return max(0, min(12, int(self._cfg_get("RENDER_DESC_MAX_LINES", 0))))
+
+    @property
+    def RENDER_SHOW_AVATAR(self) -> bool:
+        return bool(self._cfg_get("RENDER_SHOW_AVATAR", True))
+
+    @property
+    def RENDER_GRADIENT_TOP(self) -> str:
+        value = str(self._cfg_get("RENDER_GRADIENT_TOP", "") or "").strip()
+        return value if _HEX_COLOR_RE.match(value) else ""
+
+    @property
+    def RENDER_GRADIENT_BOTTOM(self) -> str:
+        value = str(self._cfg_get("RENDER_GRADIENT_BOTTOM", "") or "").strip()
+        return value if _HEX_COLOR_RE.match(value) else ""
+
+    def renderer_options(self) -> dict[str, Any]:
+        """返回构造 ShareCardRenderer 的关键字参数（配置的唯一装配点）。
+
+        main.py 的常驻渲染器与 webui.py 的临时预览渲染器都用它，
+        新增外观项只需要在这里和 ``_build_renderer`` 的覆盖层各加一行。
+        """
+        return {
+            "enabled": self.RENDER_ENABLED,
+            "width": self.RENDER_WIDTH,
+            "theme": self.RENDER_THEME,
+            "font_path": self.RENDER_FONT_PATH or None,
+            "layout": self.RENDER_LAYOUT,
+            "cover_full_size": self.RENDER_COVER_FULL_SIZE,
+            "accent_color": self.RENDER_ACCENT_COLOR or None,
+            "watermark": self.RENDER_WATERMARK,
+            "desc_max_lines": self.RENDER_DESC_MAX_LINES,
+            "show_avatar": self.RENDER_SHOW_AVATAR,
+            "gradient_top": self.RENDER_GRADIENT_TOP or None,
+            "gradient_bottom": self.RENDER_GRADIENT_BOTTOM or None,
+        }
 
     # ---------------- 媒体发送 ---------------- #
 

@@ -52,6 +52,15 @@ PREVIEW_MAX_BYTES = 3 * 1024 * 1024
 MAX_URL_LENGTH = 2048
 MAX_QUERY_LIMIT = 100
 
+
+class PreviewOverridesError(Exception):
+    """预览覆盖参数不合法。
+
+    刻意和「没有覆盖项」区分开：没有覆盖项时用常驻渲染器按当前配置出图，
+    参数非法时必须报错——否则用户改了一个非法颜色，看到的却是按旧配置渲染的
+    图，还以为自己改的值生效了。
+    """
+
 try:  # Pillow 是插件依赖，缺了只影响预览图，不影响其余接口
     from PIL import Image
 except ImportError:  # pragma: no cover
@@ -163,6 +172,9 @@ class WebUIApi:
             ("/platforms", self.toggle_platform, ("POST",), "启用/禁用平台"),
             ("/parse", self.parse_url, ("POST",), "手动解析链接"),
             ("/render", self.render_cached, ("POST",), "按指定外观重新渲染卡片"),
+            ("/preview/sample", self.sample_preview, ("POST",), "离线示例卡片预览"),
+            ("/appearance", self.get_appearance, ("GET",), "读取界面外观偏好"),
+            ("/appearance", self.save_appearance, ("POST",), "保存界面外观偏好"),
             ("/screenshot", self.screenshot, ("POST",), "网页截图测试"),
             ("/cache", self.list_cache, ("GET",), "解析记录列表"),
             ("/cache/delete", self.delete_cache, ("POST",), "删除解析记录"),
@@ -472,8 +484,12 @@ class WebUIApi:
         renderer = self.plugin._renderer
         temporary = False
         if isinstance(overrides, dict) and overrides:
-            renderer = self._build_renderer(overrides)
-            if renderer is None:
+            try:
+                renderer = self._build_renderer(overrides)
+            except PreviewOverridesError as exc:
+                # 解析链路里卡片只是附带产物，参数填错不该把整条解析判死，
+                # 记日志后按当前配置出图（页面会另外提示参数无效）。
+                logger.warning("[denia_share] 预览覆盖参数无效，回退当前配置：%s", exc)
                 renderer = self.plugin._renderer
             else:
                 temporary = True
@@ -503,34 +519,203 @@ class WebUIApi:
             "width": renderer.width,
         }
 
-    def _build_renderer(self, overrides: dict[str, Any]) -> ShareCardRenderer | None:
-        """按预览参数构造临时渲染器；参数不合法时返回 None。"""
+    def _build_renderer(self, overrides: dict[str, Any]) -> ShareCardRenderer:
+        """按预览参数构造临时渲染器。
+
+        以当前配置为底，仅覆盖预览里显式给出的外观项，这样「换个颜色看看」
+        不需要改动用户的实际配置。
+
+        参数不合法时抛 ``PreviewOverridesError``——调用方必须显式处理，
+        不能当成「没有覆盖项」静默回退。
+        """
         pconfig = get_config()
-        theme = str(overrides.get("theme") or pconfig.RENDER_THEME).strip().lower()
-        layout = str(overrides.get("layout") or pconfig.RENDER_LAYOUT).strip().lower()
-        if theme not in {"dark", "light"} or layout not in LAYOUT_NAMES:
-            return None
-        try:
-            width = int(overrides.get("width") or pconfig.RENDER_WIDTH)
-        except (TypeError, ValueError):
-            return None
-        width = max(520, min(1080, width))
-        cover_full_size = overrides.get("cover_full_size")
-        if not isinstance(cover_full_size, bool):
-            cover_full_size = pconfig.RENDER_COVER_FULL_SIZE
-        try:
-            return ShareCardRenderer(
-                self.plugin.cache_dir,
-                enabled=True,
-                width=width,
-                theme=theme,
-                font_path=pconfig.RENDER_FONT_PATH or None,
-                layout=layout,
-                cover_full_size=cover_full_size,
+        opts = pconfig.renderer_options()
+        opts["enabled"] = True
+
+        theme = str(overrides.get("theme") or opts["theme"]).strip().lower()
+        layout = str(overrides.get("layout") or opts["layout"]).strip().lower()
+        if theme not in {"dark", "light"}:
+            raise PreviewOverridesError(f"主题只能是 dark 或 light，收到 {theme!r}")
+        if layout not in LAYOUT_NAMES:
+            raise PreviewOverridesError(
+                f"布局只能是 {'/'.join(sorted(LAYOUT_NAMES))}，收到 {layout!r}"
             )
+        opts["theme"] = theme
+        opts["layout"] = layout
+
+        if "width" in overrides and overrides.get("width") is not None:
+            try:
+                opts["width"] = max(520, min(1080, int(overrides.get("width"))))
+            except (TypeError, ValueError):
+                raise PreviewOverridesError(
+                    f"宽度需要是数字，收到 {overrides.get('width')!r}"
+                ) from None
+        if isinstance(overrides.get("cover_full_size"), bool):
+            opts["cover_full_size"] = overrides["cover_full_size"]
+        if isinstance(overrides.get("show_avatar"), bool):
+            opts["show_avatar"] = overrides["show_avatar"]
+        if overrides.get("desc_max_lines") is not None:
+            try:
+                opts["desc_max_lines"] = max(0, min(12, int(overrides.get("desc_max_lines"))))
+            except (TypeError, ValueError):
+                raise PreviewOverridesError(
+                    f"正文行数需要是数字，收到 {overrides.get('desc_max_lines')!r}"
+                ) from None
+        for key in ("accent_color", "gradient_top", "gradient_bottom"):
+            if key in overrides:
+                raw = overrides.get(key)
+                if raw in (None, ""):
+                    opts[key] = None
+                    continue
+                from .card_renderer import normalize_hex_color
+
+                normalized = normalize_hex_color(str(raw))
+                if normalized is None:
+                    raise PreviewOverridesError(
+                        f"{key} 需要是 #RRGGBB 形式的颜色，收到 {raw!r}"
+                    )
+                opts[key] = normalized
+        if "watermark" in overrides:
+            opts["watermark"] = str(overrides.get("watermark") or "").strip()[:12]
+
+        try:
+            return ShareCardRenderer(self.plugin.cache_dir, **opts)
         except Exception:
             logger.warning("[denia_share] 构造临时渲染器失败", exc_info=True)
-            return None
+            raise PreviewOverridesError("这些外观参数无法生成渲染器") from None
+
+    # ==================== 离线示例预览 ==================== #
+
+    _SAMPLE_LOCK: asyncio.Lock | None = None
+
+    async def sample_preview(self):
+        """用内置示例数据渲染一张卡片预览（不联网，不写解析记录）。
+
+        供「外观」页实时预览：改一个参数立刻看到效果，无需真的去解析一条链接。
+        """
+        from astrbot.api.web import request
+
+        body = await request.json(default={}) or {}
+        overrides = body.get("preview")
+        overrides = overrides if isinstance(overrides, dict) else {}
+
+        renderer = None
+        if overrides:
+            try:
+                renderer = self._build_renderer(overrides)
+            except PreviewOverridesError as exc:
+                # 预览的全部意义就是「所见即所填」，参数非法必须显式报错，
+                # 不能悄悄按当前配置出图。
+                return _error(str(exc))
+        if renderer is None:
+            # 没有覆盖项时直接用常驻渲染器；没开渲染时也要能给预览（强制启用）
+            renderer = self.plugin._renderer
+            if renderer is None or not renderer.enabled:
+                opts = get_config().renderer_options()
+                opts["enabled"] = True
+                renderer = ShareCardRenderer(self.plugin.cache_dir, **opts)
+
+        result = self.plugin.build_sample_result()
+        # 示例渲染不进入渲染缓存，也不污染记录；文件名带外观指纹自然去重
+        try:
+            if WebUIApi._SAMPLE_LOCK is None:
+                WebUIApi._SAMPLE_LOCK = asyncio.Lock()
+            async with WebUIApi._SAMPLE_LOCK:
+                path = await renderer.render(result, cache_key=None)
+        except Exception:
+            logger.warning("[denia_share] 示例卡片预览失败", exc_info=True)
+            return _error("示例卡片渲染失败，请检查字体配置", 500)
+        if path is None:
+            return _error("示例卡片渲染失败，请检查字体配置", 500)
+
+        data_url = await asyncio.to_thread(_image_data_url, path, 720)
+        if data_url is None:
+            return _error("预览图生成失败", 500)
+        return _json_response(
+            {
+                "data_url": data_url,
+                "theme": renderer.theme_name,
+                "layout": renderer.layout_name,
+                "width": renderer.width,
+                "file": path.name,
+            }
+        )
+
+    # ==================== 界面外观偏好 ==================== #
+
+    _APPEARANCE_KEYS = {
+        "accent": (str, ""),
+        "accent_custom": (str, ""),
+        "radius": (str, "m"),
+        "compact": (bool, False),
+        "animations": (bool, True),
+        "theme_override": (str, "follow"),
+    }
+
+    def _appearance_path(self) -> Path:
+        return self.plugin.history.path.parent / "webui_appearance.json"
+
+    async def get_appearance(self):
+        prefs = await asyncio.to_thread(self._read_appearance)
+        return _json_response({"prefs": prefs})
+
+    def _read_appearance(self) -> dict[str, Any]:
+        path = self._appearance_path()
+        try:
+            import json
+
+            raw = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            raw = {}
+        if not isinstance(raw, dict):
+            raw = {}
+        prefs: dict[str, Any] = {}
+        for key, (kind, default) in self._APPEARANCE_KEYS.items():
+            value = raw.get(key, default)
+            if kind is bool:
+                prefs[key] = bool(value)
+            else:
+                value = str(value or "").strip()
+                # 白名单收敛，避免把脏数据写进 CSS 变量
+                if key == "radius" and value not in {"s", "m", "l"}:
+                    value = "m"
+                if key == "theme_override" and value not in {"follow", "light", "dark"}:
+                    value = "follow"
+                if key in {"accent", "accent_custom"}:
+                    import re as _re
+
+                    if value and not _re.match(r"^#[0-9a-fA-F]{6}$", value):
+                        value = ""
+                prefs[key] = value
+        return prefs
+
+    async def save_appearance(self):
+        from astrbot.api.web import request
+
+        body = await request.json(default={}) or {}
+        prefs = body.get("prefs") if isinstance(body, dict) else None
+        if not isinstance(prefs, dict):
+            return _error("缺少 prefs 对象")
+        # 只接受白名单键，值在 _read_appearance 回读时还会再校验一次
+        cleaned = {k: prefs[k] for k in self._APPEARANCE_KEYS if k in prefs}
+        try:
+            await asyncio.to_thread(self._write_appearance, cleaned)
+        except OSError as exc:
+            logger.warning("[denia_share] 外观偏好写入失败", exc_info=True)
+            return _error(f"写入失败：{str(exc)[:120]}", 500)
+        return _json_response({"prefs": self._read_appearance()})
+
+    def _write_appearance(self, prefs: dict[str, Any]) -> None:
+        import json
+        import os
+
+        path = self._appearance_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        merged = self._read_appearance()
+        merged.update(prefs)
+        tmp = path.with_suffix(".tmp")
+        tmp.write_text(json.dumps(merged, ensure_ascii=False, indent=2), encoding="utf-8")
+        os.replace(tmp, path)
 
     # ==================== 网页截图 ==================== #
 

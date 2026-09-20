@@ -6,7 +6,7 @@
   "pages": {
     "denia": {
       "title": "Denia Share",
-      "description": "Overview, manual link parsing, parse-cache management and full configuration."
+      "description": "Overview, manual link parsing, parse-cache management, UI and card appearance customization, and full configuration."
     }
   }
 }
