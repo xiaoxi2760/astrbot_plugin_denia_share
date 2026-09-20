@@ -1,3 +1,7 @@
+# 本文件包含衍生自 astrbot_plugin_rika_share（MIT License）的代码，
+# 上游项目：https://github.com/iris1598/astrbot_plugin_rika_share
+# 本仓库对其做过修改；完整归属见项目根目录 README「许可与致谢」。
+
 """抖音 Web 详情接口传输层。"""
 
 # 该接口并非公开稳定 API，所有易变参数和会话状态集中在本模块，解析器只消费
@@ -165,7 +169,10 @@ class DouyinWebClient:
         """返回 ``(数据, 是否值得刷新会话后重试)``。"""
         params = self._build_params(item_id)
         param_string = urlencode(params)
-        signature = generate_abogus(
+        # 签名是纯 Python 的 SM3 位运算（见 sign.py），同步跑会卡住整个事件循环，
+        # 所以丢到线程池里
+        signature = await asyncio.to_thread(
+            generate_abogus,
             param_string,
             body="",
             user_agent=DOUYIN_WEB_USER_AGENT,

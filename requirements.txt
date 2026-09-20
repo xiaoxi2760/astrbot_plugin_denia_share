@@ -1,4 +1,4 @@
-astrbot>=4.25.0
+astrbot>=4.25.3
 httpx>=0.27.0
 aiofiles>=24.1.0
 beautifulsoup4>=4.12.0

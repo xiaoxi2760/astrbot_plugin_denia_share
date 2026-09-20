@@ -1,3 +1,7 @@
+# 本文件包含衍生自 astrbot_plugin_rika_share（MIT License）的代码，
+# 上游项目：https://github.com/iris1598/astrbot_plugin_rika_share
+# 本仓库对其做过修改；完整归属见项目根目录 README「许可与致谢」。
+
 """网页截图服务
 
 两个后端，由配置 `SCREENSHOT_BACKEND` 选择：
@@ -65,6 +69,7 @@ class ScreenshotService:
         cf_api_token: str = "",
         proxy: str = "",
         timeout: float = 60.0,
+        verify_ssl: bool = True,
     ):
         self.cache_dir = cache_dir / "screenshot"
         self.backend = (backend or "thum").strip().lower()
@@ -74,6 +79,8 @@ class ScreenshotService:
         self.cf_api_token = (cf_api_token or "").strip()
         self.proxy = (proxy or "").strip() or None
         self.timeout = timeout
+        # Cloudflare 后端会带 Authorization: Bearer <token>，默认必须校验证书
+        self.verify_ssl = bool(verify_ssl)
         self.last_error: str | None = None
 
     @property
@@ -116,7 +123,8 @@ class ScreenshotService:
         path = self.cache_dir / f"thum_{uuid.uuid4().hex[:12]}.png"
 
         async with httpx.AsyncClient(
-            proxy=self.proxy, timeout=self.timeout, follow_redirects=True, verify=False,
+            proxy=self.proxy, timeout=self.timeout, follow_redirects=True,
+            verify=self.verify_ssl,
         ) as client:
             resp = await client.get(target)
 
@@ -157,7 +165,8 @@ class ScreenshotService:
         path = self.cache_dir / f"cf_{uuid.uuid4().hex[:12]}.png"
 
         async with httpx.AsyncClient(
-            proxy=self.proxy, timeout=self.timeout, follow_redirects=True, verify=False,
+            proxy=self.proxy, timeout=self.timeout, follow_redirects=True,
+            verify=self.verify_ssl,
         ) as client:
             resp = await client.post(endpoint, headers=headers, json=body)
 

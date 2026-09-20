@@ -31,16 +31,61 @@ def fmt_duration(duration: float) -> str:
 
 
 async def safe_unlink(path: Path):
-    """安全删除文件"""
+    """安全删除文件（失败只记日志，不向上抛）"""
     try:
         if path.exists():
             path.unlink()
     except Exception:
-        pass
+        logger.warning(f"删除文件失败: {path}", exc_info=True)
+
+
+# 缓存目录哨兵文件名。
+#
+# 为什么需要它：清理是**递归删除**，而「共享缓存目录」是个自由文本配置项，
+# 填错了就会把无关目录清空。哨兵的作用是把「这是个缓存目录」变成可验证的事实，
+# 而不是靠配置项里填了什么来推断。目录里已经有别的东西、又没有这个文件时，
+# 清理函数一律拒绝执行。
+CACHE_MARKER_NAME = ".denia_share_cache"
+
+
+def is_cache_dir_trusted(cache_dir: Path) -> bool:
+    """目录里是否有缓存哨兵（没有就说明不该对它做递归清理）。"""
+    try:
+        return (cache_dir / CACHE_MARKER_NAME).is_file()
+    except OSError:
+        return False
+
+
+def ensure_cache_marker(cache_dir: Path, *, allow_nonempty: bool = False) -> bool:
+    """确保缓存目录带哨兵文件。
+
+    Args:
+        cache_dir: 目标目录（应已存在）。
+        allow_nonempty: 目录非空时是否仍然补写哨兵。插件自己管的目录
+            （默认数据目录下的 cache/）传 True；用户填的共享目录传 False，
+            这样「指向一个已有内容的目录」会被拒绝而不是被清空。
+
+    Returns:
+        是否可安全用作缓存目录。
+    """
+    marker = cache_dir / CACHE_MARKER_NAME
+    try:
+        if marker.is_file():
+            return True
+        if not allow_nonempty and any(cache_dir.iterdir()):
+            return False
+        marker.touch()
+        return True
+    except OSError as exc:
+        logger.warning(f"写入缓存哨兵失败: {cache_dir} ({exc})")
+        return False
 
 
 async def cleanup_cache_dir(cache_dir: Path, ttl_hours: int) -> int:
     """清理缓存目录中超过 TTL 的过期文件。
+
+    目录没有缓存哨兵时直接返回 0 —— 说明它不是插件认领的缓存目录，
+    宁可不清也不能清错。
 
     Args:
         cache_dir: 缓存目录路径。
@@ -51,6 +96,12 @@ async def cleanup_cache_dir(cache_dir: Path, ttl_hours: int) -> int:
         清理的文件数量。
     """
     if not cache_dir.exists():
+        return 0
+
+    if not is_cache_dir_trusted(cache_dir):
+        logger.warning(
+            f"缓存目录 {cache_dir} 缺少 {CACHE_MARKER_NAME} 哨兵，已跳过清理"
+        )
         return 0
 
     cutoff = time.time() - ttl_hours * 3600
@@ -74,9 +125,18 @@ async def cleanup_cache_dir(cache_dir: Path, ttl_hours: int) -> int:
 async def clear_cache_dir(cache_dir: Path) -> int:
     """清空缓存目录中的所有文件，并删除其中的空目录。
 
-    缓存目录本身会保留，配置目录不在其内，因此不会被清理。
+    只保留目录本身与哨兵文件。**目录没有缓存哨兵时直接返回 0**：
+    清理是递归删除，而缓存目录可被配置项指向任意路径，所以必须先确认
+    「这确实是插件认领的缓存目录」再动手，而不是反过来事后补救。
     """
     if not cache_dir.exists():
+        return 0
+
+    if not is_cache_dir_trusted(cache_dir):
+        logger.warning(
+            f"缓存目录 {cache_dir} 缺少 {CACHE_MARKER_NAME} 哨兵，已跳过清理。"
+            f"如果确实要把它当缓存目录，请先在该目录下建一个空的 {CACHE_MARKER_NAME} 文件"
+        )
         return 0
 
     cleaned = 0
@@ -84,6 +144,8 @@ async def clear_cache_dir(cache_dir: Path) -> int:
     entries = sorted(cache_dir.rglob("*"), key=lambda p: len(p.parts), reverse=True)
 
     for entry in entries:
+        if entry.name == CACHE_MARKER_NAME:
+            continue
         try:
             # 先判断符号链接，避免误将链接目标当作缓存目录递归处理
             if entry.is_symlink() or entry.is_file():

@@ -974,7 +974,9 @@ class WebUIApi:
                 try:
                     target.unlink()
                     removed += 1
-                except OSError:
+                except OSError as exc:
+                    # 静默 continue 会让「一个文件都没删掉」看起来像成功
+                    logger.warning(f"[denia_share] 删除缓存文件失败: {target} ({exc})")
                     continue
         # 渲染缓存按 cache_key 索引、存的是路径，删了文件后难以精确对应，
         # 直接整体清掉：代价只是下次重新渲染一次。

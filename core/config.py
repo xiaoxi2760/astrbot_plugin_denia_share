@@ -287,7 +287,9 @@ CONFIG_META: tuple[dict[str, Any], ...] = (
         "hint": (
             "① 本地文件方式：填一个「所有容器都把宿主机同一目录挂到它上面」的容器内路径，"
             "协议端（NapCat 等）就能直接读走视频。留空=用插件数据目录 —— 分容器部署时协议端读不到，"
-            "视频会发不出去（图片语音不受影响，它们会转成 base64）"
+            "视频会发不出去（图片语音不受影响，它们会转成 base64）。"
+            "安全限制：清理缓存会递归删除该目录，所以根目录、把插件数据目录包在里面的上级目录，"
+            "以及「已有内容且没有 .denia_share_cache 哨兵文件」的目录都会被拒绝并回退到插件数据目录"
         ),
     },
     {
@@ -360,6 +362,17 @@ CONFIG_META: tuple[dict[str, Any], ...] = (
         "default": "",
         "placeholder": "http://127.0.0.1:7897",
         "hint": "留空不使用。作用于下载与自建请求（GitHub/Pixiv/截图）。填运行 AstrBot 那台机器上的地址",
+    },
+    {
+        "key": "HTTP_VERIFY_SSL",
+        "group": "高级设置",
+        "label": "校验 HTTPS 证书",
+        "type": "bool",
+        "default": True,
+        "hint": (
+            "默认开启。下载与自建请求都会校验服务端证书，防止中间人截获带 Cookie 的请求。"
+            "只有遇到证书链有问题的站点（自建反代、内网镜像）导致解析失败时，才临时关掉"
+        ),
     },
     {
         "key": "TWITTER_MEDIA_PROXY_BASE",
@@ -614,7 +627,11 @@ class ParserConfig:
             changed.append(key)
 
         if changed:
-            self.save()
+            if not self.save():
+                errors.append(
+                    "配置已生效但没能写入磁盘，重启插件后会回滚；"
+                    "请检查配置目录是否可写、磁盘是否已满"
+                )
         return changed, errors
 
     def reset_to_defaults(self) -> list[str]:
@@ -625,14 +642,28 @@ class ParserConfig:
         return changed
 
     def save(self) -> bool:
-        """持久化配置（AstrBotConfig 提供 save_config，缺失时静默跳过）。"""
+        """持久化配置（AstrBotConfig 提供 save_config，缺失时静默跳过）。
+
+        Returns:
+            是否真的写盘成功。失败必须让调用方看见 —— 只写内存的修改在
+            重启后会无声回滚，前端却已经提示「已保存」。
+        """
+        from astrbot.api import logger
+
         save = getattr(self._cfg, "save_config", None)
         if not callable(save):
+            logger.warning(
+                "[denia_share] 配置对象没有 save_config，本次修改只存在于内存，"
+                "重启后会回滚"
+            )
             return False
         try:
             save()
             return True
         except Exception:
+            logger.exception(
+                "[denia_share] 配置写入磁盘失败，本次修改只存在于内存，重启后会回滚"
+            )
             return False
 
     # ---------------- 平台 ---------------- #
@@ -657,6 +688,11 @@ class ParserConfig:
     def PROXY(self) -> str:
         """全局代理地址，形如 http://127.0.0.1:7890，留空不使用。"""
         return str(self._cfg_get("PROXY", "") or "").strip()
+
+    @property
+    def HTTP_VERIFY_SSL(self) -> bool:
+        """是否校验 HTTPS 证书（默认开启；关掉会让带 Cookie 的请求可被中间人截获）。"""
+        return bool(self._cfg_get("HTTP_VERIFY_SSL", True))
 
     @property
     def XHS_CK(self) -> str | None:

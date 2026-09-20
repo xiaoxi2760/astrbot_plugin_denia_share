@@ -223,7 +223,7 @@ class HistoryStore:
             self._write(records)
 
     def delete(self, record_ids: Iterable[str]) -> int:
-        """按 id 删除记录，返回实际删除条数。"""
+        """按 id 删除记录，返回**实际落盘**的删除条数（写盘失败返回 0）。"""
         targets = {str(x) for x in record_ids}
         if not targets:
             return 0
@@ -231,22 +231,31 @@ class HistoryStore:
             records = self.load()
             kept = [r for r in records if r.id not in targets]
             removed = len(records) - len(kept)
-            if removed:
-                self._write(kept)
+            if removed and not self._write(kept):
+                # 没写成功就等于没删掉，不能报「删了 N 条」让前端显示成功
+                return 0
             return removed
 
     def clear(self) -> int:
-        """清空全部记录，返回删除条数。"""
+        """清空全部记录，返回**实际落盘**的删除条数（写盘失败返回 0）。"""
         with self._lock:
             records = self.load()
             count = len(records)
-            self._write([])
+            if not self._write([]):
+                return 0
             return count
 
-    def _write(self, records: list[ParseRecord]) -> None:
-        self.path.parent.mkdir(parents=True, exist_ok=True)
+    def _write(self, records: list[ParseRecord]) -> bool:
+        """把记录整体落盘（先写临时文件再 os.replace）。
+
+        Returns:
+            是否写入成功。调用方必须据此判断删除是否真的生效。
+        """
         tmp = self.path.with_suffix(self.path.suffix + ".tmp")
         try:
+            # mkdir 也要在 try 里：目录建不出来（父路径被同名文件占住、
+            # 权限不足、磁盘满）同样属于「写失败」，不能让它直接抛出去
+            self.path.parent.mkdir(parents=True, exist_ok=True)
             with tmp.open("w", encoding="utf-8") as fp:
                 for record in records:
                     fp.write(json.dumps(record.to_dict(), ensure_ascii=False) + "\n")
@@ -260,3 +269,5 @@ class HistoryStore:
                 tmp.unlink(missing_ok=True)
             except OSError:
                 pass
+            return False
+        return True
