@@ -83,6 +83,13 @@ html[data-motion="0"] * { transition: none !important; animation: none !importan
 
 * { box-sizing: border-box; }
 
+/* hidden 属性必须能压过组件自己的 display。
+   浏览器 UA 样式表的 [hidden]{display:none} 优先级低于作者样式，
+   所以 .modal-host{display:flex}、.pill{display:inline-flex} 这类
+   带 hidden 属性的元素照样会显示 —— 表现就是一层永远盖在页面上的黑罩，
+   页面发暗且所有点击都被吃掉。放在这里，以后新增的组件自动免疫。 */
+[hidden] { display: none !important; }
+
 html,
 body { margin: 0; padding: 0; height: 100%; }
 
