@@ -268,6 +268,10 @@ class DeniaSharePlugin(Star):
 
         # ========== B站 Cookie ==========
         self._bili_cookie: str = ""
+        # 上一次**生效过**的配置项 BILI_CK。用来判断「配置项到底变没变」：
+        # apply_runtime_config 是「保存配置 / 恢复默认 / 保存外观」三个接口都会走的，
+        # 无条件重新应用 cookie 会误伤（详见那里的注释）。
+        self._bili_ck_applied: str = ""
         self._bili_http_session: aiohttp.ClientSession | None = None
         self._bili_login_tasks: Dict[str, asyncio.Task] = {}
         self._bili_login_states: Dict[str, dict[str, Any]] = {}
@@ -772,12 +776,25 @@ class DeniaSharePlugin(Star):
         self.parsers = {}
         self._init_parsers()
 
-        # **配置项优先**：BILI_CK 是用户在网页上显式填的，登录态文件只是扫码登录的
-        # 暂存。反过来（登录态优先）会让「网页上改了 BILI_CK」看起来成功、实际仍用
-        # 老 Cookie —— 接口还回 changed:["BILI_CK"], runtime_ok:true，很难查。
-        bili_cookie = (pconfig.BILI_CK or "") or self._bili_cookie
-        if bili_cookie:
-            self._bili_apply_cookie_to_parser(bili_cookie)
+        # B站 Cookie **只在配置项真的变了的时候**才动。
+        #
+        # 为什么不能无条件重新应用：这个方法是「保存配置 / 恢复默认 / 保存外观」
+        # 三个接口都会走的（webui.py:293/316/352）。无条件应用会有两种误伤 ——
+        #   · 原先「登录态优先」：改 BILI_CK 不生效，接口却回 changed + runtime_ok
+        #   · 改成「配置项优先」后：配置项非空时，改任何别的配置（代理/外观）都会
+        #     把配置项里的 cookie 再应用一次，覆盖掉期间的扫码登录结果
+        # 两种都是「用户没动 cookie，cookie 却被改了」。所以按「变化」触发。
+        current_ck = str(pconfig.BILI_CK or "")
+        if current_ck != self._bili_ck_applied:
+            self._bili_ck_applied = current_ck
+            if current_ck:
+                self._bili_cookie = current_ck
+                self._bili_apply_cookie_to_parser(current_ck)
+            else:
+                # 配置项被清空 = 用户明确要清掉（「恢复默认」的文案承诺了「包括 Cookie」）。
+                # 走 bili_logout 而不是只清配置项：它会把主模块内存、解析器的持久化文件
+                # 与 bili_cookie.json 一起清掉，否则「看起来清了、实际还在用」。
+                await self.bili_logout()
 
         self._renderer = ShareCardRenderer(self.cache_dir, **pconfig.renderer_options())
         # 渲染参数进了产物文件名，配置变了就得让旧缓存失效
@@ -1175,6 +1192,9 @@ class DeniaSharePlugin(Star):
         以及配置项 ``BILI_CK``（否则重建解析器时又被读回来）。
         """
         self._bili_cookie = ""
+        # 同步「已生效的配置项值」：下面会把配置项也清空，不清这里的话
+        # 下一次热更新会以为配置项「没变」而跳过（其实该走的分支已经走完了）
+        self._bili_ck_applied = ""
 
         parser = self.parsers.get("bilibili")
         if parser is not None and hasattr(parser, "clear_cookie"):
@@ -1378,8 +1398,11 @@ class DeniaSharePlugin(Star):
         # **配置项优先**：BILI_CK 是用户显式填的，持久化文件只是扫码登录的暂存。
         # 取值顺序要和 apply_runtime_config 与 parser._init_credential 保持一致，
         # 否则「网页上改了 BILI_CK」还是会被旧登录态压住。
-        if get_config().BILI_CK:
-            self._bili_cookie = get_config().BILI_CK
+        configured = str(get_config().BILI_CK or "")
+        # 记下启动时生效的配置项值：apply_runtime_config 靠它判断「到底变没变」
+        self._bili_ck_applied = configured
+        if configured:
+            self._bili_cookie = configured
             return
         try:
             if self._bili_cookie_file.exists():
