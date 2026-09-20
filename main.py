@@ -5,9 +5,11 @@
 另有网页截图（thum.io / Cloudflare 双后端）与 Pixiv 关键词搜索。
 Steam 历史最低价需配置 ITAD_API_KEY（免费申请），未配置时只显示当前价与折扣。
 
-解析内核合并自两个插件，取各自更强的一版：
-- astrbot_plugin_rika_share（架构 / 渲染 / B站 / 微博 / 小红书 / AcFun / NGA）
-- astrbot_plugin_media_parser 娅娅版（抖音 a_bogus 签名 / 快手新版兼容 / Twitter GraphQL）
+代码来源（涉及第三方许可的都标在各自源文件里）：
+- astrbot_plugin_rika_share（MIT）：解析框架 / 卡片渲染 / B站 / 微博 / 小红书 / AcFun / NGA
+- Johnserf-Seed/f2（Apache-2.0）：抖音 a_bogus 签名，见 core/parsers/douyin/sign.py
+- 作者自己的 astrbot_plugin_media_parser（娅娅版）：抖音签名 Web API 路径、
+  快手新版页面兼容、Twitter GraphQL 兜底、媒体发送机制
 
 有意不实现的能力：LLM 文本翻译、视频仅发送封面。
 """
