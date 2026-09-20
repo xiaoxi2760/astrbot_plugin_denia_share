@@ -38,10 +38,17 @@ from .core.media_utils import (
 )
 from .core.config import init_config, get_config, verify_schema_alignment
 from .core.download import StreamDownloader
-from .core.data import ParseResult, ImageContent, VideoContent, AudioContent, Platform, Author
+from .core.data import (
+    ParseResult, ImageContent, VideoContent, AudioContent, Author, platform_of,
+)
 from .core.history import HistoryStore, ParseRecord
 from .core.relay import register_file
-from .core.constants import PLATFORM_DISPLAY_NAMES, PLATFORM_ORDER
+from .core.constants import (
+    PLATFORM_DISPLAY_NAMES, PLATFORM_ORDER, PlatformEnum, platform_meta,
+)
+# 版本号只认 __init__.py 那一处：register 装饰器直接读它，
+# 不用再在装饰器里手写一遍版本字符串（以前改版本要同时改三处，漏一处就版本不一致）
+from . import __version__
 from .core.exception import (
     ParseException, IgnoreException, SilentException,
 )
@@ -63,6 +70,13 @@ QR_CODE_EXPIRED = 86038
 QR_CODE_SUCCESS = 0
 QR_CODE_EXPIRE_TIME = 180
 POLL_INTERVAL = 5
+
+# 登录状态在任务结束后还要留一会儿：WebUI 是**轮询**读取的，任务一结束就删，
+# 最后一轮会拿到「登录任务不存在」而不是「登录成功」。
+LOGIN_STATE_TTL = 300
+# 状态字典的条数上限。WebUI 每点一次「获取二维码」都是一个随机 task_id，
+# 原先只从 _bili_login_tasks 里 pop，状态永远留着 —— 点得越多字典越长。
+LOGIN_STATE_MAX = 32
 
 
 def _get_plugin_data_dir() -> Path:
@@ -98,8 +112,14 @@ class _EventUrlWrapper:
         return getattr(self._event, name)
 
 
-@register("达妮娅分享", "xiaoxi2760",
-          "链接分享自动解析，支持 B站|抖音|快手|微博|小红书|Twitter|AcFun|NGA|GitHub|Pixiv|Steam", "0.6.5")
+@register(
+    "达妮娅分享",
+    "xiaoxi2760",
+    # 平台列表也从 PLATFORMS 派生：这是第 5 处会写出平台名的地方，
+    # 手写一份就等于又埋一个「改了这里忘了那里」
+    "链接分享自动解析，支持 " + "|".join(PLATFORM_DISPLAY_NAMES.values()),
+    __version__,
+)
 class DeniaSharePlugin(Star):
 
     @staticmethod
@@ -651,7 +671,9 @@ class DeniaSharePlugin(Star):
             record = ParseRecord.create(
                 url=result.url or "",
                 platform=result.platform.name,
-                platform_display=result.platform.display_name,
+                # 记录页是管理视图，用**正式名**：页面上的平台筛选与统计都是正式名，
+                # 行内再显示「猴山」这种卡片叫法就会出现同一平台两个名字并排
+                platform_display=platform_meta(result.platform.name).display_name,
                 content_type=result.content_type,
                 title=result.title or "",
                 author=result.author.name if result.author else "",
@@ -810,7 +832,7 @@ class DeniaSharePlugin(Star):
             duration=309,
         )
         return ParseResult(
-            platform=Platform("bilibili", "哔哩哔哩"),
+            platform=platform_of(PlatformEnum.BILIBILI),
             author=Author(
                 name="达妮娅示例频道",
                 avatar=PathTask(_static(avatar_path)),
@@ -1246,8 +1268,42 @@ class DeniaSharePlugin(Star):
             state["message"] = f"轮询出错：{str(e)[:120]}"
         finally:
             self._bili_login_tasks.pop(task_id, None)
+            # 状态不能跟着一起 pop：UI 还要读最终结果，见 _schedule_login_state_cleanup
+            self._schedule_login_state_cleanup(task_id)
             if qr_path is not None:
                 self._schedule_qr_cleanup(qr_path)
+
+    def _schedule_login_state_cleanup(self, task_id: str) -> None:
+        """登录任务结束后延迟回收状态，并把总量夹在上限内。
+
+        两个理由：一是 WebUI 轮询读取，任务刚结束就删会让最后一轮拿到
+        「登录任务不存在」而不是「登录成功」；二是 task_id 在 WebUI 侧是随机串，
+        不清就会随点击次数无限增长（原先只 pop 了 ``_bili_login_tasks``，
+        状态字典是只进不出的）。
+        """
+        if len(self._bili_login_states) > LOGIN_STATE_MAX:
+            ordered = sorted(
+                self._bili_login_states.items(),
+                key=lambda kv: kv[1].get("started_at") or 0.0,
+            )
+            for old_id, _ in ordered[: len(ordered) - LOGIN_STATE_MAX]:
+                if old_id in self._bili_login_tasks:
+                    continue  # 还在跑的任务不能丢，UI 要读它的进度
+                self._bili_login_states.pop(old_id, None)
+
+        async def _delayed_drop() -> None:
+            try:
+                await asyncio.sleep(LOGIN_STATE_TTL)
+                self._bili_login_states.pop(task_id, None)
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.debug("回收扫码登录状态失败", exc_info=True)
+
+        self._delayed_cleanup_tasks = [
+            task for task in self._delayed_cleanup_tasks if not task.done()
+        ]
+        self._delayed_cleanup_tasks.append(asyncio.create_task(_delayed_drop()))
 
     def _schedule_qr_cleanup(self, qr_path: Path, delay: int = 120) -> None:
         """延迟删除二维码临时文件。

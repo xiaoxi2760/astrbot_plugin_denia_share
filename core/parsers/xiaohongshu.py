@@ -8,11 +8,11 @@ from typing import ClassVar
 from httpx import Cookies, AsyncClient
 from astrbot.api import logger
 from ..base_parser import BaseParser, PlatformEnum, ParseException, handle
-from ..data import Platform
+from ..data import Platform, platform_of
 
 
 class XiaoHongShuParser(BaseParser):
-    platform: ClassVar[Platform] = Platform(name=PlatformEnum.XIAOHONGSHU, display_name="小红书")
+    platform: ClassVar[Platform] = platform_of(PlatformEnum.XIAOHONGSHU)
 
     def __init__(self, downloader, xhs_ck: str | None = None):
         super().__init__(downloader)

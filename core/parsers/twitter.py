@@ -22,7 +22,7 @@ import aiohttp
 from astrbot.api import logger
 
 from ..base_parser import BaseParser, PlatformEnum, ParseException, handle
-from ..data import Platform, ParseResult
+from ..data import Platform, ParseResult, platform_of
 
 # pbs.twimg.com / video.twimg.com 在国内常不可达，可配置反代根地址绕过
 _TWIMG_HOST_PREFIX = {
@@ -85,7 +85,7 @@ GRAPHQL_FEATURES = {
 
 
 class TwitterParser(BaseParser):
-    platform: ClassVar[Platform] = Platform(name=PlatformEnum.TWITTER, display_name="小蓝鸟")
+    platform: ClassVar[Platform] = platform_of(PlatformEnum.TWITTER)
 
     @handle("x.com", r"x\.com/[0-9a-zA-Z_]{1,20}/status/(?P<tweet_id>[0-9]+)")
     @handle("twitter.com", r"twitter\.com/[0-9a-zA-Z_]{1,20}/status/(?P<tweet_id>[0-9]+)")

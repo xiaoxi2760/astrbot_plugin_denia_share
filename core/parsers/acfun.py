@@ -8,11 +8,11 @@ from typing import ClassVar
 from httpx import AsyncClient
 from astrbot.api import logger
 from ..base_parser import BaseParser, PlatformEnum, ParseException, IgnoreException, handle
-from ..data import Platform
+from ..data import Platform, platform_of
 
 
 class AcfunParser(BaseParser):
-    platform: ClassVar[Platform] = Platform(name=PlatformEnum.ACFUN, display_name="猴山")
+    platform: ClassVar[Platform] = platform_of(PlatformEnum.ACFUN)
 
     def __init__(self, downloader):
         super().__init__(downloader)

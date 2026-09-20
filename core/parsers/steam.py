@@ -26,7 +26,7 @@ from astrbot.api import logger
 
 from ..base_parser import BaseParser, PlatformEnum, ParseException, handle, COMMON_TIMEOUT
 from ..config import get_config
-from ..data import Platform
+from ..data import Platform, platform_of
 
 APPDETAILS_URL = "https://store.steampowered.com/api/appdetails/"
 CHEAPSHARK_URL = "https://www.cheapshark.com/api/1.0"
@@ -45,7 +45,7 @@ _TAG_RE = re.compile(r"<[^>]+>")
 
 
 class SteamParser(BaseParser):
-    platform: ClassVar[Platform] = Platform(name=PlatformEnum.STEAM, display_name="Steam")
+    platform: ClassVar[Platform] = platform_of(PlatformEnum.STEAM)
 
     def __init__(self, downloader, itad_key: str = "", region: str = "cn"):
         super().__init__(downloader)

@@ -22,11 +22,11 @@ from httpx import AsyncClient
 from astrbot.api import logger
 
 from ..base_parser import BaseParser, PlatformEnum, ParseException, handle
-from ..data import Platform
+from ..data import Platform, platform_of
 
 
 class KuaiShouParser(BaseParser):
-    platform: ClassVar[Platform] = Platform(name=PlatformEnum.KUAISHOU, display_name="快手")
+    platform: ClassVar[Platform] = platform_of(PlatformEnum.KUAISHOU)
 
     def __init__(self, downloader):
         super().__init__(downloader)
