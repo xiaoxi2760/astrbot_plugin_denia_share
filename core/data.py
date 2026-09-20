@@ -121,15 +121,29 @@ class ParseResult:
 
     @property
     def video(self) -> VideoContent | None:
-        if len(self.contents) != 1:
-            return None
-        cont = self.contents[0]
-        return cont if isinstance(cont, VideoContent) and not cont.is_gif else None
+        """结果里的首个视频内容（GIF 不算）。
+
+        不能要求 ``len(contents) == 1``：同一条作品可以既有视频又有图集。
+        推特的三条取流路径（``media_extended`` / ``media.videos`` / GraphQL
+        ``media``）都是把视频和图片**一起** append 进 contents，微博
+        ``_collect_result`` 也是两个独立的 if。要求长度为 1 会让这类作品
+        拿不到封面 hero，而 ``skip_text`` 又因为 video_contents 非空把正文掐掉
+        —— 卡片既没封面也没文字。
+        """
+        for cont in self.contents:
+            if isinstance(cont, VideoContent) and not cont.is_gif:
+                return cont
+        return None
 
     @video.setter
     def video(self, video: VideoContent | None):
-        if video is not None and len(self.contents) == 0:
-            self.contents.append(video)
+        """放入视频内容。
+
+        放在最前面，这样「视频当封面 hero」的直觉与 ``video`` 属性的取值一致。
+        旧实现是「contents 非空就静默什么都不做」——调用方察觉不到，视频就这么丢了。
+        """
+        if video is not None:
+            self.contents.insert(0, video)
 
     @property
     def video_contents(self) -> list[VideoContent]:
