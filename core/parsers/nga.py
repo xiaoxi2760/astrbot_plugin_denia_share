@@ -48,7 +48,9 @@ class NGAParser(BaseParser):
     async def _parse(self, searched: re.Match[str]):
         tid = int(searched.group("tid"))
         url = self.build_url_by_tid(tid)
-        async with AsyncClient(headers=self.headers, timeout=self.timeout, follow_redirects=True) as client:
+        async with AsyncClient(
+            **self.client_kwargs(headers=self.headers, follow_redirects=True)
+        ) as client:
             try:
                 resp = await client.get(url)
                 if resp.status_code == 403 and "guestJs" in resp.text:

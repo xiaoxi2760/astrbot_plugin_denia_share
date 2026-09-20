@@ -38,9 +38,18 @@ class PathTask:
         try:
             return await self.get()
         except Exception as e:
-            from .config import get_config
-            if get_config().DEBUG_LOG_ENABLED:
-                logger.exception(f"PathTask 获取失败 | task={self._task.get_name()}")
+            # 这里**不能**被 DEBUG_LOG_ENABLED 门控：取不到路径意味着最终产物会缺料，
+            # 而缺料必须留痕。开关只用来决定要不要附堆栈（排障时才需要）。
+            try:
+                from .config import get_config
+                verbose = get_config().DEBUG_LOG_ENABLED
+            except Exception:
+                verbose = False
+            logger.warning(
+                f"PathTask 获取失败 | task={self._task.get_name()} | "
+                f"{type(e).__name__}: {e}",
+                exc_info=verbose,
+            )
             if on_error is not None:
                 on_error(e)
             return None

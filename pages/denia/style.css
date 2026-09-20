@@ -283,6 +283,11 @@ body {
   -webkit-backdrop-filter: blur(14px) saturate(1.25);
 }
 
+/* 状态卡：卡里有需要用户处理的事（如缓存目录回退）。只写正文小字容易被划过去，
+   而这类状态常常决定了视频发不发得出去。 */
+.card-warn { border-color: var(--warn); }
+.card-err { border-color: var(--err); }
+
 .card-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; }
 .card-head h2 { margin: 0; font-size: 14px; font-weight: 600; }
 .card-head .sub { color: var(--text-3); font-size: 11.5px; flex: 1; min-width: 0; }

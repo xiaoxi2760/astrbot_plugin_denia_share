@@ -7,7 +7,7 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Any, TypedDict
+from typing import Any, ClassVar, TypedDict
 from pathlib import Path
 from datetime import datetime
 from dataclasses import field, dataclass
@@ -196,6 +196,67 @@ class ParseResult:
 
     async def ensure_downloads_complete(self, *, img_only: bool = False, suppress_errors: bool = True) -> None:
         await asyncio.gather(*self._iterate_download_coros(img_only), return_exceptions=suppress_errors)
+
+    # 缺料提示里的量词：中文里「3 张图片」「1 个视频」比「3 图片」顺口
+    _MEDIA_UNITS: ClassVar[dict[str, str]] = {
+        "图片": "张", "封面": "张", "视频": "个", "音频": "个", "头像": "个",
+    }
+
+    def _iter_media_tasks(self) -> Iterator[tuple[str, PathTask]]:
+        """遍历所有需要落盘的媒体任务，附带用途标签（供缺料审计用）。"""
+        if self.author is not None and self.author.avatar is not None:
+            yield "头像", self.author.avatar
+        for cont in self.contents:
+            if isinstance(cont, VideoContent):
+                yield "视频", cont.path_task
+                if cont.cover is not None:
+                    yield "封面", cont.cover
+            elif isinstance(cont, AudioContent):
+                yield "音频", cont.path_task
+            else:
+                yield "图片", cont.path_task
+        for gra in self.graphics:
+            if isinstance(gra, ImageContent):
+                yield "图片", gra.path_task
+        if self.repost is not None:
+            yield from self.repost._iter_media_tasks()
+
+    async def audit_missing_media(self) -> dict[str, int]:
+        """结算所有媒体下载，把失败项按用途计数写进 ``extra["limit_warnings"]``。
+
+        **为什么要有这个方法**：下载失败原先只在日志里留痕，产出物本身却在撒谎
+        —— 少了 3 张图的消息和图一张不缺的消息长得一模一样，用户没法判断该不该
+        重试。这里在渲染/发送之前统一结算一次，把缺料写进既有的警告通道
+        （``limit_warnings`` 已被卡片与聊天消息两处消费），让产物如实反映它缺了什么。
+
+        只在确有失败时才追加，成功路径零开销（一次 gather，本来也要等这些任务）。
+
+        Returns:
+            各用途的失败数量，如 ``{"图片": 3, "视频": 1}``；全部成功时为空字典。
+        """
+        tasks = list(self._iter_media_tasks())
+        if not tasks:
+            return {}
+
+        await asyncio.gather(
+            *[task.get() for _, task in tasks], return_exceptions=True
+        )
+
+        missing: dict[str, int] = {}
+        for kind, task in tasks:
+            # get() 失败时不会缓存 _path，所以 resolved 为 None 就等于「没落盘」
+            if task.resolved is None:
+                missing[kind] = missing.get(kind, 0) + 1
+
+        if missing:
+            parts = [
+                f"{count} {self._MEDIA_UNITS.get(kind, '个')}{kind}"
+                for kind, count in missing.items()
+            ]
+            self.extra.setdefault("limit_warnings", []).append(
+                f"⚠️ {'、'.join(parts)}下载失败，未包含在本次内容中"
+            )
+        return missing
 
     @property
     def content_type(self) -> str:

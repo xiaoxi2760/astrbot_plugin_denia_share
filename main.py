@@ -99,7 +99,7 @@ class _EventUrlWrapper:
 
 
 @register("达妮娅分享", "xiaoxi2760",
-          "链接分享自动解析，支持 B站|抖音|快手|微博|小红书|Twitter|AcFun|NGA|GitHub|Pixiv|Steam", "0.6.4")
+          "链接分享自动解析，支持 B站|抖音|快手|微博|小红书|Twitter|AcFun|NGA|GitHub|Pixiv|Steam", "0.6.5")
 class DeniaSharePlugin(Star):
 
     @staticmethod
@@ -132,7 +132,7 @@ class DeniaSharePlugin(Star):
         **安全约束**：缓存清理是递归删除（``clear_cache_dir`` / ``cleanup_cache_dir``），
         所以这里必须先把危险路径挡掉，而不是等清理时再补救。三类被拒：
         文件系统根目录、把插件数据目录包在里面的祖先目录、
-        已有内容却没有缓存哨兵的目录。
+        已有内容却没有缓存哨兵的目录。三者在**建目录之前**判定。
 
         Returns:
             (缓存目录, 来源说明)，来源取 ``default`` / ``configured`` / ``fallback``。
@@ -144,21 +144,10 @@ class DeniaSharePlugin(Star):
             return default_dir, "default"
 
         candidate = Path(configured).expanduser()
-        try:
-            candidate.mkdir(parents=True, exist_ok=True)
-        except OSError as exc:
-            logger.warning(
-                f"[denia_share] 共享缓存目录不可用（{configured}）：{exc}；"
-                f"已回退到插件数据目录"
-            )
-            return DeniaSharePlugin._fallback_cache_dir(data_dir)
-
-        if not os.access(candidate, os.W_OK):
-            logger.warning(
-                f"[denia_share] 共享缓存目录不可写（{candidate}），已回退到插件数据目录"
-            )
-            return DeniaSharePlugin._fallback_cache_dir(data_dir)
-
+        # resolve() 不要求路径存在（strict=False），所以危险路径可以在建目录**之前**
+        # 就判掉。之前是先 mkdir(parents=True) 再校验，虽然删除链已经被哨兵挡住，
+        # 但「按一个自由文本配置项在任意路径建出目录树」这个原语还在 —— 顺序调过来
+        # 就顺手消掉了，代价为零。
         resolved = candidate.resolve()
 
         if resolved == Path(resolved.anchor):
@@ -176,6 +165,21 @@ class DeniaSharePlugin(Star):
             logger.warning(
                 f"[denia_share] 缓存目录 {resolved} 把插件数据目录包在里面，"
                 f"清理时会连配置与解析记录一起删掉，已回退到插件数据目录"
+            )
+            return DeniaSharePlugin._fallback_cache_dir(data_dir)
+
+        try:
+            resolved.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            logger.warning(
+                f"[denia_share] 共享缓存目录不可用（{configured}）：{exc}；"
+                f"已回退到插件数据目录"
+            )
+            return DeniaSharePlugin._fallback_cache_dir(data_dir)
+
+        if not os.access(resolved, os.W_OK):
+            logger.warning(
+                f"[denia_share] 共享缓存目录不可写（{resolved}），已回退到插件数据目录"
             )
             return DeniaSharePlugin._fallback_cache_dir(data_dir)
 
@@ -574,6 +578,21 @@ class DeniaSharePlugin(Star):
 
         链接解析与 /pixiv 搜索共用这条输出链路。
         """
+        # 先结算媒体下载再构建产物：下载失败的条目会在这里被记进
+        # result.extra["limit_warnings"]，卡片与聊天消息都会如实带上
+        # 「少了几张图」的说明 —— 否则图少了 3 张的消息和图一张不缺的消息
+        # 长得一模一样，用户只能靠肉眼数。
+        try:
+            missing = await result.audit_missing_media()
+        except Exception:
+            missing = {}
+            logger.warning("[denia_share] 媒体下载结算失败", exc_info=True)
+        if missing:
+            logger.warning(
+                f"[denia_share] 本次解析有媒体未落盘: "
+                f"{'、'.join(f'{k}×{v}' for k, v in missing.items())}"
+            )
+
         header, nodes_content = await self._build_output(result)
 
         render_path: Path | None = None

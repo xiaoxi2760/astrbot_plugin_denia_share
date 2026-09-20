@@ -142,9 +142,12 @@ async def clear_cache_dir(cache_dir: Path) -> int:
     cleaned = 0
     # 深路径优先，保证子目录先被清空才能 rmdir
     entries = sorted(cache_dir.rglob("*"), key=lambda p: len(p.parts), reverse=True)
+    # 只跳过**缓存目录根下**的那个哨兵：按文件名比较会把子目录里恰好同名的文件
+    # 一起放过（无害，但会让「哨兵」的语义变得含糊）
+    marker = cache_dir / CACHE_MARKER_NAME
 
     for entry in entries:
-        if entry.name == CACHE_MARKER_NAME:
+        if entry == marker:
             continue
         try:
             # 先判断符号链接，避免误将链接目标当作缓存目录递归处理
