@@ -2,7 +2,7 @@ from random import choice
 from typing import Any
 from msgspec import Struct, field
 from msgspec.json import Decoder
-from ..exception import ParseException
+from ...exception import ParseException
 
 
 class Avatar(Struct):
