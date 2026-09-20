@@ -17,6 +17,7 @@ from bilibili_api.login_v2 import QrCodeLogin, QrCodeLoginEvents
 from msgspec import convert
 
 from ..base_parser import BaseParser, PlatformEnum, ParseException, IgnoreException, DownloadException, handle
+from ..bili_access import STATUS_BLOCKED, analyze_play_access
 from ..data import Platform, ImageContent, MediaContent, platform_of
 from ..cookie_utils import ck2dict
 from ..media_utils import fmt_duration
@@ -207,7 +208,13 @@ class BilibiliParser(BaseParser):
             output_path = pconfig.cache_dir / f"{video_info.bvid}-{page_num}.mp4"
             if output_path.exists():
                 return output_path
-            v_url, v_backups, a_url, a_backups = await self.extract_download_urls(video=video, page_index=page_info.index)
+            # 把缺料通道的 list 直接捕获进来，而不是闭包引用 result ——
+            # 后者要靠「create_task 到 result 赋值之间没有 await」这个时序假设，
+            # 而 extra["limit_warnings"] 在闭包定义之前就已经存在了。
+            v_url, v_backups, a_url, a_backups = await self.extract_download_urls(
+                video=video, page_index=page_info.index,
+                warnings=limit_warnings, rights=video_info.rights,
+            )
             if page_info.duration > pconfig.VIDEO_DURATION_MAXIMUM:
                 raise IgnoreException
 
@@ -346,8 +353,22 @@ class BilibiliParser(BaseParser):
         return self.result(title=favdata.title, timestamp=favdata.timestamp,
                           author=author, graphics=graphics, extra={"content_type": "收藏夹"})
 
+    @staticmethod
+    def _append_access_warning(warnings: list[str] | None, message: str) -> None:
+        """把可访问性结论写进缺料通道（同一条只记一次）。
+
+        ``warnings`` 为 None 时什么都不做 —— ``tools/probe_bili_e2e.py`` 之类的
+        探测脚本只关心 URL，不该被这一步绊住。
+        """
+        if not message or warnings is None:
+            return
+        if message not in warnings:
+            warnings.append(message)
+
     async def extract_download_urls(self, video: Video | None = None, *, bvid: str | None = None,
-                                     avid: int | None = None, page_index: int = 0):
+                                     avid: int | None = None, page_index: int = 0,
+                                     warnings: list[str] | None = None,
+                                     rights: dict | None = None):
         from bilibili_api.video import (
             AudioStreamDownloadURL, VideoStreamDownloadURL, FLVStreamDownloadURL,
             MP4StreamDownloadURL, VideoDownloadURLDataDetecter, VideoQuality, VideoCodecs,
@@ -370,13 +391,38 @@ class BilibiliParser(BaseParser):
         raw_quality = pconfig.BILI_QUALITY.strip().upper().replace("＋", "+")
         target_quality = QUALITY_MAP.get(raw_quality, VideoQuality._1080P)
 
+        credential = await self.credential
         if video is None:
-            video = Video(bvid=bvid, aid=avid, credential=await self.credential)
+            video = Video(bvid=bvid, aid=avid, credential=credential)
 
-        download_url_data = await self._call_bili_api_with_retry(
-            lambda: video.get_download_url(page_index=page_index),
-            operation="视频流地址",
+        try:
+            download_url_data = await self._call_bili_api_with_retry(
+                lambda: video.get_download_url(page_index=page_index),
+                operation="视频流地址",
+            )
+        except IgnoreException:
+            raise
+        except Exception as error:
+            # **受限视频在这里是抛异常**（`ResponseCodeException`，如 code=-10403
+            # 大会员专享）。不接住的话会被 download_video 的 CDN 重试循环当成网络故障，
+            # 逐个备用地址重试一遍，最后报「视频下载失败，已尝试所有CDN」——
+            # 把「没权限」说成「网络问题」，用户不知道该去登录还是该重试。
+            # 这里分析成一句人话原因，再抛 IgnoreException（策略跳过），
+            # 缺料审计就不会再加一条「下载失败」的自相矛盾警告。
+            access = analyze_play_access(
+                error=error, rights=rights, has_cookie=credential is not None,
+            )
+            self._append_access_warning(warnings, access["message"])
+            raise IgnoreException(access["message"] or "无法获取视频流") from error
+
+        access = analyze_play_access(
+            download_url_data, rights=rights, has_cookie=credential is not None,
         )
+        self._append_access_warning(warnings, access["message"])
+        if access["status"] == STATUS_BLOCKED:
+            # 有响应但拿不到可播放流：同样是「知道原因的跳过」，不是 CDN 故障
+            raise IgnoreException(access["message"] or "无法获取视频流")
+
         detecter = VideoDownloadURLDataDetecter(download_url_data)
         streams = detecter.detect_best_streams(
             video_max_quality=target_quality,

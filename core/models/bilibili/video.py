@@ -3,6 +3,7 @@
 # 本仓库对其做过修改；完整归属见项目根目录 README「许可与致谢」。
 
 from dataclasses import dataclass
+from typing import Any
 from msgspec import Struct
 from .common import Upper
 
@@ -46,6 +47,10 @@ class VideoInfo(Struct):
     ctime: int
     pic: str | None = None
     pages: list[Page] | None = None
+    # 版权 / 权限标记（`ugc_pay` 充电专属、`arc_pay`/`pay` 付费专享、`free_watch` 试看…）。
+    # 只在「拿不到完整视频」时用来判断**是什么性质的受限**，见 core/bili_access.py。
+    # 用 dict 而不是逐个字段：B站会加新标记，写死字段就要跟着改结构体。
+    rights: dict[str, Any] | None = None
 
     @property
     def title_with_part(self) -> str:
