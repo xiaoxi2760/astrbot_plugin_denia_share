@@ -30,7 +30,12 @@ from astrbot.api.event import filter, AstrMessageEvent, MessageEventResult, Mess
 import astrbot.api.message_components as Comp
 from astrbot.api.star import Context, Star, register, StarTools
 
-from .core.media_utils import cleanup_cache_dir, is_docker_environment
+from .core.media_utils import (
+    CACHE_MARKER_NAME,
+    cleanup_cache_dir,
+    ensure_cache_marker,
+    is_docker_environment,
+)
 from .core.config import init_config, get_config, verify_schema_alignment
 from .core.download import StreamDownloader
 from .core.data import ParseResult, ImageContent, VideoContent, AudioContent, Platform, Author
@@ -38,7 +43,7 @@ from .core.history import HistoryStore, ParseRecord
 from .core.relay import register_file
 from .core.constants import PLATFORM_DISPLAY_NAMES, PLATFORM_ORDER
 from .core.exception import (
-    ParseException, IgnoreException, DownloadException, SilentException,
+    ParseException, IgnoreException, SilentException,
 )
 from .core.card_renderer import ShareCardRenderer
 from .core.screenshot import ScreenshotService, is_probably_screenshotable
@@ -94,7 +99,7 @@ class _EventUrlWrapper:
 
 
 @register("达妮娅分享", "xiaoxi2760",
-          "链接分享自动解析，支持 B站|抖音|快手|微博|小红书|Twitter|AcFun|NGA|GitHub|Pixiv|Steam", "0.6.2")
+          "链接分享自动解析，支持 B站|抖音|快手|微博|小红书|Twitter|AcFun|NGA|GitHub|Pixiv|Steam", "0.6.3")
 class DeniaSharePlugin(Star):
 
     @staticmethod
@@ -104,6 +109,14 @@ class DeniaSharePlugin(Star):
             return "aiocqhttp" in event.get_platform_name().lower()
         except Exception:
             return False
+
+    @staticmethod
+    def _fallback_cache_dir(data_dir: Path) -> tuple[Path, str]:
+        """回退到插件数据目录，并保证它带缓存哨兵。"""
+        default_dir = data_dir / "cache"
+        default_dir.mkdir(parents=True, exist_ok=True)
+        ensure_cache_marker(default_dir, allow_nonempty=True)
+        return default_dir, "fallback"
 
     @staticmethod
     def _resolve_cache_dir(data_dir: Path, configured: str) -> tuple[Path, str]:
@@ -116,11 +129,19 @@ class DeniaSharePlugin(Star):
         ``/app/sharedFolder/...``；这里在目录不可用时**回退**插件数据目录而不是
         拒绝下载 —— 用户没挂载却被切到不可写路径时，至少功能还是通的。
 
+        **安全约束**：缓存清理是递归删除（``clear_cache_dir`` / ``cleanup_cache_dir``），
+        所以这里必须先把危险路径挡掉，而不是等清理时再补救。三类被拒：
+        文件系统根目录、把插件数据目录包在里面的祖先目录、
+        已有内容却没有缓存哨兵的目录。
+
         Returns:
             (缓存目录, 来源说明)，来源取 ``default`` / ``configured`` / ``fallback``。
         """
         if not configured:
-            return data_dir / "cache", "default"
+            default_dir = data_dir / "cache"
+            default_dir.mkdir(parents=True, exist_ok=True)
+            ensure_cache_marker(default_dir, allow_nonempty=True)
+            return default_dir, "default"
 
         candidate = Path(configured).expanduser()
         try:
@@ -130,15 +151,44 @@ class DeniaSharePlugin(Star):
                 f"[denia_share] 共享缓存目录不可用（{configured}）：{exc}；"
                 f"已回退到插件数据目录"
             )
-            return data_dir / "cache", "fallback"
+            return DeniaSharePlugin._fallback_cache_dir(data_dir)
 
         if not os.access(candidate, os.W_OK):
             logger.warning(
                 f"[denia_share] 共享缓存目录不可写（{candidate}），已回退到插件数据目录"
             )
-            return data_dir / "cache", "fallback"
+            return DeniaSharePlugin._fallback_cache_dir(data_dir)
 
-        return candidate.resolve(), "configured"
+        resolved = candidate.resolve()
+
+        if resolved == Path(resolved.anchor):
+            logger.warning(
+                f"[denia_share] 拒绝把文件系统根目录 {resolved} 当作缓存目录"
+                f"（清理会递归删掉整块盘），已回退到插件数据目录"
+            )
+            return DeniaSharePlugin._fallback_cache_dir(data_dir)
+
+        try:
+            data_dir.resolve().relative_to(resolved)
+        except ValueError:
+            pass
+        else:
+            logger.warning(
+                f"[denia_share] 缓存目录 {resolved} 把插件数据目录包在里面，"
+                f"清理时会连配置与解析记录一起删掉，已回退到插件数据目录"
+            )
+            return DeniaSharePlugin._fallback_cache_dir(data_dir)
+
+        if not ensure_cache_marker(resolved, allow_nonempty=False):
+            logger.warning(
+                f"[denia_share] 共享缓存目录 {resolved} 里已有内容且没有 "
+                f"{CACHE_MARKER_NAME} 哨兵，无法确认它就该被当作缓存目录，"
+                f"已回退到插件数据目录。确认要用它，请先在该目录下建一个空的 "
+                f"{CACHE_MARKER_NAME} 文件"
+            )
+            return DeniaSharePlugin._fallback_cache_dir(data_dir)
+
+        return resolved, "configured"
 
     def __init__(self, context: Context, config: AstrBotConfig):
         super().__init__(context)
@@ -174,6 +224,7 @@ class DeniaSharePlugin(Star):
             self.cache_dir,
             proxies=pconfig.PROXY or None,
             max_size_mb=pconfig.VIDEO_SIZE_MAXIMUM_MB,
+            verify_ssl=pconfig.HTTP_VERIFY_SSL,
         )
         self.disabled_platforms = pconfig.DISABLED_PLATFORMS
         self._send_errors = pconfig.SEND_ERROR_MESSAGES
@@ -278,12 +329,22 @@ class DeniaSharePlugin(Star):
                 region=pconfig.STEAM_REGION,
             )
 
+        self._build_screenshot_service()
+
+    def _build_screenshot_service(self) -> None:
+        """按当前配置（重）建截图服务。
+
+        抽成独立方法是因为热更新也要调它：截图后端的代理与证书校验都是构造时
+        读死的，只在初始化时建一次的话，网页上改这两项要重载插件才生效。
+        """
+        pconfig = get_config()
         self.screenshot = ScreenshotService(
             self.cache_dir,
             backend=pconfig.SCREENSHOT_BACKEND,
             cf_account_id=pconfig.CF_ACCOUNT_ID,
             cf_api_token=pconfig.CF_API_TOKEN,
             proxy=pconfig.PROXY,
+            verify_ssl=pconfig.HTTP_VERIFY_SSL,
         )
         self._screenshot_fallback = pconfig.SCREENSHOT_FALLBACK
 
@@ -427,12 +488,17 @@ class DeniaSharePlugin(Star):
                 result, self._render_cache.get(cache_key), via="command"
             )
         except IgnoreException as e:
+            logger.warning(f"[denia_share] Pixiv 搜索被忽略: {e.message}")
             yield event.plain_result(f"ℹ️ {e.message}")
         except ParseException as e:
+            logger.warning(f"[denia_share] Pixiv 搜索失败: {e.message}")
             yield event.plain_result(f"❌ 搜索失败: {e.message}")
         except Exception as e:
             logger.exception("Pixiv 搜索异常")
-            yield event.plain_result(f"❌ 搜索出错: {str(e)[:100]}")
+            # 同样不回显异常原文，避免把 URL / 容器内路径带进群里
+            yield event.plain_result(
+                f"❌ 搜索出错（{type(e).__name__}），详情见 AstrBot 日志"
+            )
 
     # ==================== JSON 卡片（QQ 小程序分享） ====================
 
@@ -483,21 +549,23 @@ class DeniaSharePlugin(Star):
             # 交付完成后再记录：此时媒体都已落盘，记录里能带上真实文件名
             await self._record_history(result, self._render_cache.get(cache_key))
 
-        except SilentException:
-            return
-        except IgnoreException as e:
-            if self._send_errors:
-                yield event.plain_result(f"ℹ️ {e.message}")
+        except SilentException as e:
+            # 「这条链接不归我管」是每条普通消息都会走到的正常流量，只在调试级留痕
+            logger.debug(f"[denia_share] 静默跳过: {e.message}")
         except ParseException as e:
-            if self._send_errors:
-                yield event.plain_result(f"❌ 解析失败: {e.message}")
-        except DownloadException as e:
-            if self._send_errors:
-                yield event.plain_result(f"⚠️ 下载失败: {e.message}")
+            # 解析失败必须无条件留痕：Cookie 全失效、接口改版、被风控都走这条，
+            # 而 SEND_ERROR_MESSAGES 默认是关的 —— 只由它决定「发不发群」，
+            # 不能连日志一起决定，否则群里不回复、日志也一片空白，用户和运维同时失明。
+            logger.warning(f"[denia_share] 解析未完成: {e.message}")
+            if e.notify_prefix and self._send_errors:
+                yield event.plain_result(f"{e.notify_prefix} {e.message}")
         except Exception as e:
             logger.exception("解析异常")
             if self._send_errors:
-                yield event.plain_result(f"❌ 处理出错: {str(e)[:100]}")
+                # 不回显异常原文：里面常带完整 URL 与容器内本地路径
+                yield event.plain_result(
+                    f"❌ 处理出错（{type(e).__name__}），详情见 AstrBot 日志"
+                )
 
     async def _deliver(
         self, event: AstrMessageEvent, result: ParseResult, cache_key: str
@@ -631,6 +699,7 @@ class DeniaSharePlugin(Star):
                 proxies=pconfig.PROXY or None,
                 max_size_mb=pconfig.VIDEO_SIZE_MAXIMUM_MB,
                 cache_dir=self.cache_dir,
+                verify_ssl=pconfig.HTTP_VERIFY_SSL,
             )
         except Exception:
             logger.warning("[denia_share] 更新下载器参数失败", exc_info=True)
@@ -645,6 +714,9 @@ class DeniaSharePlugin(Star):
         self._renderer = ShareCardRenderer(self.cache_dir, **pconfig.renderer_options())
         # 渲染参数进了产物文件名，配置变了就得让旧缓存失效
         self._render_cache.clear()
+
+        # 截图后端的代理 / 证书校验同样是构造时读死的，热更新要一起重建
+        self._build_screenshot_service()
 
         summary["rebuilt"] = True
         summary["platforms"] = sorted(self.parsers)

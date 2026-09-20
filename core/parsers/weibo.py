@@ -1,3 +1,7 @@
+# 本文件包含衍生自 astrbot_plugin_rika_share（MIT License）的代码，
+# 上游项目：https://github.com/iris1598/astrbot_plugin_rika_share
+# 本仓库对其做过修改；完整归属见项目根目录 README「许可与致谢」。
+
 """微博解析器"""
 import re
 from time import time
@@ -5,7 +9,13 @@ from uuid import uuid4
 from typing import ClassVar
 from bs4 import Tag, BeautifulSoup
 from httpx import Cookies, AsyncClient
-from ..base_parser import BaseParser, PlatformEnum, ParseException, handle
+from ..base_parser import (
+    MAX_IMAGES_PER_RESULT,
+    BaseParser,
+    PlatformEnum,
+    ParseException,
+    handle,
+)
 from ..data import Platform, ImageContent
 
 
@@ -63,6 +73,7 @@ class WeiBoParser(BaseParser):
         data = detail.data
         soup = BeautifulSoup(data.content, "html.parser")
         graphics: list[str | ImageContent] = []
+        image_count = 0
         for element in soup.find_all(["p", "img"]):
             if not isinstance(element, Tag):
                 continue
@@ -71,9 +82,13 @@ class WeiBoParser(BaseParser):
                 if text:
                     graphics.append(text)
             elif element.name == "img":
+                # 长文里的图片数量由远端 HTML 决定，这里必须自己封顶
+                if image_count >= MAX_IMAGES_PER_RESULT:
+                    continue
                 src = element.get("src")
                 if isinstance(src, str):
                     graphics.append(self.create_image(src))
+                    image_count += 1
         author = self.create_author(data.userinfo.screen_name, data.userinfo.profile_image_url)
         return self.result(url=data.url, title=data.title, author=author, timestamp=data.create_at_unix, graphics=graphics)
 
@@ -91,7 +106,13 @@ class WeiBoParser(BaseParser):
         data = show_decoder.decode(response.content).data
         play_info = data.Component_Play_Playinfo
         author = self.create_author(play_info.name, play_info.avatar, play_info.description)
-        result = self.result(title=play_info.title, text=play_info.text, author=author, timestamp=play_info.real_date)
+        result = self.result(
+            title=play_info.title,
+            # 必须用 clean_text：play_info.text 里的 <br/> 会原样进卡片
+            text=play_info.clean_text,
+            author=author,
+            timestamp=play_info.real_date,
+        )
         self._add_limit_warning(result, play_info.duration)
         result.contents = [self.create_video(play_info.video_url, play_info.cover_url, duration=play_info.duration)]
         return result

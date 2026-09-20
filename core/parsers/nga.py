@@ -1,3 +1,7 @@
+# 本文件包含衍生自 astrbot_plugin_rika_share（MIT License）的代码，
+# 上游项目：https://github.com/iris1598/astrbot_plugin_rika_share
+# 本仓库对其做过修改；完整归属见项目根目录 README「许可与致谢」。
+
 """NGA 解析器"""
 import re
 import json
@@ -8,7 +12,13 @@ from typing import ClassVar
 from bs4 import Tag, BeautifulSoup
 from httpx import HTTPError, AsyncClient
 from astrbot.api import logger
-from ..base_parser import BaseParser, PlatformEnum, ParseException, handle
+from ..base_parser import (
+    MAX_IMAGES_PER_RESULT,
+    BaseParser,
+    PlatformEnum,
+    ParseException,
+    handle,
+)
 from ..data import Platform
 
 
@@ -98,12 +108,17 @@ class NGAParser(BaseParser):
         content_tag = soup.find(id="postcontent0")
         if content_tag and isinstance(content_tag, Tag):
             text = content_tag.get_text("\n", strip=True)
+            image_count = 0
             for line in text.split("\n"):
                 if "[" in line:
                     if paths := re.findall(r"\[img\]\.(.*?)\[\/img\]", line):
                         for path in paths:
+                            # 帖子里的图片数量由远端内容决定，这里必须自己封顶
+                            if image_count >= MAX_IMAGES_PER_RESULT:
+                                continue
                             img_url = self.build_img_url(path)
                             result.graphics.append(self.create_image(img_url))
+                            image_count += 1
                     else:
                         if clean_line := re.sub(r"\[[^\]]*?\]", "", line).strip():
                             result.graphics.append(clean_line)

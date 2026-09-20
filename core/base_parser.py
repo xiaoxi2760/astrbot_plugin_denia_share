@@ -1,3 +1,7 @@
+# 本文件包含衍生自 astrbot_plugin_rika_share（MIT License）的代码，
+# 上游项目：https://github.com/iris1598/astrbot_plugin_rika_share
+# 本仓库对其做过修改；完整归属见项目根目录 README「许可与致谢」。
+
 """BaseParser 基类 - 所有平台解析器的基类"""
 
 import asyncio
@@ -18,6 +22,14 @@ HandlerFunc = Any
 KeyPatterns = list[tuple[str, Pattern[str]]]
 
 _KEY_PATTERNS = "_key_patterns"
+
+# 单条解析结果里最多下载多少张图。
+#
+# 远端返回的图集长度完全不受控（微博长文、抖音图文、NGA 帖），而 create_images
+# 会对每个 URL 立刻 create_task，数量等于远端给的数量。渲染端最多只画 6 张
+# （card_renderer 的图集网格上限 3×2），但聊天侧会把每张图都发出去，
+# 所以不能按渲染端上限截断，只能设一个覆盖真实场景的宽松上限。
+MAX_IMAGES_PER_RESULT = 50
 
 
 def handle(keyword: str, pattern: str):
@@ -47,14 +59,30 @@ class BaseParser:
             from .config import get_config
             self.proxies = get_config().PROXY or None
         except Exception:
+            # 不能只静默降级直连：代理配错时表现为「所有平台都解析失败」，
+            # 排查方向会被带偏，所以这里至少留一条线索
+            from astrbot.api import logger
+            logger.warning(
+                "读取全局代理配置失败，本次请求将直连（代理配错时会导致解析全部失败）",
+                exc_info=True,
+            )
             self.proxies = None
+
+    @staticmethod
+    def verify_ssl_enabled() -> bool:
+        """HTTPS 证书校验开关。读配置失败时按最安全的一侧回退：校验。"""
+        try:
+            from .config import get_config
+            return get_config().HTTP_VERIFY_SSL
+        except Exception:
+            return True
 
     def new_client(self, **kwargs) -> "AsyncClient":
         """创建带代理与默认超时的 httpx 客户端。"""
         from httpx import AsyncClient
         kwargs.setdefault("timeout", self.timeout)
         kwargs.setdefault("follow_redirects", True)
-        kwargs.setdefault("verify", False)
+        kwargs.setdefault("verify", self.verify_ssl_enabled())
         if self.proxies:
             kwargs.setdefault("proxy", self.proxies)
         return AsyncClient(**kwargs)
@@ -110,7 +138,12 @@ class BaseParser:
     async def get_redirect_url(url: str, headers: dict[str, str] | None = None) -> str:
         from httpx import AsyncClient
         headers = headers or COMMON_HEADER.copy()
-        async with AsyncClient(headers=headers, verify=False, follow_redirects=False, timeout=COMMON_TIMEOUT) as client:
+        async with AsyncClient(
+            headers=headers,
+            verify=BaseParser.verify_ssl_enabled(),
+            follow_redirects=False,
+            timeout=COMMON_TIMEOUT,
+        ) as client:
             response = await client.get(url)
             if response.status_code >= 400:
                 response.raise_for_status()
@@ -120,7 +153,12 @@ class BaseParser:
     async def get_final_url(url: str, headers: dict[str, str] | None = None) -> str:
         from httpx import AsyncClient
         headers = headers or COMMON_HEADER.copy()
-        async with AsyncClient(headers=headers, verify=False, follow_redirects=True, timeout=COMMON_TIMEOUT) as client:
+        async with AsyncClient(
+            headers=headers,
+            verify=BaseParser.verify_ssl_enabled(),
+            follow_redirects=True,
+            timeout=COMMON_TIMEOUT,
+        ) as client:
             response = await client.get(url)
             if response.status_code >= 400:
                 response.raise_for_status()
@@ -210,11 +248,28 @@ class BaseParser:
         return self.create_video(url_or_task, cover_url=cover_url, is_gif=True)
 
     def create_images(self, image_urls: list[str]):
+        """把一批图片 URL 转成 ImageContent（每个 URL 会立刻起一条下载任务）。
+
+        超过 :data:`MAX_IMAGES_PER_RESULT` 的部分直接丢弃 —— 远端列表长度不可控，
+        不截断的话并发下载数与磁盘占用都跟着远端走。
+        """
         contents: list[ImageContent] = []
-        for url in image_urls:
+        for url in self.cap_image_urls(image_urls):
             task = self.downloader.download_img(url, ext_headers=self.headers)
             contents.append(ImageContent(PathTask(task)))
         return contents
+
+    @staticmethod
+    def cap_image_urls(image_urls: list[str]) -> list[str]:
+        """截断远端图集长度，超限时记一条警告。"""
+        if len(image_urls) <= MAX_IMAGES_PER_RESULT:
+            return image_urls
+        from astrbot.api import logger
+        logger.warning(
+            f"图集条目 {len(image_urls)} 超过上限 {MAX_IMAGES_PER_RESULT}，"
+            f"只处理前 {MAX_IMAGES_PER_RESULT} 张"
+        )
+        return image_urls[:MAX_IMAGES_PER_RESULT]
 
     def create_image(self, url_or_task: str | asyncio.Task[Path], alt: str | None = None):
         if isinstance(url_or_task, str):

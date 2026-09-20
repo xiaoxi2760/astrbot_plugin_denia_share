@@ -1,3 +1,7 @@
+# 本文件包含衍生自 astrbot_plugin_rika_share（MIT License）的代码，
+# 上游项目：https://github.com/iris1598/astrbot_plugin_rika_share
+# 本仓库对其做过修改；完整归属见项目根目录 README「许可与致谢」。
+
 """精美解析卡片渲染模块（现代卡片风格 v2）
 
 使用 Pillow 将解析结果渲染为一张现代风格的分享卡片图片，
@@ -180,6 +184,7 @@ class _L:
 
     # --- 顶部横幅 ---
     HERO_RATIO = 9 / 16       # 横幅宽高比
+    HERO_MAX_ASPECT = 3.0     # 封面全尺寸模式的宽高比上限（防超长图把画布撑爆）
     HERO_BADGE_TOP = 24       # 悬浮徽章距顶
     HERO_BADGE_H = 42         # 悬浮徽章高度
     HERO_BADGE_GAP = 10       # 徽章间距
@@ -1843,14 +1848,20 @@ class ShareCardRenderer:
         return y + 8
 
     def _hero_aspect_height(self, hero_path: Path | None, box_w: int, default_h: int) -> int:
-        """若开启了封面全尺寸模式 (cover_full_size)，按原图宽高比计算高度，否则使用 default_h。"""
+        """若开启了封面全尺寸模式 (cover_full_size)，按原图宽高比计算高度，否则使用 default_h。
+
+        上限必须封顶：封面来自远端，宽高比完全不受控，一张极端窄高的图会算出
+        几千像素的 total_h，随后连着分配两张同尺寸画布（canvas + shadow）直接把
+        进程打爆。这里按 ``HERO_MAX_ASPECT`` 倍卡宽封顶。
+        """
         if not hero_path or not self.cover_full_size:
             return default_h
         try:
             with Image.open(hero_path) as im:
                 w, h = im.size
                 if w > 0 and h > 0:
-                    return max(100, round(box_w * h / w))
+                    ceiling = round(box_w * _L.HERO_MAX_ASPECT)
+                    return max(100, min(round(box_w * h / w), ceiling))
         except Exception:
             pass
         return default_h

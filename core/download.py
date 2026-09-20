@@ -1,6 +1,7 @@
 """下载系统 - 提供媒体文件下载功能"""
 
 import asyncio
+import os
 from pathlib import Path
 from functools import partial
 from contextlib import contextmanager
@@ -14,16 +15,38 @@ from .media_utils import merge_av, safe_unlink, generate_file_name, is_module_av
 from .constants import COMMON_HEADER, DOWNLOAD_TIMEOUT
 from .exception import IgnoreException, DownloadException
 
+# 同时进行的下载数上限。
+#
+# 远端返回的图集长度不受控（微博长文、抖音图文、NGA 帖），而每个条目都会立刻
+# 变成一条下载任务；没有闸门时并发数等于远端给的数量。这里按连接数与内存
+# 取一个保守值，配合 base_parser 的数量截断一起用。
+MAX_CONCURRENT_DOWNLOADS = 8
+
+# m3u8 分片数上限：字节上限之外再兜一层，防止「超多超小分片」把循环拖死
+MAX_M3U8_SEGMENTS = 3000
+
 
 class StreamDownloader:
-    def __init__(self, cache_dir: Path, proxies: str | None = None, max_size_mb: int = 0):
+    def __init__(
+        self,
+        cache_dir: Path,
+        proxies: str | None = None,
+        max_size_mb: int = 0,
+        verify_ssl: bool = True,
+    ):
         self.headers: dict[str, str] = COMMON_HEADER.copy()
         self.cache_dir: Path = cache_dir
         # max_size_mb <= 0 表示不限制
         self.max_size_mb: int = max(0, int(max_size_mb or 0))
         self.proxies: str | None = (proxies or "").strip() or None
-        self.client: httpx.AsyncClient = httpx.AsyncClient(
-            timeout=DOWNLOAD_TIMEOUT, verify=False, proxy=self.proxies,
+        # 下载请求带含 Cookie 的 ext_headers，默认必须校验证书
+        self.verify_ssl: bool = bool(verify_ssl)
+        self._slots = asyncio.Semaphore(MAX_CONCURRENT_DOWNLOADS)
+        self.client: httpx.AsyncClient = self._new_client(self.proxies)
+
+    def _new_client(self, proxy: str | None) -> httpx.AsyncClient:
+        return httpx.AsyncClient(
+            timeout=DOWNLOAD_TIMEOUT, verify=self.verify_ssl, proxy=proxy,
         )
 
     async def aclose(self):
@@ -35,11 +58,12 @@ class StreamDownloader:
         proxies: str | None = None,
         max_size_mb: int | None = None,
         cache_dir: Path | None = None,
+        verify_ssl: bool | None = None,
     ) -> bool:
         """就地更新下载参数，供 WebUI 保存配置后热生效。
 
-        体积上限与缓存目录只影响后续写入，直接改即可；代理绑定在连接池上，
-        变化时才重建 client 并关掉旧的（避免每次保存配置都泄漏一个连接池）。
+        体积上限与缓存目录只影响后续写入，直接改即可；代理与证书校验绑定在
+        连接池上，变化时才重建 client 并关掉旧的（避免每次保存配置都泄漏一个连接池）。
 
         Returns:
             是否重建了连接池。
@@ -50,19 +74,29 @@ class StreamDownloader:
             self.cache_dir = Path(cache_dir)
 
         normalized = (proxies or "").strip() or None
-        if normalized == self.proxies:
+        new_verify = self.verify_ssl if verify_ssl is None else bool(verify_ssl)
+        if normalized == self.proxies and new_verify == self.verify_ssl:
             return False
+
         self.proxies = normalized
+        self.verify_ssl = new_verify
 
         old_client = self.client
-        self.client = httpx.AsyncClient(
-            timeout=DOWNLOAD_TIMEOUT, verify=False, proxy=normalized,
-        )
+        self.client = self._new_client(normalized)
         try:
             await old_client.aclose()
         except Exception:
             logger.debug("关闭旧下载连接池失败", exc_info=True)
         return True
+
+    @staticmethod
+    def _part_path(file_path: Path) -> Path:
+        """下载中的临时文件名。
+
+        先写 ``*.part`` 再 ``os.replace`` 成正式名：中途失败留下的半截文件
+        不会顶着正式文件名被下一次的 ``exists()`` 当成有效缓存复用。
+        """
+        return file_path.with_name(file_path.name + ".part")
 
     def _validate_content_length(self, response: httpx.Response) -> int | None:
         """校验明确声明的响应大小。
@@ -120,12 +154,13 @@ class StreamDownloader:
         headers: dict[str, str],
         chunk_size: int = 64 * 1024,
     ) -> Path:
+        part = self._part_path(file_path)
         async with self.client.stream("GET", url, headers=headers, follow_redirects=True) as response:
             response.raise_for_status()
             self._validate_content_length(response)
             received_bytes = 0
             try:
-                async with aiofiles.open(file_path, "wb") as file:
+                async with aiofiles.open(part, "wb") as file:
                     async for chunk in response.aiter_bytes(chunk_size):
                         if not chunk:
                             continue
@@ -133,7 +168,7 @@ class StreamDownloader:
                         received_bytes += len(chunk)
                         # chunked 场景没有 Content-Length，边下边判大小
                         if self._max_bytes and received_bytes > self._max_bytes:
-                            await safe_unlink(file_path)
+                            await safe_unlink(part)
                             mb = received_bytes / 1024 / 1024
                             logger.warning(
                                 f"媒体 url: {response.url}, 下载到 {mb:.1f}MB 超过上限，中断"
@@ -145,9 +180,10 @@ class StreamDownloader:
                 raise
             except Exception:
                 # 下载中断时清掉半截文件，避免下次命中缓存拿到坏文件
-                await safe_unlink(file_path)
+                await safe_unlink(part)
                 raise
-            await self._validate_downloaded_bytes(file_path, str(response.url), received_bytes)
+            await self._validate_downloaded_bytes(part, str(response.url), received_bytes)
+        os.replace(part, file_path)
         return file_path
 
     async def _download_file_with_curl_cffi(
@@ -162,7 +198,17 @@ class StreamDownloader:
         except ImportError:
             raise DownloadException("curl_cffi 未安装")
 
-        async with curl_cffi.AsyncSession(allow_redirects=True) as session:
+        # 兜底通道同样要带代理：代理-only 环境里不带代理等于必失败，
+        # 而这条路径的存在意义恰恰是「httpx 走不通时再试一次」
+        session_kwargs: dict[str, object] = {
+            "allow_redirects": True,
+            "verify": self.verify_ssl,
+        }
+        if self.proxies:
+            session_kwargs["proxies"] = {"http": self.proxies, "https": self.proxies}
+
+        part = self._part_path(file_path)
+        async with curl_cffi.AsyncSession(**session_kwargs) as session:
             response: curl_cffi.Response = await session.get(
                 url, headers=headers, timeout=DOWNLOAD_TIMEOUT, stream=True,
             )
@@ -170,23 +216,24 @@ class StreamDownloader:
             self._validate_content_length(response)
             received_bytes = 0
             try:
-                async with aiofiles.open(file_path, "wb") as file:
+                async with aiofiles.open(part, "wb") as file:
                     async for chunk in response.aiter_content(chunk_size=8192):
                         if not chunk:
                             continue
                         await file.write(chunk)
                         received_bytes += len(chunk)
                         if self._max_bytes and received_bytes > self._max_bytes:
-                            await safe_unlink(file_path)
+                            await safe_unlink(part)
                             raise IgnoreException(
                                 f"媒体大小超过上限({self.max_size_mb}MB)"
                             )
             except IgnoreException:
                 raise
             except Exception:
-                await safe_unlink(file_path)
+                await safe_unlink(part)
                 raise
-            await self._validate_downloaded_bytes(file_path, str(response.url), received_bytes)
+            await self._validate_downloaded_bytes(part, str(response.url), received_bytes)
+        os.replace(part, file_path)
         return file_path
 
     async def _download_file(
@@ -205,20 +252,24 @@ class StreamDownloader:
 
         headers = {**self.headers, **(ext_headers or {})}
 
-        try:
-            return await self._download_file_with_httpx(
-                url, file_path=file_path, headers=headers, chunk_size=chunk_size
-            )
-        except httpx.HTTPError:
-            from .config import get_config
-            if get_config().DEBUG_LOG_ENABLED:
-                logger.warning(f"下载失败(httpx) | url: {url}", exc_info=True)
+        # 并发闸门：图集场景下每个条目都会走到这里，远端给多少就并发多少
+        async with self._slots:
+            if file_path.exists():
+                return file_path
             try:
-                return await self._download_file_with_curl_cffi(url, file_path=file_path, headers=headers)
-            except Exception:
+                return await self._download_file_with_httpx(
+                    url, file_path=file_path, headers=headers, chunk_size=chunk_size
+                )
+            except httpx.HTTPError:
+                from .config import get_config
                 if get_config().DEBUG_LOG_ENABLED:
-                    logger.warning(f"下载失败(curl_cffi) | url: {url}", exc_info=True)
-                raise DownloadException("媒体下载失败")
+                    logger.warning(f"下载失败(httpx) | url: {url}", exc_info=True)
+                try:
+                    return await self._download_file_with_curl_cffi(url, file_path=file_path, headers=headers)
+                except Exception:
+                    if get_config().DEBUG_LOG_ENABLED:
+                        logger.warning(f"下载失败(curl_cffi) | url: {url}", exc_info=True)
+                    raise DownloadException("媒体下载失败")
 
     async def download_video(
         self,
@@ -249,6 +300,7 @@ class StreamDownloader:
             return video_path
 
         headers = {**self.headers, **(ext_headers or {})}
+        part = self._part_path(video_path)
 
         try:
             # 1. 获取并解析 m3u8 分片列表
@@ -266,31 +318,55 @@ class StreamDownloader:
             if not slices:
                 raise DownloadException("m3u8 分片列表为空")
 
+            if len(slices) > MAX_M3U8_SEGMENTS:
+                logger.warning(
+                    f"m3u8 分片数 {len(slices)} 超过上限 {MAX_M3U8_SEGMENTS}，取消下载: {m3u8_url}"
+                )
+                raise IgnoreException(f"m3u8 分片数超过上限({MAX_M3U8_SEGMENTS})")
+
             # 2. 逐个下载分片并追加到文件
-            async with aiofiles.open(video_path, "wb") as f:
+            #
+            # 体积上限必须在这里也算一遍：分片是逐片流式写盘的，不经过
+            # _validate_content_length / _validate_downloaded_bytes，
+            # 只判 Content-Length 的话 VIDEO_SIZE_MAXIMUM_MB 在 m3u8 上完全失效。
+            received_bytes = 0
+            async with aiofiles.open(part, "wb") as f:
                 for seg_url in slices:
                     async with self.client.stream("GET", seg_url, headers=headers) as response:
                         response.raise_for_status()
                         async for chunk in response.aiter_bytes(chunk_size=1024 * 1024):
+                            if not chunk:
+                                continue
                             await f.write(chunk)
+                            received_bytes += len(chunk)
+                            if self._max_bytes and received_bytes > self._max_bytes:
+                                mb = received_bytes / 1024 / 1024
+                                logger.warning(
+                                    f"m3u8 视频下载到 {mb:.1f}MB 超过上限 "
+                                    f"{self.max_size_mb}MB，中断: {m3u8_url}"
+                                )
+                                raise IgnoreException(
+                                    f"媒体大小超过上限({self.max_size_mb}MB)"
+                                )
 
-        except DownloadException:
-            await safe_unlink(video_path)
+        except (DownloadException, IgnoreException):
+            await safe_unlink(part)
             raise
         except httpx.HTTPError:
-            await safe_unlink(video_path)
+            await safe_unlink(part)
             from .config import get_config
             if get_config().DEBUG_LOG_ENABLED:
                 logger.exception(f"m3u8 视频下载失败 | url: {m3u8_url}")
             raise DownloadException("m3u8 视频下载失败")
         except Exception:
             # 写盘失败等意外异常也要清理半截文件，避免留下坏缓存被后续命中
-            await safe_unlink(video_path)
+            await safe_unlink(part)
             from .config import get_config
             if get_config().DEBUG_LOG_ENABLED:
                 logger.exception(f"m3u8 视频下载异常 | url: {m3u8_url}")
             raise DownloadException("m3u8 视频下载失败")
 
+        os.replace(part, video_path)
         return video_path
 
     async def download_audio(

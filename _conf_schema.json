@@ -253,7 +253,7 @@
         "type": "string",
         "default": "",
         "invisible": true,
-        "hint": "① 本地文件方式：填一个「所有容器都把宿主机同一目录挂到它上面」的容器内路径，协议端（NapCat 等）就能直接读走视频。留空=用插件数据目录 —— 分容器部署时协议端读不到，视频会发不出去（图片语音不受影响，它们会转成 base64）"
+        "hint": "① 本地文件方式：填一个「所有容器都把宿主机同一目录挂到它上面」的容器内路径，协议端（NapCat 等）就能直接读走视频。留空=用插件数据目录 —— 分容器部署时协议端读不到，视频会发不出去（图片语音不受影响，它们会转成 base64）。安全限制：清理缓存会递归删除该目录，所以根目录、把插件数据目录包在里面的上级目录，以及「已有内容且没有 .denia_share_cache 哨兵文件」的目录都会被拒绝并回退到插件数据目录"
       },
       "MEDIA_RELAY_ENABLED": {
         "description": "启用媒体中转",
@@ -312,6 +312,13 @@
         "default": "",
         "invisible": true,
         "hint": "留空不使用。作用于下载与自建请求（GitHub/Pixiv/截图）。填运行 AstrBot 那台机器上的地址"
+      },
+      "HTTP_VERIFY_SSL": {
+        "description": "校验 HTTPS 证书",
+        "type": "bool",
+        "default": true,
+        "invisible": true,
+        "hint": "默认开启。下载与自建请求都会校验服务端证书，防止中间人截获带 Cookie 的请求。只有遇到证书链有问题的站点（自建反代、内网镜像）导致解析失败时，才临时关掉"
       },
       "TWITTER_MEDIA_PROXY_BASE": {
         "description": "Twitter 图片/视频反代根地址",
