@@ -93,8 +93,6 @@ class WeiBoParser(BaseParser):
         return self.result(url=data.url, title=data.title, author=author, timestamp=data.create_at_unix, graphics=graphics)
 
     async def parse_fid(self, fid: str):
-        from ..models.weibo.show import decoder as show_decoder
-
         req_url = f"https://h5.video.weibo.com/api/component?page=/show/{fid}"
         # self.headers 里是小写 referer，这里必须同键名小写覆盖，否则会发出两个 Referer
         headers = {**self.headers, "referer": f"https://h5.video.weibo.com/show/{fid}", "Content-Type": "application/x-www-form-urlencoded"}
@@ -103,8 +101,7 @@ class WeiBoParser(BaseParser):
             response = await client.post(req_url, content=post_content)
             response.raise_for_status()
 
-        data = show_decoder.decode(response.content).data
-        play_info = data.Component_Play_Playinfo
+        play_info = self._decode_play_info(response.content, fid)
         author = self.create_author(play_info.name, play_info.avatar, play_info.description)
         result = self.result(
             title=play_info.title,
@@ -118,8 +115,6 @@ class WeiBoParser(BaseParser):
         return result
 
     async def parse_weibo_id(self, weibo_id: str):
-        from ..models.weibo.common import decoder as weibo_decoder
-
         # 通用头在前、专用头在后：字典字面量里**后写的键覆盖先写的**，
         # 所以下面的 accept/referer 会盖掉 self.headers 里的同名键。
         headers = {
@@ -151,8 +146,75 @@ class WeiBoParser(BaseParser):
             if "application/json" not in ctype:
                 raise ParseException(f"获取数据失败 content-type is not application/json (got: {ctype})")
 
-        weibo_data = weibo_decoder.decode(response.content).data
+        weibo_data = self._decode_status(response.content, weibo_id)
         return self._collect_result(weibo_data)
+
+    # ---------------- 解码 + 返回作品校验 ----------------
+    #
+    # 抽成「只吃 bytes」的方法是为了**可测**：原先是把 decode 与校验写在
+    # parse_weibo_id / parse_fid 里，那两段要经过 httpx 客户端，自检没法在不打网络的
+    # 前提下覆盖 —— 于是校验很容易被后来的人删掉而没人发现。这里只吃 bytes，
+    # 自检可以拿真实 JSON 直接喂，把「解码 + 校验 + 调用点接线」一起测到。
+
+    def _decode_status(self, content: bytes, requested_id: str):
+        from ..models.weibo.common import decoder as weibo_decoder
+
+        data = weibo_decoder.decode(content).data
+        self._assert_status_matches_requested(data, requested_id)
+        return data
+
+    def _decode_play_info(self, content: bytes, requested_id: str):
+        from ..models.weibo.show import decoder as show_decoder
+
+        data = show_decoder.decode(content).data
+        play_info = data.Component_Play_Playinfo
+        self._assert_video_matches_requested(play_info, requested_id)
+        return play_info
+
+    @staticmethod
+    def _assert_status_matches_requested(data, requested_id: str) -> None:
+        """校验接口返回的作品就是被请求的那条。
+
+        请求 id 是纯数字时（``m.weibo.cn/status/<mid>``、``_mid2id`` 转出来的）比
+        ``id`` / ``idstr`` / ``mid``；否则（base62 的 bid）比 ``mblogid`` / ``bid``。
+
+        **拿不到任何可比字段时放行**：宁可不校验，也不要因为接口少给一个字段就误杀。
+        """
+        requested_id = str(requested_id or "").strip()
+        if not requested_id:
+            return
+        keys = ("id", "idstr", "mid") if requested_id.isdigit() else ("mblogid", "bid")
+        candidates = {
+            str(getattr(data, key)).strip()
+            for key in keys
+            if getattr(data, key, None) not in (None, "")
+        }
+        if candidates and requested_id not in candidates:
+            raise ParseException(
+                f"微博接口返回了其他作品的数据（请求 {requested_id}，"
+                f"返回 {'/'.join(sorted(candidates))}）"
+            )
+
+    @staticmethod
+    def _assert_video_matches_requested(play_info, requested_id: str) -> None:
+        """同上，用于 video.weibo.com 的播放数据。
+
+        请求时是把 ``fid`` 当 ``oid`` 发出去的（见 parse_fid 的 post_content），
+        所以正常情况响应里的 ``oid`` 就等于请求的 fid。
+        """
+        requested_id = str(requested_id or "").strip()
+        if not requested_id:
+            return
+        candidates = {
+            str(getattr(play_info, key)).strip()
+            for key in ("oid", "fid", "object_id")
+            if getattr(play_info, key, None) not in (None, "")
+        }
+        if candidates and requested_id not in candidates:
+            raise ParseException(
+                f"微博视频接口返回了其他作品的数据（请求 {requested_id}，"
+                f"返回 {'/'.join(sorted(candidates))}）"
+            )
 
     def _collect_result(self, data):
         author = self.create_author(data.display_name, data.user.profile_image_url)

@@ -43,8 +43,14 @@ class NoteDetail(Struct):
 
     @property
     def video_cover_duration(self):
-        # 用 ParseException 而不是 assert：AssertionError 不是 ParseException 的子类，
-        # 会直接穿过解析器的三级兜底把整条链路炸掉（用户看到报错，而不是自动换下一条路径）。
+        # 用 ParseException 而不是 assert。**收益要说准**：本属性只在 parse_explore 里
+        # 被调用，而 _parse_common（parsers/xiaohongshu.py:55-59）的兜底是**裸
+        # except Exception**，AssertionError 会被它接住并 fallback 到 parse_discovery
+        # —— 所以这里换成 ParseException 的收益只在**日志可读性与消息文案**，
+        # 不是「炸掉整条链路」。
+        # 对照：抖音 _parse_douyin（parsers/douyin/parser.py:63）只 except ParseException，
+        # 那里 AssertionError 才真的会打断「换下一条路径」。
+        # 见 discovery.NoteData.url_and_duration：那条**不在**任何 try 里，注释写法与这里不同。
         if self.video is None:
             raise ParseException("图文详情缺少 video 段")
         video_url, duration = self.video.url_and_duration

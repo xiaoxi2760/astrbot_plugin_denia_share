@@ -89,6 +89,14 @@ class PixivParser(BaseParser):
 
         async with self.new_client() as client:
             detail = await self._fetch_ajax(client, f"{AJAX_BASE}/illust/{illust_id}", referer)
+            # 先校验「返回的就是被请求的那条」，再判 R18：拿错了作品时，对它做内容
+            # 安全判定毫无意义（而且会给出误导性的「非全年龄」提示）。
+            # 与抖音的 _pick_item 同源 —— 那条注释里写了旧实现会静默发出另一条作品。
+            returned_id = detail.get("illustId") or detail.get("illust_id")
+            if returned_id not in (None, "") and str(returned_id) != illust_id:
+                raise ParseException(
+                    f"Pixiv 接口返回了其他作品的数据（请求 {illust_id}，返回 {returned_id}）"
+                )
             if self._is_unsafe(detail):
                 raise IgnoreException("该作品非全年龄内容，已跳过")
             pages = await self._fetch_ajax(client, f"{AJAX_BASE}/illust/{illust_id}/pages", referer)

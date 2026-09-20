@@ -180,17 +180,44 @@ async def clear_cache_dir(cache_dir: Path) -> int:
     return cleaned
 
 
+async def _terminate_process(process: asyncio.subprocess.Process) -> None:
+    """尽力杀掉子进程并回收。
+
+    清理路径里**不能再抛新异常**（会盖掉调用方要向上抛的那个），所以这里连
+    ``BaseException`` 一起吞：取消中的第二次 await 可能再抛一次 CancelledError。
+    """
+    try:
+        process.kill()
+    except (ProcessLookupError, OSError):
+        pass
+    try:
+        await process.wait()
+    except BaseException:
+        logger.debug("回收 ffmpeg 子进程失败", exc_info=True)
+
+
 async def exec_ffmpeg_cmd(cmd: list[str]) -> None:
-    """执行 ffmpeg 命令"""
+    """执行 ffmpeg 命令。
+
+    取消/退出时**先收掉子进程再向上抛**：ffmpeg 被留在后台会继续写目标文件，
+    而调用方紧接着要 unlink 它 —— Windows 上文件被占用会 PermissionError，
+    被 ``safe_unlink`` 吞成一条日志，于是「删掉残缺输出」这层保护静默失效。
+    """
     logger.debug(f"Executing ffmpeg command: {' '.join(cmd)}")
     try:
         process = await asyncio.create_subprocess_exec(
             *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
         )
-        _, stderr = await process.communicate()
-        return_code = process.returncode
     except FileNotFoundError:
         raise RuntimeError("ffmpeg 未安装或无法找到可执行文件")
+
+    try:
+        _, stderr = await process.communicate()
+    except BaseException:
+        # 必须写 BaseException：CancelledError 不是 Exception 的子类
+        await _terminate_process(process)
+        raise
+    return_code = process.returncode
 
     if return_code != 0:
         error_msg = stderr.decode().strip()
@@ -224,9 +251,11 @@ async def merge_av(
 
     try:
         await exec_ffmpeg_cmd(cmd)
-    except RuntimeError:
+    except BaseException:
         # 失败时删掉可能残留的 0 字节/残缺输出，避免被 encode_video_to_h264
-        # 等下游的 exists() 缓存命中当成成品
+        # 等下游的 exists() 缓存命中当成成品。
+        # 捕 BaseException 而不是 RuntimeError：CancelledError 不是 Exception 的子类，
+        # 取消时同样会留下残缺输出（与 download.py 的 .part 是同一形状）。
         await safe_unlink(output_path)
         raise
     await asyncio.gather(safe_unlink(v_path), safe_unlink(a_path))
@@ -267,7 +296,8 @@ async def merge_av_h264(
     ]
     try:
         await exec_ffmpeg_cmd(cmd)
-    except RuntimeError:
+    except BaseException:
+        # 同 merge_av：捕 BaseException，取消时也要清掉残缺输出
         await safe_unlink(output_path)
         raise
     await asyncio.gather(safe_unlink(v_path), safe_unlink(a_path))
@@ -294,7 +324,8 @@ async def encode_video_to_h264(video_path: Path) -> Path:
     ]
     try:
         await exec_ffmpeg_cmd(cmd)
-    except RuntimeError:
+    except BaseException:
+        # 同 merge_av：捕 BaseException，取消时也要清掉残缺输出
         await safe_unlink(output_path)
         raise
     logger.info(f"视频重新编码为 H.264 成功: {output_path}, {fmt_size(output_path)}")

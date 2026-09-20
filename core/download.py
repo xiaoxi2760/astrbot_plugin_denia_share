@@ -13,6 +13,7 @@ import aiofiles
 from astrbot.api import logger
 
 from .media_utils import merge_av, safe_unlink, generate_file_name, is_module_available
+from .media_verify import HEAD_PROBE_BYTES, classify_media_response
 from .constants import COMMON_HEADER, DOWNLOAD_TIMEOUT
 from .exception import IgnoreException, DownloadException
 
@@ -164,6 +165,32 @@ class StreamDownloader:
     def _max_bytes(self) -> int:
         return self.max_size_mb * 1024 * 1024 if self.max_size_mb > 0 else 0
 
+    @staticmethod
+    def _reject_if_not_media(response, head: bytes) -> None:
+        """把「200 OK + 错误页」认出来，别当媒体存盘发出去。
+
+        判定规则见 :mod:`.media_verify`（只拒绝有把握的：明确的非媒体 Content-Type，
+        或泛型 Content-Type 下开头就是 HTML/JSON/文本错误）。认不出的一律放行 ——
+        把签名做成白名单会在平台换容器格式时误杀。
+
+        抛 ``DownloadException`` 而不是 ``IgnoreException``：错误页意味着**媒体确实
+        没拿到**，属于缺料审计口径里的真失败；说成「按策略跳过」会让审计不再报缺料，
+        用户就会拿到一张少了这张图的卡片而毫无提示。
+        """
+        headers = getattr(response, "headers", None) or {}
+        content_type = None
+        if hasattr(headers, "get"):
+            # httpx 的 Headers 大小写不敏感，curl_cffi 的也基本是；两个都试一遍最稳
+            content_type = headers.get("content-type") or headers.get("Content-Type")
+
+        reason = classify_media_response(content_type, head)
+        if reason is None:
+            return
+        logger.warning(
+            f"媒体响应不是有效内容，已丢弃 | url: {getattr(response, 'url', '?')} | {reason}"
+        )
+        raise DownloadException(f"媒体响应不是有效内容：{reason}")
+
     async def _download_file_with_httpx(
         self,
         url: str,
@@ -177,11 +204,17 @@ class StreamDownloader:
             response.raise_for_status()
             self._validate_content_length(response)
             received_bytes = 0
+            head = b""
             try:
                 async with aiofiles.open(part, "wb") as file:
                     async for chunk in response.aiter_bytes(chunk_size):
                         if not chunk:
                             continue
+                        if not head:
+                            # 只探开头一段：CDN 的错误页一定从头开始，
+                            # 所以不需要多一次请求，也不影响流式写入
+                            head = chunk[:HEAD_PROBE_BYTES]
+                            self._reject_if_not_media(response, head)
                         await file.write(chunk)
                         received_bytes += len(chunk)
                         # chunked 场景没有 Content-Length，边下边判大小
@@ -237,11 +270,16 @@ class StreamDownloader:
             response.raise_for_status()
             self._validate_content_length(response)
             received_bytes = 0
+            head = b""
             try:
                 async with aiofiles.open(part, "wb") as file:
                     async for chunk in response.aiter_content(chunk_size=8192):
                         if not chunk:
                             continue
+                        if not head:
+                            # 与 httpx 通道同形：只探开头一段
+                            head = chunk[:HEAD_PROBE_BYTES]
+                            self._reject_if_not_media(response, head)
                         await file.write(chunk)
                         received_bytes += len(chunk)
                         if self._max_bytes and received_bytes > self._max_bytes:
@@ -394,18 +432,30 @@ class StreamDownloader:
                                         f"媒体大小超过上限({self.max_size_mb}MB)"
                                     )
 
-            except (DownloadException, IgnoreException):
+            except BaseException as exc:
+                # 半截 .part 必须无条件删掉，所以这里**必须写 BaseException**：
+                # CancelledError 不是 Exception 的子类，原先三个分支
+                # （DownloadException/IgnoreException、httpx.HTTPError、Exception）
+                # 一个都不匹配，取消时合并到一半的文件会一直躺在缓存目录里。
+                # 这是同一形状的第三处 —— 前两处是 _download_file_with_httpx 与
+                # _download_file_with_curl_cffi，它们早就用 BaseException 了。
                 await safe_unlink(part)
-                raise
-            except httpx.HTTPError:
-                await safe_unlink(part)
+                if isinstance(exc, (DownloadException, IgnoreException)):
+                    # 「分片数超限 / 体积超限」是**策略跳过**，不是下载失败。
+                    # 包装成 DownloadException 会让缺料审计把它当成真失败 ——
+                    # 审计正是靠异常类型区分「按策略跳过」与「真失败」的。
+                    raise
+                if not isinstance(exc, Exception):
+                    # CancelledError / KeyboardInterrupt / SystemExit：原样向上抛。
+                    # 包装成 DownloadException 会把「任务被取消」说成「下载失败」，
+                    # 而且取消语义不该被吞。
+                    raise
                 # 视频下不下来属于「产物缺料」，日志不能被调试开关门控
-                logger.warning(f"m3u8 视频下载失败 | url: {m3u8_url}", exc_info=True)
-                raise DownloadException("m3u8 视频下载失败")
-            except Exception:
-                # 写盘失败等意外异常也要清理半截文件，避免留下坏缓存被后续命中
-                await safe_unlink(part)
-                logger.warning(f"m3u8 视频下载异常 | url: {m3u8_url}", exc_info=True)
+                if isinstance(exc, httpx.HTTPError):
+                    logger.warning(f"m3u8 视频下载失败 | url: {m3u8_url}", exc_info=True)
+                else:
+                    # 写盘失败等意外异常：同样要留痕，避免留下坏缓存被后续命中
+                    logger.warning(f"m3u8 视频下载异常 | url: {m3u8_url}", exc_info=True)
                 raise DownloadException("m3u8 视频下载失败")
 
             os.replace(part, video_path)

@@ -327,9 +327,12 @@ export function createConfigView(ctx) {
   async function resetAll(button) {
     const ok = await confirmDialog({
       title: "恢复默认配置",
+      // 文案必须与后端一致：reset_config 除了重置配置项，还会调 bili_logout() 把
+      // B 站扫码登录态一起清掉（它不在配置项里，单独存在插件数据目录）。
+      // 两个提交曾各修了这句承诺的一侧 —— 代码清了、文案说没清，方向相反。
       body:
-        "所有配置项都会回到默认值，包括 Cookie、Token 与代理设置。这一步不能撤销。" +
-        "（B 站扫码登录保存的登录态不在配置项里，恢复默认不会清掉它，需要单独「清除 Cookie」。）",
+        "所有配置项都会回到默认值，包括 Cookie、Token 与代理设置；" +
+        "B 站扫码登录保存的登录态（不在配置项里）也会一并清除。这一步不能撤销。",
       confirmText: "恢复默认",
       danger: true,
     });
