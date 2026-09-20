@@ -113,12 +113,22 @@ class NGAParser(BaseParser):
             image_count = 0
             for line in text.split("\n"):
                 if "[" in line:
-                    if paths := re.findall(r"\[img\]\.(.*?)\[\/img\]", line):
+                    # NGA 的图片标记有两种写法：相对路径（`[img]./mon_xxx.jpg[/img]`）
+                    # 与绝对 URL（`[img]https://img.nga.178.com/...[/img]`）。
+                    # 原先正则要求路径以 `.` 开头，绝对 URL 一律不匹配 → 落到 else
+                    # 被 re.sub 把标签抹掉，图片既不下载、也不留提示。
+                    if paths := re.findall(r"\[img\](.*?)\[/img\]", line):
                         for path in paths:
+                            if not path:
+                                continue
                             # 帖子里的图片数量由远端内容决定，这里必须自己封顶
                             if image_count >= MAX_IMAGES_PER_RESULT:
                                 continue
-                            img_url = self.build_img_url(path)
+                            img_url = (
+                                path
+                                if path.startswith(("http://", "https://"))
+                                else self.build_img_url(path)
+                            )
                             result.graphics.append(self.create_image(img_url))
                             image_count += 1
                     else:

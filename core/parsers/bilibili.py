@@ -226,9 +226,17 @@ class BilibiliParser(BaseParser):
                             v_try, a_try, output_path=output_path, ext_headers=self.headers,
                         )
                     else:
+                        # 这是**视频**，必须占媒体池：不传 slots 会落到 _image_slots，
+                        # 双池设计要防的「小图排队等大视频」就在这条路径上原样发生。
                         return await self.downloader._download_file(
                             v_try, file_name=output_path.name, ext_headers=self.headers,
+                            slots=self.downloader._media_slots,
                         )
+                except IgnoreException:
+                    # 「体积超限 / 分片超限」不是 CDN 故障：换个备用地址必然还是超限，
+                    # 逐个重试只是把同一个大文件重下若干遍，最后还报「已尝试所有CDN」，
+                    # 把「策略跳过」说成了网络问题（缺料审计也会因此误判）。
+                    raise
                 except Exception as e:
                     if idx > 0:
                         logger.warning(f"B站 CDN 重试 ({idx+1}/{len(url_pairs)}) 失败: {e}")
@@ -491,15 +499,9 @@ class BilibiliParser(BaseParser):
             logger.error(f"保存 Cookie 失败: {e}")
 
     async def _init_credential(self):
-        # 优先从已持久化的cookie文件加载
-        self._load_credential()
-        if self._credential is not None:
-            if await self._credential.check_valid():
-                logger.info("从持久化文件加载的B站 Cookie 有效")
-                return
-            logger.info("持久化文件中的 Cookie 已过期")
-
-        # 其次从配置中的 BILI_CK 加载
+        # **配置项优先**（与 main.apply_runtime_config 的取值顺序保持一致）：
+        # BILI_CK 是用户显式填的，持久化文件只是扫码登录的暂存。
+        # 反过来的话，网页上改了 BILI_CK 会被旧登录态压住 —— 接口报成功、实际不生效。
         if self._bili_ck:
             credential = Credential.from_cookies(ck2dict(self._bili_ck))
             if await credential.check_valid():
@@ -509,6 +511,14 @@ class BilibiliParser(BaseParser):
                 self._save_cookie_str(self._bili_ck)
                 return
             logger.info("B站配置中的 Cookie 已过期")
+
+        # 其次才是扫码登录持久化下来的文件
+        self._load_credential()
+        if self._credential is not None:
+            if await self._credential.check_valid():
+                logger.info("从持久化文件加载的B站 Cookie 有效")
+                return
+            logger.info("持久化文件中的 Cookie 已过期")
 
     def update_cookie(self, cookie_str: str):
         """运行时更新B站Cookie，立即生效"""

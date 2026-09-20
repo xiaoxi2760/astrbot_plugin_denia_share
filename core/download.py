@@ -186,21 +186,22 @@ class StreamDownloader:
                         received_bytes += len(chunk)
                         # chunked 场景没有 Content-Length，边下边判大小
                         if self._max_bytes and received_bytes > self._max_bytes:
-                            await safe_unlink(part)
                             mb = received_bytes / 1024 / 1024
                             logger.warning(
                                 f"媒体 url: {response.url}, 下载到 {mb:.1f}MB 超过上限，中断"
                             )
+                            # **不能在这里删**：aiofiles 的句柄还开着，Windows 上
+                            # unlink 会 PermissionError(WinError 32)，而 safe_unlink
+                            # 把它吞成一条日志 —— 文件反而留了下来。抛出去，由下面的
+                            # except 在句柄关闭后统一删（对照 _validate_downloaded_bytes：
+                            # 它在句柄外，删得掉）。
                             raise IgnoreException(
                                 f"媒体大小超过上限({self.max_size_mb}MB)"
                             )
-            except IgnoreException:
-                raise
             except BaseException:
-                # 下载中断时清掉半截文件，避免下次命中缓存拿到坏文件。
-                # 必须写 BaseException：CancelledError 不是 Exception 的子类，
-                # 只捕 Exception 时「任务被取消」留下的半截 .part 会一直躺在缓存目录里
-                # （靠 cleanup_cache_dir 的 TTL 兜底能清掉，但那是事后补救，不如当场删）。
+                # 句柄已关闭，这里删得掉。必须写 BaseException：CancelledError 不是
+                # Exception 的子类，只捕 Exception 时「任务被取消」留下的半截 .part
+                # 会一直躺在缓存目录里（TTL 兜底是事后补救，不如当场删）。
                 await safe_unlink(part)
                 raise
             await self._validate_downloaded_bytes(part, str(response.url), received_bytes)
@@ -244,13 +245,15 @@ class StreamDownloader:
                         await file.write(chunk)
                         received_bytes += len(chunk)
                         if self._max_bytes and received_bytes > self._max_bytes:
-                            await safe_unlink(part)
+                            # 同 httpx 通道：**不能在句柄内删**（Windows 上
+                            # unlink 会 PermissionError(WinError 32) 并被 safe_unlink
+                            # 吞掉），抛出去交给下面的 except 在句柄关闭后删。
                             raise IgnoreException(
                                 f"媒体大小超过上限({self.max_size_mb}MB)"
                             )
-            except IgnoreException:
-                raise
-            except Exception:
+            except BaseException:
+                # 与 httpx 通道保持一致：必须捕 BaseException，
+                # CancelledError 不是 Exception 的子类，取消时的半截 .part 也要清。
                 await safe_unlink(part)
                 raise
             await self._validate_downloaded_bytes(part, str(response.url), received_bytes)
@@ -287,6 +290,13 @@ class StreamDownloader:
                 from .config import get_config
                 try:
                     return await self._download_file_with_curl_cffi(url, file_path=file_path, headers=headers)
+                except IgnoreException:
+                    # 「体积超限 / 分片超限」这类**策略跳过**不是下载失败。
+                    # 包装成 DownloadException 会让缺料审计把它当成真失败 ——
+                    # 审计正是靠异常类型区分「按策略跳过」与「真失败」的，
+                    # 在这里把它抹平，等于把那条判定打回原形。
+                    # （download.py 内部已经 warning 过，不必再记一次。）
+                    raise
                 except Exception as fallback_error:
                     # 两条通道都失败才算真失败：这属于「产物缺料」，必须无条件留痕，
                     # 否则用户看到卡片少图、日志里却找不到原因。开关只决定要不要堆栈。

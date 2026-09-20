@@ -78,6 +78,11 @@ LOGIN_STATE_TTL = 300
 # 原先只从 _bili_login_tasks 里 pop，状态永远留着 —— 点得越多字典越长。
 LOGIN_STATE_MAX = 32
 
+# 解析结果内存缓存的条数上限。`_result_cache` 原先只在「清理循环 / 切换缓存目录 /
+# 手动清空缓存」三处 clear，而清理循环在 CACHE_TTL_HOURS=0 时根本不启动 ——
+# 也就是说那种部署下它永不回收。加个条数上限兜底，与 TTL 无关。
+MAX_RESULT_CACHE_ENTRIES = 128
+
 
 def _get_plugin_data_dir() -> Path:
     from astrbot.core.utils.astrbot_path import get_astrbot_data_path
@@ -372,26 +377,32 @@ class DeniaSharePlugin(Star):
         )
         self._screenshot_fallback = pconfig.SCREENSHOT_FALLBACK
 
-    async def initialize(self):
-        pconfig = get_config()
-        ttl = pconfig.CACHE_TTL_HOURS
-        if ttl > 0:
+    async def _cache_cleanup_loop(self):
+        """缓存清理循环。
+
+        **每一轮重新读配置**，而不是把 TTL / 间隔烤进闭包 —— 配置页的「维护」
+        分组写着「改动后立即生效」，而 apply_runtime_config 并不重建这个任务，
+        烤进闭包就等于「网页上改了 CACHE_TTL_HOURS 也不会生效」。
+        """
+        while True:
+            pconfig = get_config()
+            ttl = pconfig.CACHE_TTL_HOURS
             interval = max(pconfig.CACHE_CLEANUP_INTERVAL_MINUTES, 1) * 60
+            try:
+                if ttl > 0:
+                    await cleanup_cache_dir(self.cache_dir, ttl_hours=ttl)
+                    self._result_cache.clear()
+                    self._render_cache.clear()
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                # 一次清理失败（如磁盘满/文件占用）不应杀死整个循环
+                logger.warning("[denia_share] 缓存清理失败，下轮重试", exc_info=True)
+            await asyncio.sleep(interval)
 
-            async def _cache_cleanup_loop():
-                while True:
-                    try:
-                        await cleanup_cache_dir(self.cache_dir, ttl_hours=ttl)
-                        self._result_cache.clear()
-                        self._render_cache.clear()
-                    except asyncio.CancelledError:
-                        raise
-                    except Exception:
-                        # 一次清理失败（如磁盘满/文件占用）不应杀死整个循环
-                        logger.warning("[denia_share] 缓存清理失败，下轮重试", exc_info=True)
-                    await asyncio.sleep(interval)
-
-            self._cache_cleanup_task = asyncio.create_task(_cache_cleanup_loop())
+    async def initialize(self):
+        # 循环常驻：TTL=0 时它自己跳过清理，这样「把 TTL 从 0 改成非 0」也能生效
+        self._cache_cleanup_task = asyncio.create_task(self._cache_cleanup_loop())
 
         await self._bili_load_cookie()
         self._bili_http_session = aiohttp.ClientSession()
@@ -505,7 +516,7 @@ class DeniaSharePlugin(Star):
             result = self._result_cache.get(cache_key)
             if result is None:
                 result = await parser.search(keyword)
-                self._result_cache[cache_key] = result
+                self._remember_result(cache_key, result)
             async for r in self._deliver(event, result, cache_key):
                 yield r
             await self._record_history(
@@ -565,7 +576,7 @@ class DeniaSharePlugin(Star):
             if result is None:
                 keyword, searched = parser.search_url(url)
                 result = await parser.parse(keyword, searched)
-                self._result_cache[cache_key] = result
+                self._remember_result(cache_key, result)
 
             async for r in self._deliver(event, result, cache_key):
                 yield r
@@ -647,6 +658,14 @@ class DeniaSharePlugin(Star):
         async for r in self._try_send_media(event, result):
             yield r
 
+    def _remember_result(self, cache_key: str, result: ParseResult) -> None:
+        """写入解析结果内存缓存，并维持条数上限（见 MAX_RESULT_CACHE_ENTRIES）。"""
+        cache = self._result_cache
+        cache[cache_key] = result
+        # dict 保持插入序：超限就丢最早写入的（FIFO 够用，这里只是防无界增长）
+        while len(cache) > MAX_RESULT_CACHE_ENTRIES:
+            cache.pop(next(iter(cache)), None)
+
     # ==================== 解析记录 ====================
 
     async def _record_history(
@@ -683,7 +702,12 @@ class DeniaSharePlugin(Star):
                 detail=self._history_detail(result),
                 elapsed_ms=elapsed_ms,
             )
-            await asyncio.to_thread(self.history.add, record)
+            if not await asyncio.to_thread(self.history.add, record):
+                # 写盘失败（Windows 上 os.replace 会撞开着的文件）：记录没能落盘，
+                # 不能假装成功 —— 至少要在日志里说清楚，而不是静默少一条。
+                logger.warning(
+                    "[denia_share] 解析记录未能落盘（记录页可能正被占用），本条记录已丢失"
+                )
             return record
         except Exception:
             logger.warning("[denia_share] 写入解析记录失败", exc_info=True)
@@ -748,7 +772,10 @@ class DeniaSharePlugin(Star):
         self.parsers = {}
         self._init_parsers()
 
-        bili_cookie = self._bili_cookie or (pconfig.BILI_CK or "")
+        # **配置项优先**：BILI_CK 是用户在网页上显式填的，登录态文件只是扫码登录的
+        # 暂存。反过来（登录态优先）会让「网页上改了 BILI_CK」看起来成功、实际仍用
+        # 老 Cookie —— 接口还回 changed:["BILI_CK"], runtime_ok:true，很难查。
+        bili_cookie = (pconfig.BILI_CK or "") or self._bili_cookie
         if bili_cookie:
             self._bili_apply_cookie_to_parser(bili_cookie)
 
@@ -1348,17 +1375,20 @@ class DeniaSharePlugin(Star):
             return {"valid": False, "error": str(e)}
 
     async def _bili_load_cookie(self):
+        # **配置项优先**：BILI_CK 是用户显式填的，持久化文件只是扫码登录的暂存。
+        # 取值顺序要和 apply_runtime_config 与 parser._init_credential 保持一致，
+        # 否则「网页上改了 BILI_CK」还是会被旧登录态压住。
+        if get_config().BILI_CK:
+            self._bili_cookie = get_config().BILI_CK
+            return
         try:
             if self._bili_cookie_file.exists():
                 saved = json.loads(self._bili_cookie_file.read_text(encoding="utf-8")).get("cookie", "")
                 if saved:
                     self._bili_cookie = saved
                     logger.info("已从持久化文件加载B站 Cookie")
-                    return
         except Exception as e:
             logger.warning(f"加载B站 Cookie 失败: {e}")
-        if get_config().BILI_CK:
-            self._bili_cookie = get_config().BILI_CK
 
     async def _bili_save_cookie(self, cookie_str: str):
         try:

@@ -212,15 +212,22 @@ class HistoryStore:
 
     # ---------------- 写 ---------------- #
 
-    def add(self, record: ParseRecord) -> None:
-        """追加一条记录，超出上限时丢弃最旧的若干条。"""
+    def add(self, record: ParseRecord) -> bool:
+        """追加一条记录，超出上限时丢弃最旧的若干条。
+
+        Returns:
+            是否**真的落盘**了。原先不检查 ``_write`` 的返回值，于是 Windows 上
+            ``os.replace`` 撞到开着的文件（记录页开着时并发新增 → PermissionError
+            WinError 5）会被静默吞掉 —— 用户少了一条记录却毫无察觉。
+            ``delete`` / ``clear`` 一直是检查的，只有这里漏了。
+        """
         with self._lock:
             records = self.load()
             records.append(record)
             overflow = len(records) - self.max_records
             if overflow > 0:
                 records = records[overflow:]
-            self._write(records)
+            return self._write(records)
 
     def delete(self, record_ids: Iterable[str]) -> int:
         """按 id 删除记录，返回**实际落盘**的删除条数（写盘失败返回 0）。"""

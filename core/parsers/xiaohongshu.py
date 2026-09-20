@@ -85,6 +85,10 @@ class XiaoHongShuParser(BaseParser):
             result.video = self.create_video(video_url, self._no_watermark(cover_url), duration)
         elif image_urls := note_detail.image_urls:
             result.contents.extend(self.create_images([self._no_watermark(u) for u in image_urls]))
+        else:
+            # 既不是视频也没有图片：抛出去让三级兜底继续。返回零媒体的空结果
+            # 会让用户拿到只有标题的卡片且零警告（与抖音那类问题同一个形状）。
+            raise ParseException("图文详情里既没有视频也没有图片")
         return result
 
     async def parse_discovery(self, url: str):
