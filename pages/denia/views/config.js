@@ -327,7 +327,9 @@ export function createConfigView(ctx) {
   async function resetAll(button) {
     const ok = await confirmDialog({
       title: "恢复默认配置",
-      body: "所有配置项都会回到默认值，包括 Cookie、Token 与代理设置。这一步不能撤销。",
+      body:
+        "所有配置项都会回到默认值，包括 Cookie、Token 与代理设置。这一步不能撤销。" +
+        "（B 站扫码登录保存的登录态不在配置项里，恢复默认不会清掉它，需要单独「清除 Cookie」。）",
       confirmText: "恢复默认",
       danger: true,
     });

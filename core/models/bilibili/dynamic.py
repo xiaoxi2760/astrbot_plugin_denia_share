@@ -3,7 +3,7 @@
 # 本仓库对其做过修改；完整归属见项目根目录 README「许可与致谢」。
 
 from typing import Any
-from msgspec import Struct, convert
+from msgspec import Struct, convert, field
 
 
 class AuthorInfo(Struct):
@@ -52,11 +52,24 @@ class OpusContent(Struct):
     title: str | None = None
 
 
+class DrawItem(Struct):
+    """九宫格动态里的一张图。"""
+
+    src: str
+
+
+class DrawContent(Struct):
+    items: list[DrawItem] = field(default_factory=list)
+
+
 class DynamicMajor(Struct):
     type: str | None = None
     archive: VideoArchive | None = None
     opus: OpusContent | None = None
     desc: OpusSummary | None = None
+    # MAJOR_TYPE_DRAW（九宫格图集）走这个字段。原先没声明它，于是九宫格动态
+    # 只发出文字、图片全丢，而且**零警告** —— 和「抖音图集变成视频」同一类问题。
+    draw: DrawContent | None = None
 
     @property
     def title(self) -> str | None:
@@ -82,6 +95,9 @@ class DynamicMajor(Struct):
             return [pic.url for pic in self.opus.pics]
         elif self.type == "MAJOR_TYPE_ARCHIVE" and self.archive and self.archive.cover:
             return [self.archive.cover]
+        elif self.type == "MAJOR_TYPE_DRAW" and self.draw:
+            # 九宫格图集：原先这里没有分支，图片被整段丢掉
+            return [item.src for item in self.draw.items]
         return []
 
     @property

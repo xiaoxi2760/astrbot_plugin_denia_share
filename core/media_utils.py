@@ -106,9 +106,18 @@ async def cleanup_cache_dir(cache_dir: Path, ttl_hours: int) -> int:
 
     cutoff = time.time() - ttl_hours * 3600
     cleaned = 0
+    # 哨兵必须豁免。它是个空文件、mtime 就是创建时间，TTL 一到就会被当过期文件删掉，
+    # 后果是连锁的：
+    #   1. 下一轮 is_cache_dir_trusted 变 False → 清理**永久停摆**，
+    #      「清除缓存」按钮也一起失效；
+    #   2. 共享缓存目录更糟 —— 哨兵没了、目录里又有内容，重启时
+    #      ensure_cache_marker(allow_nonempty=False) 会拒绝补写 → 永久回退到插件数据
+    #      目录，媒体共享/中转静默失效（默认目录能自愈，因为它传的是 allow_nonempty=True）。
+    # clear_cache_dir 一直是豁免的，只有这里漏了。
+    marker = cache_dir / CACHE_MARKER_NAME
 
     for f in cache_dir.iterdir():
-        if not f.is_file():
+        if not f.is_file() or f == marker:
             continue
         try:
             if f.stat().st_mtime < cutoff:
@@ -116,6 +125,11 @@ async def cleanup_cache_dir(cache_dir: Path, ttl_hours: int) -> int:
                 cleaned += 1
         except Exception:
             continue
+
+    # 双保险：上面的 trusted 检查已通过（说明这确实是插件认领的目录），
+    # 所以补写哨兵是安全的。万一它被外部删掉，至少能自愈而不是永久停摆。
+    if not ensure_cache_marker(cache_dir, allow_nonempty=True):
+        logger.warning(f"缓存哨兵补写失败，下轮清理可能被跳过: {cache_dir}")
 
     if cleaned > 0:
         logger.info(f"缓存清理完成: 已清理 {cleaned} 个过期文件 ({cache_dir})")
