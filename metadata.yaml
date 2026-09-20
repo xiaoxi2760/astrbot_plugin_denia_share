@@ -68,8 +68,7 @@ desc: |
 
   ## 致谢
 
-  解析框架与分享卡片渲染来自 astrbot_plugin_rika_share（MIT）；
-  部分平台解析与媒体发送机制来自 astrbot_plugin_media_parser；
+  解析框架、分享卡片渲染与部分平台解析基于 astrbot_plugin_rika_share（MIT）；
   抖音 a_bogus 签名移植自 Johnserf-Seed/f2（Apache-2.0）。
   以上项目的原始版权声明均保留在对应源文件内。
 version: 0.6.2

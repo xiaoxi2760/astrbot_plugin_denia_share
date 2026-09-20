@@ -140,7 +140,7 @@ AstrBot 链接分享自动解析插件：把分享链接解析成结构化内容
 | `RENDER_GRADIENT_TOP` | 空 | 背景渐变顶部色，`#RRGGBB`；留空 = 用主题自带渐变 |
 | `RENDER_GRADIENT_BOTTOM` | 空 | 背景渐变底部色，同上 |
 
-新加的 7 项都能在「外观 → 卡片设计器」里边调边看，不必手填配置。
+这些都能在「外观 → 卡片设计器」里边调边看，不必手填配置。
 
 ### 媒体发送
 
@@ -311,7 +311,7 @@ astrbot_plugin_denia_share/
 │   ├── style.css            主题变量、布局与组件样式
 │   ├── ui.js                DOM / 提示条 / 弹窗 / 格式化等通用件
 │   ├── app.js               页面框架：bridge、导航、视图挂载
-│   └── views/               overview / parse / cache / config 四个标签页
+│   └── views/               overview / parse / cache / appearance / config 五个标签页
 └── core/
     ├── base_parser.py       解析器基类：URL 注册、懒下载、媒体构建
     ├── data.py              解析结果数据模型（ParseResult 等）
@@ -364,12 +364,15 @@ astrbot_plugin_denia_share/
 
 本项目以 MIT License 发布，详见 [LICENSE](LICENSE)。
 
-- [astrbot_plugin_rika_share](https://github.com/iris1598/astrbot_plugin_rika_share)（MIT）——
-  解析框架、分享卡片渲染器，以及 B站 / 微博 / 小红书 / AcFun / NGA 的解析实现
-- [astrbot_plugin_media_parser](https://github.com/xiaoxi2760/astrbot_plugin_media_parser_yaya)
-  （娅娅版）—— 抖音签名接口、快手新版页面兼容、Twitter 兜底链、媒体发送机制
-- [Johnserf-Seed/f2](https://github.com/Johnserf-Seed/f2)（**Apache-2.0**）——
-  抖音 `a_bogus` 签名（`core/parsers/douyin/sign.py`）
+引用了第三方代码的部分只有这两处：
 
-其余部分（GitHub / Pixiv / Steam 解析、网页截图、网页界面等）为本项目实现。
-以上项目的原始版权声明均保留在对应源文件内。
+| 来源 | 许可 | 用到哪里 |
+| --- | --- | --- |
+| [astrbot_plugin_rika_share](https://github.com/iris1598/astrbot_plugin_rika_share) | MIT | 解析框架（`base_parser` / `data` / `task` / `models`）、分享卡片渲染器 `core/card_renderer.py`、B站 / 微博 / 小红书 / AcFun / NGA 的解析实现、抖音的 HTML 取流路径、快手的页面结构、Twitter 的 vxtwitter 兜底、网页截图的 Cloudflare 后端（其 `cloudflare_screenshot.py` 的精简版） |
+| [Johnserf-Seed/f2](https://github.com/Johnserf-Seed/f2) | Apache-2.0 | 抖音 `a_bogus` 签名（`core/parsers/douyin/sign.py`，文件头保留了 `SPDX-License-Identifier: Apache-2.0`） |
+
+其余部分（GitHub / Pixiv / Steam 解析、网页界面与外观自定义、媒体发送的两套机制、
+卡片外观配置项等）为本项目实现。
+
+- Apache-2.0 全文随包附在 `LICENSES/Apache-2.0.txt`
+- 引用到的源文件里都保留了各自的原始版权声明，README 只做汇总，不替代它们
