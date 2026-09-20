@@ -252,13 +252,10 @@ class BaseParser:
 
         video_content.cover = PathTask(cover_task)
 
-        if is_gif:
-            async def convert_to_gif():
-                from .media_utils import convert_video_to_gif
-                video_path = await path_task.get()
-                return await convert_video_to_gif(video_path)
-            video_content.gif_path = PathTask(convert_to_gif())
-
+        # 这里原有一段 `if is_gif: 生成 gif_path` 的自动转换，已删除：
+        # 全仓没有任何地方读 gif_path，ffmpeg 每次都白跑一遍、产物没人取用，
+        # 而它唯一的调用者（抖音图文帖）正是「图集被当成视频」那个 bug 的来源。
+        # is_gif 标记本身保留 —— Twitter 用它表达「这是动图，不算视频作品」。
         return video_content
 
     def _add_limit_warning(self, result: ParseResult, duration: float | None):
@@ -275,9 +272,6 @@ class BaseParser:
                 )
                 logger.warning(msg)
                 result.extra.setdefault("limit_warnings", []).append(msg)
-
-    def create_gif(self, url_or_task: str | asyncio.Task[Path], cover_url: str | None = None):
-        return self.create_video(url_or_task, cover_url=cover_url, is_gif=True)
 
     def create_images(self, image_urls: list[str]):
         """把一批图片 URL 转成 ImageContent（每个 URL 会立刻起一条下载任务）。

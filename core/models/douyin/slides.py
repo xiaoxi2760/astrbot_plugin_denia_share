@@ -51,11 +51,25 @@ class SlidesData(Struct):
 
     @property
     def image_urls(self) -> list[str]:
-        return [choice(image.url_list) for image in self.images]
+        """静态图直链。
+
+        **必须跳过 url_list 为空的条目**：实拍图集里有些条目只带内嵌视频，
+        `choice([])` 会直接抛 IndexError，把整条作品解析炸掉。
+        """
+        return [choice(image.url_list) for image in self.images if image.url_list]
 
     @property
     def dynamic_urls(self) -> list[str]:
-        return [choice(image.video.play_addr.url_list) for image in self.images if image.video]
+        """实拍图集里每张图内嵌的那段视频（不是静态图）。
+
+        取的时候同样要防空列表。调用方**不要**在还有静态图时用它 ——
+        用它就会把一条图集发成一串视频。
+        """
+        return [
+            choice(image.video.play_addr.url_list)
+            for image in self.images
+            if image.video and image.video.play_addr.url_list
+        ]
 
 
 class SlidesInfo(Struct):
