@@ -15,6 +15,7 @@ from collections.abc import Iterator, Awaitable
 
 from .task import PathTask
 from .constants import PlatformEnum, platform_meta
+from .exception import IgnoreException
 
 
 @dataclass(repr=False, slots=True)
@@ -214,13 +215,16 @@ class ParseResult:
 
     # 缺料提示里的量词：中文里「3 张图片」「1 个视频」比「3 图片」顺口
     _MEDIA_UNITS: ClassVar[dict[str, str]] = {
-        "图片": "张", "封面": "张", "视频": "个", "音频": "个", "头像": "个",
+        "图片": "张", "封面": "张", "视频": "个", "音频": "个",
     }
 
     def _iter_media_tasks(self) -> Iterator[tuple[str, PathTask]]:
-        """遍历所有需要落盘的媒体任务，附带用途标签（供缺料审计用）。"""
-        if self.author is not None and self.author.avatar is not None:
-            yield "头像", self.author.avatar
+        """遍历所有需要落盘的媒体任务，附带用途标签（供缺料审计用）。
+
+        **不含头像**：头像只是装饰，缺了不影响内容完整性；把它算进缺料，会让
+        「头像恰好挂了一次」也弹一条「1 个头像下载失败，未包含在本次内容中」——
+        措辞也不对，头像本来就不是「内容」。头像的失败由 ``safe_get`` 的告警日志留痕。
+        """
         for cont in self.contents:
             if isinstance(cont, VideoContent):
                 yield "视频", cont.path_task
@@ -237,12 +241,18 @@ class ParseResult:
             yield from self.repost._iter_media_tasks()
 
     async def audit_missing_media(self) -> dict[str, int]:
-        """结算所有媒体下载，把失败项按用途计数写进 ``extra["limit_warnings"]``。
+        """结算所有媒体下载，把**真失败**按用途计数写进 ``extra["limit_warnings"]``。
 
         **为什么要有这个方法**：下载失败原先只在日志里留痕，产出物本身却在撒谎
         —— 少了 3 张图的消息和图一张不缺的消息长得一模一样，用户没法判断该不该
         重试。这里在渲染/发送之前统一结算一次，把缺料写进既有的警告通道
         （``limit_warnings`` 已被卡片与聊天消息两处消费），让产物如实反映它缺了什么。
+
+        **为什么要把 ``IgnoreException`` 排除在外**：那是本仓「**故意不下载**」的信号
+        （视频时长超限、媒体体积超限、0 字节响应、m3u8 分片超限）。这些情况各自已经
+        有专门且准确的提示（如 ``_add_limit_warning`` 的「视频时长…不会下载视频」），
+        再叠一条「下载失败」就是自相矛盾的两条警告。所以这里把 gather 的返回值与
+        任务配对，按异常类型区分「策略跳过」与「真失败」。
 
         只在确有失败时才追加，成功路径零开销（一次 gather，本来也要等这些任务）。
 
@@ -253,12 +263,16 @@ class ParseResult:
         if not tasks:
             return {}
 
-        await asyncio.gather(
+        # 返回值不能丢：它是区分「真失败」与「按策略跳过」的唯一依据
+        results = await asyncio.gather(
             *[task.get() for _, task in tasks], return_exceptions=True
         )
 
         missing: dict[str, int] = {}
-        for kind, task in tasks:
+        for (kind, task), result in zip(tasks, results):
+            if isinstance(result, IgnoreException):
+                # 按策略跳过（超时长 / 超体积 / 空响应 / 分片超限），已有专门提示
+                continue
             # get() 失败时不会缓存 _path，所以 resolved 为 None 就等于「没落盘」
             if task.resolved is None:
                 missing[kind] = missing.get(kind, 0) + 1
