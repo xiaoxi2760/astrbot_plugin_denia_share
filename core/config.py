@@ -249,6 +249,14 @@ CONFIG_META: tuple[dict[str, Any], ...] = (
         "hint": "关闭后作者行只保留昵称与签名，不绘制头像圆（头像也不会再被加载）",
     },
     {
+        "key": "RENDER_SHOW_PLAY_BUTTON",
+        "group": "卡片外观",
+        "label": "封面播放按钮",
+        "type": "bool",
+        "default": True,
+        "hint": "视频封面中央的毛玻璃播放按钮。关闭后封面更干净（yaya 那边默认是关的，这里默认开以保持现有观感）",
+    },
+    {
         "key": "RENDER_GRADIENT_TOP",
         "group": "卡片外观",
         "label": "背景渐变·顶部色",
@@ -779,6 +787,10 @@ class ParserConfig:
         return bool(self._cfg_get("RENDER_SHOW_AVATAR", True))
 
     @property
+    def RENDER_SHOW_PLAY_BUTTON(self) -> bool:
+        return bool(self._cfg_get("RENDER_SHOW_PLAY_BUTTON", True))
+
+    @property
     def RENDER_GRADIENT_TOP(self) -> str:
         value = str(self._cfg_get("RENDER_GRADIENT_TOP", "") or "").strip()
         return value if _HEX_COLOR_RE.match(value) else ""
@@ -805,6 +817,7 @@ class ParserConfig:
             "watermark": self.RENDER_WATERMARK,
             "desc_max_lines": self.RENDER_DESC_MAX_LINES,
             "show_avatar": self.RENDER_SHOW_AVATAR,
+            "show_play_button": self.RENDER_SHOW_PLAY_BUTTON,
             "gradient_top": self.RENDER_GRADIENT_TOP or None,
             "gradient_bottom": self.RENDER_GRADIENT_BOTTOM or None,
         }

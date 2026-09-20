@@ -554,6 +554,8 @@ class WebUIApi:
             opts["cover_full_size"] = overrides["cover_full_size"]
         if isinstance(overrides.get("show_avatar"), bool):
             opts["show_avatar"] = overrides["show_avatar"]
+        if isinstance(overrides.get("show_play_button"), bool):
+            opts["show_play_button"] = overrides["show_play_button"]
         if overrides.get("desc_max_lines") is not None:
             try:
                 opts["desc_max_lines"] = max(0, min(12, int(overrides.get("desc_max_lines"))))
