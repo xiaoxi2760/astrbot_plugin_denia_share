@@ -453,18 +453,22 @@ class WebUIApi:
         from astrbot.api.web import request
 
         body = await request.json(default={}) or {}
+        # 与聊天链路对齐：口令 / 整段分享文本直接整段交给解析器匹配，不再要求
+        # http(s) 开头。聊天侧 _process_url 就是把整条 message_str 传给
+        # parser.search_url（各解析器自己的 pattern 负责从文本里摘链接），所以
+        # 「4.33 a@a.AG ... https://v.douyin.com/xxx/ 复制此链接…」这类口令在群里
+        # 能解析，在这里也必须能。如果自己另起一套「先抽 URL 再匹配」，缓存键还会
+        # 和聊天链路（整段文本的哈希）分叉，同一条分享在两条链路各存一份。
         url = str(body.get("url") or "").strip()
         if not url:
-            return _error("请填写要解析的链接")
+            return _error("请填写要解析的链接或分享口令")
         if len(url) > MAX_URL_LENGTH:
-            return _error("链接过长")
-        if not url.startswith(("http://", "https://")):
-            return _error("链接需要以 http:// 或 https:// 开头")
+            return _error("内容过长")
 
         plugin = self.plugin
         name = plugin._match_parser(url)
         if name is None:
-            return _error("没有平台规则能匹配这个链接；可以改用「网页截图」试试", 422)
+            return _error("没有平台规则能匹配这段内容；可以改用「网页截图」试试", 422)
         parser = plugin.parsers.get(name)
         if parser is None:
             return _error(f"{PLATFORM_DISPLAY_NAMES.get(name, name)} 平台当前是禁用状态", 409)

@@ -232,15 +232,23 @@ export function withBusy(button, busy, busyText = "处理中…") {
 /* ---------------- 表单片段 ---------------- */
 
 export function switchControl(checked, onChange, onText = "开启", offText = "关闭") {
+  // 文案节点留引用，切换时就地更新 —— 不能指望调用方重建 DOM：
+  // 配置页现在不重建（重建会让正在输入的文本框失焦），不就地改就会出现
+  // 「开关拨到了「关闭」，旁边仍写「开启」」。
+  const text = h("span", { class: "switch-text", text: checked ? onText : offText });
   const input = h("input", {
     type: "checkbox",
     checked: checked ? true : null,
-    onChange: (event) => onChange(event.target.checked),
+    onChange: (event) => {
+      const next = event.target.checked;
+      text.textContent = next ? onText : offText;
+      onChange(next);
+    },
   });
   return h("label", { class: "switch" }, [
     input,
     h("span", { class: "track" }),
-    h("span", { class: "switch-text", text: checked ? onText : offText }),
+    text,
   ]);
 }
 

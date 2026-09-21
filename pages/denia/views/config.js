@@ -28,6 +28,8 @@ export function createConfigView(ctx) {
   let filter = "";
   let activeSection = "all";
   let collapsed = new Set();
+  /** 底部保存栏里几个需要跟着改动数走的节点，见 syncSaveBar。 */
+  let saveBar = null;
 
   async function load() {
     ctx.setHead("加载中…");
@@ -71,6 +73,59 @@ export function createConfigView(ctx) {
 
   function dirtyKeys() {
     return Object.keys(draft);
+  }
+
+  /* ---------------- 值变化：改 draft 后**只同步界面**，不重建 DOM ----------------
+
+     所有控件的值变化都必须走这里，别各写各的。两件事各自都很容易写错：
+
+     1. 值变了却不刷新界面 —— 底部保存按钮的禁用状态是渲染时算好的，改动后
+        不同步，它就停在「上一次渲染时没有改动」的禁用态：用户填完 Token 点保存
+        毫无反应，只有去拨一下某个开关（那条路径顺带触发了整页 render）才生效。
+        徽标、字段旁的「已改」同理，不刷就等于在骗人。
+     2. 顺手调 render() 整页重建 —— container 被 clear 后重建整棵子树，正在输入的
+        <input> 每按一个键就被换成新节点，焦点与光标全丢，根本没法连续输入。
+
+     所以同步只做「改文本 / 改 hidden / 改 disabled」，一个节点都不重建。 */
+  function onValueChanged(key, value) {
+    setDraft(key, value);
+    syncDirtyUI();
+  }
+
+  /** 某个脏计数范围当前的数值。scope 形如 all / section:xxx / group:yyy。 */
+  function dirtyCountFor(scope) {
+    const keys = dirtyKeys();
+    if (scope === "all") return keys.length;
+    const [kind, name] = scope.split(":", 2);
+    if (kind === "section") {
+      const section = meta.sections.find((s) => s.key === name);
+      return section ? sectionDirtyCount(section) : 0;
+    }
+    if (kind === "group") {
+      return keys.filter((key) => {
+        const item = itemOf(key);
+        return item && item.group === name;
+      }).length;
+    }
+    return 0;
+  }
+
+  /* 同步所有随脏状态变化的节点。渲染时给它们打了标记：
+     - data-dirty-scope：大类标签 / 组头的「N 项未保存」徽标（附 data-dirty-suffix 后缀）
+     - data-dirty-mark：字段旁的「已改」标记（值是配置键）
+     用 hidden 属性控制显隐 —— style.css 里有 [hidden]{display:none!important} 兜底，
+     不会被 .seg-badge / .cfg-dirty 自己的 display 盖掉。 */
+  function syncDirtyUI() {
+    if (!container) return;
+    for (const node of container.querySelectorAll("[data-dirty-scope]")) {
+      const count = dirtyCountFor(node.dataset.dirtyScope);
+      node.textContent = String(count) + (node.dataset.dirtySuffix || "");
+      node.hidden = count === 0;
+    }
+    for (const node of container.querySelectorAll("[data-dirty-mark]")) {
+      node.hidden = !hasDraft(node.dataset.dirtyMark);
+    }
+    syncSaveBar();
   }
 
   function matchesFilter(item) {
@@ -208,13 +263,15 @@ export function createConfigView(ctx) {
         },
         [
           `${label} ${count}`,
-          dirty
-            ? h("span", {
-                class: "seg-badge",
-                title: `${dirty} 项未保存`,
-                text: String(dirty),
-              })
-            : null,
+          // 徽标节点始终建出来（靠 hidden 控制显隐），syncDirtyUI 才有节点可更新；
+          // 条件渲染的话，首次渲染时没有改动 → 节点不存在 → 后面也没法让它出现。
+          h("span", {
+            class: "seg-badge",
+            title: "未保存项数",
+            text: String(dirty),
+            hidden: dirty === 0 ? true : null,
+            dataset: { dirtyScope: key === "all" ? "all" : `section:${key}` },
+          }),
         ],
       );
 
@@ -258,9 +315,12 @@ export function createConfigView(ctx) {
           group.name,
         ]),
         h("span", { class: "sub", text: subParts.join(" · ") }),
-        dirtyCount
-          ? h("span", { class: "cfg-dirty", text: `${dirtyCount} 项未保存` })
-          : null,
+        h("span", {
+          class: "cfg-dirty",
+          text: `${dirtyCount} 项未保存`,
+          hidden: dirtyCount === 0 ? true : null,
+          dataset: { dirtyScope: `group:${group.name}`, dirtySuffix: " 项未保存" },
+        }),
       ],
     );
 
@@ -302,7 +362,12 @@ export function createConfigView(ctx) {
     const parts = [h("div", { class: "field-label" }, [
       item.label,
       h("code", { text: item.key }),
-      hasDraft(item.key) ? h("span", { class: "cfg-dirty", text: "已改" }) : null,
+      h("span", {
+        class: "cfg-dirty",
+        text: "已改",
+        hidden: hasDraft(item.key) ? null : true,
+        dataset: { dirtyMark: item.key },
+      }),
     ])];
 
     const body = h("div", { class: "field-body" }, [control]);
@@ -316,10 +381,12 @@ export function createConfigView(ctx) {
     const value = currentValue(item.key);
 
     if (item.type === "bool") {
-      return switchControl(Boolean(value), (next) => {
-        setDraft(item.key, next);
-        render();
-      });
+      // 开关的开/关文案在 switchControl 内部自己维护，这里只同步脏状态。
+      // 不再整页 render：重建 DOM 会打断别处正在进行的输入，而本页没有任何
+      // 依赖布尔值的条件渲染，syncDirtyUI 的就地更新已经足够。
+      return switchControl(Boolean(value), (next) =>
+        onValueChanged(item.key, next),
+      );
     }
 
     if (item.type === "int") {
@@ -332,7 +399,7 @@ export function createConfigView(ctx) {
         style: { maxWidth: "160px" },
         onInput: (event) => {
           const raw = event.target.value;
-          setDraft(item.key, raw === "" ? "" : Number(raw));
+          onValueChanged(item.key, raw === "" ? "" : Number(raw));
         },
       });
       return h("div", { class: "inline" }, [
@@ -349,7 +416,7 @@ export function createConfigView(ctx) {
         {
           class: "select",
           style: { maxWidth: "320px" },
-          onChange: (event) => setDraft(item.key, event.target.value),
+          onChange: (event) => onValueChanged(item.key, event.target.value),
         },
         options.map((option, index) =>
           h("option", {
@@ -367,7 +434,7 @@ export function createConfigView(ctx) {
     if (item.secret) {
       return secretInput(
         value === null || value === undefined ? "" : String(value),
-        (next) => setDraft(item.key, next),
+        (next) => onValueChanged(item.key, next),
         item.placeholder || "",
       );
     }
@@ -378,7 +445,7 @@ export function createConfigView(ctx) {
         value: value === null || value === undefined ? "" : String(value),
         rows: 3,
         spellcheck: "false",
-        onInput: (event) => setDraft(item.key, event.target.value),
+        onInput: (event) => onValueChanged(item.key, event.target.value),
       });
     }
 
@@ -388,26 +455,44 @@ export function createConfigView(ctx) {
       value: value === null || value === undefined ? "" : String(value),
       placeholder: item.placeholder || "",
       spellcheck: "false",
-      onInput: (event) => setDraft(item.key, event.target.value),
+      onInput: (event) => onValueChanged(item.key, event.target.value),
     });
   }
 
   /* ---------------- 保存栏 ---------------- */
 
-  function renderSaveBar() {
+  /* 保存栏与徽标一样只同步文本 / disabled，不重建节点：渲染时把需要随改动数
+     走的节点打上 data-save-* 标记，syncDirtyUI 每次值变化都会调到这里。
+     首次渲染时 bar 还没挂进 container，不能拿 isConnected 当守卫（会永远跳过
+     初始同步）；旧节点在 render() 被 clear 掉之后 saveBar 会立即指向新 bar，
+     中间没有别的调用路径，直接改引用是安全的。 */
+  function syncSaveBar() {
+    if (!saveBar) return;
     const keys = dirtyKeys();
-    const text = keys.length
-      ? `已修改 ${keys.length} 项：${keys.slice(0, 3).join("、")}${keys.length > 3 ? " 等" : ""}`
-      : "没有未保存的改动";
+    const textNode = saveBar.querySelector("[data-save-text]");
+    if (textNode) {
+      textNode.textContent = keys.length
+        ? `已修改 ${keys.length} 项：${keys.slice(0, 3).join("、")}${keys.length > 3 ? " 等" : ""}`
+        : "没有未保存的改动";
+    }
+    const discard = saveBar.querySelector("[data-save-discard]");
+    if (discard) discard.disabled = keys.length === 0;
+    const submit = saveBar.querySelector("[data-save-submit]");
+    if (submit) {
+      submit.disabled = keys.length === 0;
+      submit.textContent = `保存更改${keys.length ? `（${keys.length}）` : ""}`;
+    }
+  }
 
-    return h("div", { class: "savebar" }, [
-      h("span", { class: "grow", text }),
+  function renderSaveBar() {
+    const bar = h("div", { class: "savebar" }, [
+      h("span", { class: "grow", dataset: { saveText: "1" } }),
       h(
         "button",
         {
           class: "btn",
           type: "button",
-          disabled: keys.length === 0,
+          dataset: { saveDiscard: "1" },
           onClick: () => {
             draft = {};
             render();
@@ -429,12 +514,14 @@ export function createConfigView(ctx) {
         {
           class: "btn primary",
           type: "button",
-          disabled: keys.length === 0,
+          dataset: { saveSubmit: "1" },
           onClick: (event) => save(event.currentTarget),
         },
-        `保存更改${keys.length ? `（${keys.length}）` : ""}`,
       ),
     ]);
+    saveBar = bar;
+    syncSaveBar();
+    return bar;
   }
 
   async function save(button) {

@@ -62,7 +62,7 @@ export function createParseView(ctx) {
       container.appendChild(renderResult());
     } else {
       container.appendChild(
-        card("解析结果", null, [emptyBox("还没有解析结果，输入一个链接试试")]),
+        card("解析结果", null, [emptyBox("还没有解析结果，输入链接或分享口令试试")]),
       );
     }
     container.appendChild(renderShotCard());
@@ -80,7 +80,7 @@ export function createParseView(ctx) {
       type: "text",
       // 重渲染（切换解析器启用状态等）不能冲掉用户已输入的链接
       value: elements.urlInput ? elements.urlInput.value : "",
-      placeholder: "粘贴分享链接，例如 https://www.bilibili.com/video/BV...",
+      placeholder: "粘贴分享链接，或 App「复制链接」得到的整段口令（含链接即可）",
       spellcheck: "false",
       onKeydown: (event) => {
         if (event.key === "Enter") {
