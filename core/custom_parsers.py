@@ -26,6 +26,12 @@ JSON** 的站点；而真实站点经常需要「先访问首页拿 cookie / tok
 本仓的 ``BaseParser`` 接口会演进（历史上 ``create_gif`` 就被删过）。自定义文件必须
 声明 ``PARSER_API_VERSION``，与 ``API_VERSION`` 一致才加载。这样接口变更后旧文件会
 **明确报错**，而不是加载进来后在某个角落里以奇怪的方式失败。
+
+## 说明文档去哪了
+
+用法、冲突规则、接口版本、加载失败原因与安全提示都写在 ``core/custom_parsers_guide.md``，
+并在建目录时复制一份成 ``custom_parsers/README.md`` —— 用户打开那个目录就能看到，
+不必回头翻插件 README。
 """
 
 from __future__ import annotations
@@ -58,9 +64,16 @@ MAX_FILE_BYTES = 512 * 1024
 # 用户复制一份改名即可。
 TEMPLATE_NAME = "TEMPLATE.py.txt"
 
+# 说明文档：随模板一起写进数据目录，用户打开目录就能看到用法、冲突规则与安全提示。
+# 正文放仓库里（``core/custom_parsers_guide.md``）便于阅读与维护，运行时复制一份过去。
+# 插件的 README 只在「自定义解析器」一节里指路，把细节留在离使用现场最近的地方。
+GUIDE_NAME = "README.md"
+GUIDE_SOURCE = Path(__file__).with_name("custom_parsers_guide.md")
+
 _TEMPLATE = '''"""自定义解析器模板 —— 复制本文件为 ``my_site.py``（去掉 .txt）即可被加载。
 
-改完在插件 WebUI 的「总览 → 平台开关」里点「重新加载自定义解析器」，无需重启插件。
+改完在插件 WebUI 的「解析 → 自定义解析器」里点「重新加载」，无需重启插件。
+目录里的 ``README.md`` 有完整说明（冲突规则、接口版本、加载失败原因、安全提示）。
 """
 
 # 必须声明，且与本插件的接口版本一致（当前为 1）。
@@ -159,7 +172,7 @@ class CustomParserLoader:
     # ---------- 目录 ----------
 
     def ensure_directory(self) -> None:
-        """建目录并放一份模板（模板只在缺失时写，不覆盖用户改过的）。"""
+        """建目录，并放一份说明与模板（两者都只在缺失时写，不覆盖用户改过的）。"""
         try:
             self.directory.mkdir(parents=True, exist_ok=True)
         except OSError:
@@ -175,6 +188,29 @@ class CustomParserLoader:
                 logger.warning(
                     f"[denia_share] 无法写入自定义解析器模板 {template}", exc_info=True
                 )
+        guide = self.directory / GUIDE_NAME
+        if not guide.exists():
+            self._copy_guide(guide)
+
+    def _copy_guide(self, target: Path) -> None:
+        """把仓库里的说明文档复制进数据目录。
+
+        文档缺失（例如打包漏了它）**不致命**：目录与模板照常可用，只是目录里没有这份说明，
+        所以只打一条警告，不让整个自定义解析器功能因此起不来。
+        """
+        try:
+            content = GUIDE_SOURCE.read_text(encoding="utf-8")
+        except OSError:
+            logger.warning(
+                f"[denia_share] 找不到自定义解析器说明文档 {GUIDE_SOURCE}，跳过"
+            )
+            return
+        try:
+            target.write_text(content, encoding="utf-8")
+        except OSError:
+            logger.warning(
+                f"[denia_share] 无法写入自定义解析器说明 {target}", exc_info=True
+            )
 
     # ---------- 加载 ----------
 
