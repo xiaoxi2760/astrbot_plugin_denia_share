@@ -11,9 +11,9 @@
     <div class="app">
       <aside class="rail">
         <div class="rail-brand">
-          <!-- logo 由 app.js 从 /logo 接口取回后插进来（图在插件根目录 logo.png，
-               缩到 128px 传过来）。取不到时留下面的文字兜底，不要写死图片路径。 -->
-          <span class="rail-logo" id="rail-logo"><span class="rail-logo-fallback">希</span></span>
+          <!-- 品牌位直接指向本页目录下的 logo.png（与插件根目录那张是同一张图）。
+               页面资源只能在本页目录内，所以这里放了一份副本；自检会校验两者逐字节一致。 -->
+          <img class="rail-logo" src="./logo.png" alt="希望解析器" />
           <span class="rail-brand-text">
             <strong>希望解析器</strong>
             <em id="brand-version">—</em>
