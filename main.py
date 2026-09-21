@@ -44,7 +44,7 @@ from .core.data import (
 from .core.history import HistoryStore, ParseRecord
 from .core.relay import register_file
 from .core.constants import (
-    PLATFORM_DISPLAY_NAMES, PLATFORM_ORDER, PlatformEnum, platform_meta,
+    PLATFORM_DISPLAY_NAMES, PlatformEnum, platform_meta,
 )
 # 版本号只认 __init__.py 那一处：register 装饰器直接读它，
 # 不用再在装饰器里手写一遍版本字符串（以前改版本要同时改三处，漏一处就版本不一致）
@@ -58,6 +58,11 @@ from .core.parsers import (
     BilibiliParser, DouyinParser, KuaiShouParser, WeiBoParser,
     XiaoHongShuParser, TwitterParser, NGAParser, AcfunParser,
     GitHubParser, PixivParser, SteamParser,
+)
+from .core.custom_parsers import (
+    SUBDIR_NAME as CUSTOM_PARSERS_SUBDIR,
+    CustomParserLoader,
+    LoadResult as CustomParserLoadResult,
 )
 
 PLUGIN_NAME = "astrbot_plugin_denia_share"
@@ -259,6 +264,9 @@ class DeniaSharePlugin(Star):
         self._send_errors = pconfig.SEND_ERROR_MESSAGES
 
         self.parsers: dict[str, Any] = {}
+        # 用户自定义解析器的加载器。延迟到 _init_parsers 里建（那时 downloader 已就绪）
+        self._custom_loader: CustomParserLoader | None = None
+        self._custom_result: CustomParserLoadResult | None = None
         self._init_parsers()
         self._result_cache: dict[str, ParseResult] = {}
         self._render_cache: dict[str, Path] = {}
@@ -362,7 +370,30 @@ class DeniaSharePlugin(Star):
                 region=pconfig.STEAM_REGION,
             )
 
+        self._init_custom_parsers()
         self._build_screenshot_service()
+
+    def _init_custom_parsers(self) -> None:
+        """加载用户自定义解析器（目录扫描 + 失败隔离）。
+
+        每次都会重新扫描目录：这个方法在插件初始化与 ``apply_runtime_config``
+        里都会被调到，所以「保存配置 / 切换平台 / 点重新加载」都能让新写的文件
+        生效，不必重载插件。加载器自身保证反复调用是幂等的（先反注册再注册）。
+        """
+        if self._custom_loader is None:
+            self._custom_loader = CustomParserLoader(
+                self._data_dir / CUSTOM_PARSERS_SUBDIR
+            )
+        result = self._custom_loader.reload(
+            self.downloader, skip_keys=set(self.disabled_platforms)
+        )
+        self._custom_result = result
+        self.parsers.update(result.parsers)
+
+    def reload_custom_parsers(self) -> CustomParserLoadResult:
+        """供 WebUI 的「重新加载自定义解析器」按钮调用：重扫 + 立刻生效。"""
+        self._init_custom_parsers()
+        return self._custom_result or CustomParserLoadResult()
 
     def _build_screenshot_service(self) -> None:
         """按当前配置（重）建截图服务。

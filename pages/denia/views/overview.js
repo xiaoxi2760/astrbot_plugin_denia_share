@@ -30,6 +30,7 @@ const BILI_STATE_TEXT = {
 export function createOverviewView(ctx) {
   let data = null;
   let recent = [];
+  let custom = null;
   let container = null;
   let loginPoll = null;
 
@@ -42,12 +43,15 @@ export function createOverviewView(ctx) {
 
   async function load(showBusy = true) {
     if (showBusy) ctx.setHead("加载中…");
-    const [overview, cachePage] = await Promise.all([
+    const [overview, cachePage, customParsers] = await Promise.all([
       ctx.api.get("overview"),
       ctx.api.get("cache", { limit: 5, offset: 0 }),
+      // 自定义解析器列表拉不到不该让整页失败（老版本后端没有这个接口）
+      ctx.api.get("custom_parsers").catch(() => null),
     ]);
     data = overview;
     recent = cachePage.items || [];
+    custom = customParsers;
     ctx.setVersion(data.version ? `v${data.version}` : "");
     ctx.setBadge(cachePage.total || 0);
     ctx.setHead(data.send_error_messages ? "错误提示已开" : "", data.send_error_messages ? "warn" : "");
@@ -119,7 +123,11 @@ export function createOverviewView(ctx) {
     left.appendChild(renderBiliCard());
     left.appendChild(renderMediaCard());
 
-    const right = h("div", {}, [renderPlatformCard(), renderRecentCard()]);
+    const right = h("div", {}, [
+      renderPlatformCard(),
+      renderCustomParserCard(),
+      renderRecentCard(),
+    ]);
 
     container.appendChild(h("div", { class: "two-col" }, [left, right]));
   }
@@ -351,27 +359,137 @@ export function createOverviewView(ctx) {
 
   /* ---------------- 平台开关 ---------------- */
 
+  function platformChip(platform) {
+    return h(
+      "button",
+      {
+        class: `platform-chip ${platform.enabled ? "is-on" : ""}`.trim(),
+        type: "button",
+        title: platform.enabled ? "点击禁用" : "点击启用",
+        onClick: (event) => togglePlatform(platform, event.currentTarget),
+      },
+      [h("span", { class: "chip-dot" }), platform.label],
+    );
+  }
+
   function renderPlatformCard() {
     const grid = h("div", { class: "platform-grid" });
-    for (const platform of data.platforms) {
-      grid.appendChild(
+    // 自定义解析器单独一张卡（它们有「加载失败」「重新加载」这些内置平台没有的状态）
+    for (const platform of data.platforms.filter((item) => !item.custom)) {
+      grid.appendChild(platformChip(platform));
+    }
+    return card("平台开关", "点击切换，立即生效", [grid]);
+  }
+
+  /* ---------------- 自定义解析器 ---------------- */
+
+  function renderCustomParserCard() {
+    const info = custom || {};
+    const entries = info.entries || [];
+    const errors = info.errors || [];
+    const body = [];
+
+    body.push(
+      h("p", {
+        class: "parser-note",
+        text: `目录：${info.dir || "（未知）"} —— 把 .py 文件放进去，点「重新加载」即生效，不用重启插件。`,
+      }),
+    );
+
+    if (entries.length) {
+      body.push(
         h(
-          "button",
-          {
-            class: `platform-chip ${platform.enabled ? "is-on" : ""}`.trim(),
-            type: "button",
-            title: platform.enabled ? "点击禁用" : "点击启用",
-            onClick: (event) => togglePlatform(platform, event.currentTarget),
-          },
-          [h("span", { class: "chip-dot" }), platform.label],
+          "div",
+          { class: "list" },
+          entries.map((entry) => {
+            const platform = (data.platforms || []).find(
+              (item) => item.name === entry.key,
+            );
+            const on = platform ? platform.enabled : entry.enabled;
+            return h("div", { class: "row" }, [
+              h("div", { class: "row-main" }, [
+                h("div", { class: "row-title" }, [entry.label || entry.key]),
+                h("div", {
+                  class: "row-meta",
+                  text: `${entry.file} · 匹配 ${(entry.keywords || []).join(" / ") || "（无）"}`,
+                }),
+              ]),
+              h("div", { class: "row-actions" }, [
+                platform
+                  ? h("button", {
+                      class: "btn tiny",
+                      type: "button",
+                      text: on ? "禁用" : "启用",
+                      onClick: (event) =>
+                        togglePlatform(
+                          { ...platform, enabled: on },
+                          event.currentTarget,
+                        ),
+                    })
+                  : null,
+              ]),
+            ]);
+          }),
         ),
       );
+    } else {
+      body.push(emptyBox("还没有自定义解析器。"));
     }
-    return card(
-      "平台开关",
-      "点击切换，立即生效",
-      [grid],
+
+    for (const err of errors) {
+      body.push(
+        h("div", { class: "parser-error" }, [
+          h("strong", { text: err.file }),
+          h("span", { text: err.reason }),
+        ]),
+      );
+    }
+
+    body.push(
+      h("p", {
+        class: "parser-note",
+        text:
+          `文件里必须声明 PARSER_API_VERSION = ${info.api_version}（当前接口版本）。` +
+          `模板见目录里的 ${info.template}，单个文件上限 ${info.max_file_kb} KB。`,
+      }),
     );
+    body.push(
+      h("p", {
+        class: "parser-note warn",
+        text: "这些文件会被直接执行（等同插件自身权限），请只放自己写的或看懂的代码。",
+      }),
+    );
+
+    const actions = h("button", {
+      class: "btn tiny",
+      type: "button",
+      text: "重新加载",
+      onClick: (event) => reloadCustomParsers(event.currentTarget),
+    });
+
+    return card(
+      "自定义解析器",
+      errors.length ? `${errors.length} 个文件加载失败` : "",
+      body,
+      actions,
+      errors.length ? "err" : "",
+    );
+  }
+
+  async function reloadCustomParsers(button) {
+    await withBusy(button, async () => {
+      try {
+        custom = await ctx.api.post("custom_parsers/reload", {});
+        await load(false);
+        toast(
+          `已重新加载：成功 ${(custom.entries || []).length} 个，失败 ${(custom.errors || []).length} 个`,
+          (custom.errors || []).length ? "warn" : "ok",
+        );
+        render();
+      } catch (error) {
+        toast(`重新加载失败：${error.message}`, "err");
+      }
+    });
   }
 
   async function togglePlatform(platform, button) {
