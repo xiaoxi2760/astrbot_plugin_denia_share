@@ -28,7 +28,8 @@
 
 1. 把 `astrbot_plugin_denia_share` 放进 AstrBot 的 `data/plugins/` 目录
 2. 安装依赖：`pip install -r requirements.txt`
-3. 重启 AstrBot，在插件管理里启用
+3. **装 ffmpeg**：视频处理要用它（B站高清的音视频合并、视频没有现成封面时抽帧）
+4. 重启 AstrBot，在插件管理里启用
 
 > 自带的网页界面需要 AstrBot **>= 4.25.3**。更老的版本插件照常工作，只是没有这个页面。
 
@@ -79,7 +80,6 @@ Dashboard 侧边栏「插件 WebUI → 希望解析器」，分五个标签：
 
 其余（Steam 地区与史低 key、网页截图后端、卡片外观、媒体发送、小红书 / Pixiv Cookie 等）
 都在那一页里。卡片外观建议直接在「外观 → 卡片设计器」里调。
-逐项清单（含一项只在 json 里的隐藏项）见 [DEVELOPMENT.md](DEVELOPMENT.md)。
 
 ## Docker 分容器部署：视频发不出去
 
@@ -132,8 +132,3 @@ MIT，详见 [LICENSE](LICENSE)。引用了两处第三方代码：
 
 其余部分（GitHub / Pixiv / Steam 解析、网页界面与外观自定义、媒体发送、卡片外观配置项等）
 为本项目实现。Apache-2.0 全文随包附在 `LICENSES/Apache-2.0.txt`，相关源文件头都带来源说明。
-
-## 开发
-
-目录结构、各平台的实现细节与实测结论、配置项契约、网页界面的实现机制等在
-[DEVELOPMENT.md](DEVELOPMENT.md)。
