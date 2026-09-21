@@ -213,6 +213,10 @@ class ParseResult:
         "图片": "张", "封面": "张", "视频": "个", "音频": "个",
     }
 
+    # 上一次审计写进 limit_warnings 的那条原文（存进 extra）。
+    # 有了它才能做到「重复审计不叠加」——见 audit_missing_media。
+    _AUDIT_WARNING_KEY: ClassVar[str] = "_missing_media_warning"
+
     def _iter_media_tasks(self) -> Iterator[tuple[str, PathTask]]:
         """遍历所有需要落盘的媒体任务，附带用途标签（供缺料审计用）。
 
@@ -251,10 +255,29 @@ class ParseResult:
 
         只在确有失败时才追加，成功路径零开销（一次 gather，本来也要等这些任务）。
 
+        **本方法是幂等的**：同一个 ``ParseResult`` 会被结算多次 —— 聊天链路
+        （``main._deliver``）每次交付都调一次，而 ``_result_cache`` 命中的结果会被
+        再交付一次（同一条链接在群里发两遍）；WebUI 的「按当前外观重渲染」也会对
+        缓存里的**同一个对象**再调一次（``webui._preview_payload``）。不做处理的话
+        「⚠️ 3 张图片下载失败」会一次一条越叠越多，而 warnings 还参与产物缓存键，
+        于是每重发一次就重渲染一版卡片。所以这里先撤掉自己上一次留下的那条，
+        再按本轮结果重新追加 —— **只动自己那条**，B站受限说明、时长超限这些
+        别人写的警告一律不碰。
+
         Returns:
             各用途的失败数量，如 ``{"图片": 3, "视频": 1}``；全部成功时为空字典。
         """
         tasks = list(self._iter_media_tasks())
+        warnings = self.extra.setdefault("limit_warnings", [])
+
+        # 撤回上一次审计留下的那条（只撤回自己写的，别误删别的来源）
+        previous = self.extra.pop(self._AUDIT_WARNING_KEY, None)
+        if previous is not None:
+            try:
+                warnings.remove(previous)
+            except ValueError:
+                pass  # 被外部清理过，忽略
+
         if not tasks:
             return {}
 
@@ -277,9 +300,10 @@ class ParseResult:
                 f"{count} {self._MEDIA_UNITS.get(kind, '个')}{kind}"
                 for kind, count in missing.items()
             ]
-            self.extra.setdefault("limit_warnings", []).append(
-                f"⚠️ {'、'.join(parts)}下载失败，未包含在本次内容中"
-            )
+            message = f"⚠️ {'、'.join(parts)}下载失败，未包含在本次内容中"
+            warnings.append(message)
+            # 记下原文，供下一次调用撤回（幂等的关键）
+            self.extra[self._AUDIT_WARNING_KEY] = message
         return missing
 
     @property
