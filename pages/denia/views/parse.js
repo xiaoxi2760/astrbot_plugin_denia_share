@@ -1,4 +1,6 @@
-/* 解析页：手动输入链接 → 立刻看到卡片预览与字段明细；附带网页截图小工具。 */
+/* 解析页：手动输入链接 → 立刻看到卡片预览与字段明细；附带网页截图小工具。
+ * 底部是「自定义解析器」卡（从总览页挪来）：改完 .py 点「重新加载」，
+ * 在上面贴个匹配链接立刻就能验证，不用切页。 */
 
 import {
   h,
@@ -32,6 +34,7 @@ export function createParseView(ctx) {
   let defaults = { theme: "dark", layout: "standard" };
   let overrides = { theme: "", layout: "" };
   let last = null;
+  let custom = null;
   let busy = false;
 
   const elements = {};
@@ -47,6 +50,8 @@ export function createParseView(ctx) {
     } catch (error) {
       console.warn("读取默认外观失败", error);
     }
+    // 自定义解析器列表拉不到不该让整页失败（老版本后端没有这个接口）
+    custom = await ctx.api.get("custom_parsers").catch(() => null);
   }
 
   function render() {
@@ -61,6 +66,9 @@ export function createParseView(ctx) {
       );
     }
     container.appendChild(renderShotCard());
+    // 老版本后端没有 custom_parsers 接口时 custom 为 null，整卡不渲染
+    const customCard = renderCustomParserCard();
+    if (customCard) container.appendChild(customCard);
   }
 
   /* ---------------- 输入区 ---------------- */
@@ -70,6 +78,8 @@ export function createParseView(ctx) {
       class: "input",
       id: "parse-url",
       type: "text",
+      // 重渲染（切换解析器启用状态等）不能冲掉用户已输入的链接
+      value: elements.urlInput ? elements.urlInput.value : "",
       placeholder: "粘贴分享链接，例如 https://www.bilibili.com/video/BV...",
       spellcheck: "false",
       onKeydown: (event) => {
@@ -304,6 +314,7 @@ export function createParseView(ctx) {
     const input = h("input", {
       class: "input",
       type: "text",
+      value: elements.shotInput ? elements.shotInput.value : "",
       placeholder: "https://example.com",
       spellcheck: "false",
       onKeydown: (event) => {
@@ -353,6 +364,121 @@ export function createParseView(ctx) {
       clear(elements.shotFrame);
       elements.shotFrame.appendChild(placeholder(`截图失败：${error.message}`));
       toast(`截图失败：${error.message}`, "err");
+    } finally {
+      restore();
+    }
+  }
+
+  /* ---------------- 自定义解析器（从总览页挪来） ---------------- */
+
+  function renderCustomParserCard() {
+    if (!custom) return null; // 接口不存在：整卡缺席，而不是渲染一张报错卡
+    const entries = custom.entries || [];
+    const errors = custom.errors || [];
+    const body = [];
+
+    body.push(
+      h("p", {
+        class: "parser-note",
+        text: `目录：${custom.dir || "（未知）"} —— 把 .py 文件放进去，点「重新加载」即生效，不用重启插件。`,
+      }),
+    );
+
+    if (entries.length) {
+      body.push(
+        h(
+          "div",
+          { class: "list" },
+          entries.map((entry) =>
+            h("div", { class: "row" }, [
+              h("div", { class: "row-main" }, [
+                h("div", { class: "row-title" }, [entry.label || entry.key]),
+                h("div", {
+                  class: "row-meta",
+                  text: `${entry.file} · 匹配 ${(entry.keywords || []).join(" / ") || "（无）"}`,
+                }),
+              ]),
+              h("div", { class: "row-actions" }, [
+                h("button", {
+                  class: "btn tiny",
+                  type: "button",
+                  text: entry.enabled ? "禁用" : "启用",
+                  onClick: (event) => toggleCustomParser(entry, event.currentTarget),
+                }),
+              ]),
+            ]),
+          ),
+        ),
+      );
+    } else {
+      body.push(emptyBox("还没有自定义解析器。"));
+    }
+
+    for (const err of errors) {
+      body.push(
+        h("div", { class: "parser-error" }, [
+          h("strong", { text: err.file }),
+          h("span", { text: err.reason }),
+        ]),
+      );
+    }
+
+    body.push(
+      h("p", {
+        class: "parser-note warn",
+        text:
+          `必须声明 PARSER_API_VERSION = ${custom.api_version}，模板见 ${custom.template}，` +
+          `单文件上限 ${custom.max_file_kb} KB；文件会被直接执行（等同插件权限），只放自己写得懂的代码。`,
+      }),
+    );
+
+    return card(
+      "自定义解析器",
+      errors.length ? `${errors.length} 个文件加载失败` : "",
+      body,
+      h("button", {
+        class: "btn tiny",
+        type: "button",
+        text: "重新加载",
+        onClick: (event) => reloadCustomParsers(event.currentTarget),
+      }),
+      errors.length ? "err" : "",
+    );
+  }
+
+  async function toggleCustomParser(entry, button) {
+    button.disabled = true;
+    try {
+      const result = await ctx.api.post("platforms", {
+        name: entry.key,
+        enabled: !entry.enabled,
+      });
+      const stillEnabled = (result.runtime && result.runtime.platforms) || [];
+      entry.enabled = stillEnabled.length
+        ? stillEnabled.includes(entry.key)
+        : !entry.enabled;
+      toast(`${entry.label || entry.key} 已${entry.enabled ? "启用" : "禁用"}`, "ok");
+      render();
+    } catch (error) {
+      toast(`切换失败：${error.message}`, "err");
+      button.disabled = false;
+    }
+  }
+
+  async function reloadCustomParsers(button) {
+    // withBusy 只接受布尔 busy 标志（返回恢复函数）。总览页旧写法把 async 回调
+    // 当第二参数传入 —— 那个函数从未被执行，按钮还会永久卡在「处理中…」，
+    // 即「重新加载」其实从来没发出过请求。别复活那个写法。
+    const restore = withBusy(button, true, "加载中…");
+    try {
+      custom = await ctx.api.post("custom_parsers/reload", {});
+      toast(
+        `已重新加载：成功 ${(custom.entries || []).length} 个，失败 ${(custom.errors || []).length} 个`,
+        (custom.errors || []).length ? "warn" : "ok",
+      );
+      render();
+    } catch (error) {
+      toast(`重新加载失败：${error.message}`, "err");
     } finally {
       restore();
     }

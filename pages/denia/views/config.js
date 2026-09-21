@@ -1,7 +1,12 @@
-/* 配置页：把 CONFIG_META 描述的全部配置项渲染成表单。
+/* 配置页：把 CONFIG_META 描述的全部配置项按「大类 → 分组 → 子组」三级渲染成表单。
  *
  * 页面不再依赖 AstrBot 的原生插件配置面板（_conf_schema.json 里的条目都标了
- * invisible），所以这里要把 26 个配置项完整覆盖到，并做前端校验 + 脏值跟踪。
+ * invisible），所以这里要把全部配置项完整覆盖到，并做前端校验 + 脏值跟踪。
+ *
+ * 三级数据都来自 GET config：
+ * - sections（大类）：顶部导航条，选中后只显示该大类下的分组；搜索时跨全部大类
+ * - groups（分组）：可折叠卡片，卡头显示组内未保存数
+ * - subgroup（子组）：组内第三级小标题（可选字段，没有就整组平铺）
  */
 
 import {
@@ -17,16 +22,18 @@ import {
 
 export function createConfigView(ctx) {
   let container = null;
-  let meta = { groups: [], items: [], platforms: [], problems: [] };
+  let meta = { sections: [], groups: [], items: [], platforms: [], problems: [] };
   let values = {};
   let draft = {};
   let filter = "";
+  let activeSection = "all";
   let collapsed = new Set();
 
   async function load() {
     ctx.setHead("加载中…");
     const payload = await ctx.api.get("config");
     meta = {
+      sections: Array.isArray(payload.sections) ? payload.sections : [],
       groups: payload.groups || [],
       items: payload.items || [],
       platforms: payload.platforms || [],
@@ -42,8 +49,16 @@ export function createConfigView(ctx) {
     return meta.items.find((item) => item.key === key);
   }
 
+  function groupOf(name) {
+    return meta.groups.find((group) => group.name === name);
+  }
+
+  function hasDraft(key) {
+    return Object.prototype.hasOwnProperty.call(draft, key);
+  }
+
   function currentValue(key) {
-    return Object.prototype.hasOwnProperty.call(draft, key) ? draft[key] : values[key];
+    return hasDraft(key) ? draft[key] : values[key];
   }
 
   function setDraft(key, value) {
@@ -67,6 +82,25 @@ export function createConfigView(ctx) {
     return haystack.includes(filter);
   }
 
+  /** 当前应该展示的分组：选中某个大类时收窄到它；搜索时始终跨全部大类。 */
+  function visibleGroups() {
+    if (!meta.sections.length || filter || activeSection === "all") {
+      return meta.groups;
+    }
+    const section = meta.sections.find((s) => s.key === activeSection);
+    if (!section) return meta.groups;
+    const allowed = new Set(section.groups);
+    return meta.groups.filter((group) => allowed.has(group.name));
+  }
+
+  function sectionDirtyCount(section) {
+    const groups = new Set(section.groups);
+    return dirtyKeys().filter((key) => {
+      const item = itemOf(key);
+      return item && groups.has(item.group);
+    }).length;
+  }
+
   function render() {
     if (!container) return;
     clear(container);
@@ -84,10 +118,8 @@ export function createConfigView(ctx) {
     container.appendChild(renderToolbar());
 
     let rendered = 0;
-    for (const group of meta.groups) {
-      const items = group.keys
-        .map(itemOf)
-        .filter((item) => item && matchesFilter(item));
+    for (const group of visibleGroups()) {
+      const items = group.keys.map(itemOf).filter((item) => item && matchesFilter(item));
       if (!items.length) continue;
       rendered += items.length;
       container.appendChild(renderGroup(group, items));
@@ -104,19 +136,34 @@ export function createConfigView(ctx) {
     container.appendChild(renderSaveBar());
   }
 
+  /* ---------------- 工具条（搜索 + 折叠 + 大类导航） ---------------- */
+
+  function collapseAllState() {
+    const names = visibleGroups().map((group) => group.name);
+    return names.length > 0 && names.every((name) => collapsed.has(name));
+  }
+
   function renderToolbar() {
     const search = h("input", {
       class: "input",
       type: "search",
       value: filter,
-      placeholder: "搜索配置项（名称 / 键 / 说明）",
+      placeholder: "搜索配置项（名称 / 键 / 说明），跨全部大类",
       onInput: (event) => {
-        filter = event.target.value.trim();
+        // haystack 已转小写，filter 必须同步转，否则搜大写键名（如 RENDER）永远落空
+        filter = event.target.value.trim().toLowerCase();
         render();
       },
     });
 
-    return card("配置项", `${meta.items.length} 项，保存后立即生效`, [
+    const section = meta.sections.find((s) => s.key === activeSection);
+    const subtitle = filter
+      ? `搜索「${filter}」· 跨全部大类`
+      : section
+        ? `${section.label} · ${section.description}`
+        : `${meta.items.length} 项，保存后立即生效`;
+
+    const toolbar = card("配置项", subtitle, [
       h("div", { class: "toolbar" }, [
         h("div", { class: "grow" }, [search]),
         h(
@@ -125,24 +172,80 @@ export function createConfigView(ctx) {
             class: "btn",
             type: "button",
             onClick: () => {
-              collapsed = collapsed.size ? new Set() : new Set(meta.groups.map((g) => g.name));
+              const names = visibleGroups().map((group) => group.name);
+              if (collapseAllState()) {
+                names.forEach((name) => collapsed.delete(name));
+              } else {
+                names.forEach((name) => collapsed.add(name));
+              }
               render();
             },
           },
-          collapsed.size ? "展开全部" : "收起全部",
+          collapseAllState() ? "展开全部" : "收起全部",
         ),
       ]),
+      renderSectionTabs(),
     ]);
+    // 吸顶：翻长列表时搜索与大类导航始终在手边（stage-body 是滚动容器）
+    toolbar.classList.add("cfg-toolbar");
+    return toolbar;
   }
+
+  function renderSectionTabs() {
+    if (!meta.sections.length) return null;
+
+    const tab = (key, label, count, dirty) =>
+      h(
+        "button",
+        {
+          type: "button",
+          class: activeSection === key ? "is-active" : "",
+          onClick: () => {
+            if (activeSection === key) return;
+            activeSection = key;
+            render();
+          },
+        },
+        [
+          `${label} ${count}`,
+          dirty
+            ? h("span", {
+                class: "seg-badge",
+                title: `${dirty} 项未保存`,
+                text: String(dirty),
+              })
+            : null,
+        ],
+      );
+
+    const tabs = [tab("all", "全部", meta.items.length, dirtyKeys().length)];
+    for (const section of meta.sections) {
+      const count = section.groups.reduce((sum, name) => {
+        const group = groupOf(name);
+        return sum + (group ? group.keys.length : 0);
+      }, 0);
+      tabs.push(tab(section.key, section.label, count, sectionDirtyCount(section)));
+    }
+    return h("div", { class: "cfg-tabs-row" }, [h("div", { class: "seg cfg-tabs" }, tabs)]);
+  }
+
+  /* ---------------- 分组卡片（第二级） ---------------- */
 
   function renderGroup(group, items) {
     const isCollapsed = collapsed.has(group.name);
+    const dirtyCount = group.keys.filter(hasDraft).length;
+    const section = meta.sections.find((s) => s.groups.includes(group.name));
+
+    const subParts = [`${items.length} 项`];
+    // 搜索时跨大类展示，卡头标出归属大类，免得找完不知道改的是哪一类
+    if (filter && section) subParts.push(section.label);
+    if (group.description) subParts.push(group.description);
+
     const head = h(
       "button",
       {
-        class: "card-head",
+        class: "card-head cfg-group-head",
         type: "button",
-        style: { width: "100%", background: "transparent", border: "0", cursor: "pointer", textAlign: "left" },
         onClick: () => {
           if (isCollapsed) collapsed.delete(group.name);
           else collapsed.add(group.name);
@@ -150,23 +253,56 @@ export function createConfigView(ctx) {
         },
       },
       [
-        h("h2", { text: `${isCollapsed ? "＋" : "－"} ${group.name}` }),
-        h("span", { class: "sub", text: `${items.length} 项 · ${group.description || ""}` }),
+        h("h2", {}, [
+          h("span", { class: `chev${isCollapsed ? " closed" : ""}` }),
+          group.name,
+        ]),
+        h("span", { class: "sub", text: subParts.join(" · ") }),
+        dirtyCount
+          ? h("span", { class: "cfg-dirty", text: `${dirtyCount} 项未保存` })
+          : null,
       ],
     );
 
-    const section = h("section", { class: "card" }, [head]);
+    const sectionNode = h("section", { class: "card" }, [head]);
     if (!isCollapsed) {
-      section.appendChild(h("div", {}, items.map(renderField)));
+      sectionNode.appendChild(renderGroupBody(items));
     }
-    return section;
+    return sectionNode;
   }
+
+  /** 组内渲染：带 subgroup 的按子组（第三级）分段，没有子组的项排在最前。 */
+  function renderGroupBody(items) {
+    const body = h("div");
+    if (!items.some((item) => item.subgroup)) {
+      for (const item of items) body.appendChild(renderField(item));
+      return body;
+    }
+    const order = [];
+    const buckets = new Map();
+    for (const item of items) {
+      const sub = item.subgroup || "";
+      if (!buckets.has(sub)) {
+        buckets.set(sub, []);
+        order.push(sub);
+      }
+      buckets.get(sub).push(item);
+    }
+    for (const sub of order) {
+      if (sub) body.appendChild(h("div", { class: "cfg-subhead", text: sub }));
+      for (const item of buckets.get(sub)) body.appendChild(renderField(item));
+    }
+    return body;
+  }
+
+  /* ---------------- 配置项（字段行） ---------------- */
 
   function renderField(item) {
     const control = buildControl(item);
     const parts = [h("div", { class: "field-label" }, [
       item.label,
       h("code", { text: item.key }),
+      hasDraft(item.key) ? h("span", { class: "cfg-dirty", text: "已改" }) : null,
     ])];
 
     const body = h("div", { class: "field-body" }, [control]);
@@ -255,6 +391,8 @@ export function createConfigView(ctx) {
       onInput: (event) => setDraft(item.key, event.target.value),
     });
   }
+
+  /* ---------------- 保存栏 ---------------- */
 
   function renderSaveBar() {
     const keys = dirtyKeys();
