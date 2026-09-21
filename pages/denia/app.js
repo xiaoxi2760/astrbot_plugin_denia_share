@@ -121,6 +121,22 @@ function setActiveNav(view) {
   });
 }
 
+/** 左上角品牌位：换成插件 logo（图片由 /logo 接口缩好后以 data URL 返回）。
+ *  取不到就保留 HTML 里的文字兜底 —— 品牌位不该因为一张图缺失而空着。 */
+async function applyBrandLogo() {
+  const holder = document.getElementById("rail-logo");
+  if (!holder || holder.querySelector("img")) return;
+  try {
+    const payload = await api.get("logo");
+    const uri = payload && payload.data;
+    if (!uri) return;
+    holder.appendChild(h("img", { src: uri, alt: "" }));
+    holder.classList.add("has-logo");
+  } catch (error) {
+    console.error("加载插件 logo 失败，保留文字兜底", error);
+  }
+}
+
 async function switchView(view) {
   const config = VIEWS[view];
   if (!config) return;
@@ -214,6 +230,9 @@ async function boot() {
   }
 
   await loadPrefs(api);
+
+  // 品牌位与视图并行取，不阻塞首屏；失败也只是保留文字兜底
+  applyBrandLogo();
 
   ctx.setConnection(true, "已连接");
   await switchView("overview");

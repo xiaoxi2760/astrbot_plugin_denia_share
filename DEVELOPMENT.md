@@ -26,7 +26,7 @@ astrbot_plugin_denia_share/
     ├── download.py          下载器：流式下载、体积上限、代理
     ├── card_renderer.py     分享卡片渲染（约 2300 行 Pillow）
     ├── screenshot.py        网页截图（thum / Cloudflare 双后端）
-    ├── webui.py             网页界面的后端接口层（23 个路由）
+    ├── webui.py             网页界面的后端接口层（24 个路由）
     ├── custom_parsers.py    用户自定义解析器：目录扫描、动态加载、失败隔离
     ├── custom_parsers_guide.md  自定义解析器说明（运行时复制成数据目录里的 README.md）
     ├── relay.py             媒体中转：本地文件 → 临时 HTTP 链接
@@ -166,6 +166,10 @@ iframe 加载，通过 `window.AstrBotPluginPage` bridge 调用插件注册的 W
   配置重建（只有「缓存清理间隔」要重载才生效）
 - 卡片图片不通过 URL 暴露（受限 iframe 带不上鉴权头），预览是把图片缩成 base64 随 JSON
   返回；要看原图走页面上的「下载」按钮
+- **页面左上角的品牌位用的是插件根目录的 `logo.png`**（与插件列表里那张是同一个文件），
+  由 `/logo` 接口缩到 128px 后以 data URL 返回，页面拿到再插进占位容器 —— 所以换 logo
+  只需替换那一张图，不必改页面。原图 256×256 / 126 KB，缩过之后约 6 KB；取不到图时页面
+  保留文字兜底（不写死图片路径，也不留空）
 
 原生插件配置面板已隐藏，避免两处入口写同一份配置。
 
