@@ -44,6 +44,17 @@ WORK_KEYS = ("videoInfoRes", "slidesInfoRes", "noteDetailRes")
 MAX_ATTEMPTS = 6
 MAX_POW_ITER = 1_000_000
 
+# 单条作品的请求总预算（跨 URL 变体共享）。
+#
+# 为什么需要：`_parse_douyin` 最多试 4 个 URL（slides 时 2 种 html_type × 2 个域名），
+# 每个 URL 内部 `fetch` 最多 MAX_ATTEMPTS(6) 次，cookie 失效时还要清空冷请求再来 6 次
+# —— 最坏 4 × 12 = **48 次 GET**。而本仓自己的经验是「不要连发探测，否则出口 IP 会被
+# 打进 __ac_nonce 限流页，之后怎么重试都没用」，48 次正是最容易触发限流的形状。
+#
+# 12 次足够覆盖正常路径（冷请求拿 ttwid + 热请求拿数据，通常 2~3 次）。
+# 预算耗尽说明本机多半已经被限流，继续连发只会更糟 —— 那时应当把机会留给下一条消息。
+MAX_REQUESTS_PER_WORK = 12
+
 
 def _b64d(value: str) -> bytes:
     # 抖音的 cs 字段是不带 padding 的 base64，直接 b64decode 会报 Incorrect padding
@@ -119,6 +130,22 @@ class DouyinShareSession:
         self._client_kwargs = client_kwargs
         self._cookies: dict[str, str] = {}
         self._lock = asyncio.Lock()
+        # 单条作品的请求预算，由解析器在开始解析时重置（见 start_work）
+        self._requests_left = MAX_REQUESTS_PER_WORK
+
+    def start_work(self) -> None:
+        """开始解析一条新作品：重置请求预算。
+
+        预算跨 URL 变体共享 —— 那正是要防的东西（4 个 URL 各自重试一轮就是 48 次）。
+        """
+        self._requests_left = MAX_REQUESTS_PER_WORK
+
+    def _spend_request(self) -> bool:
+        """消耗一次请求预算；返回 False 表示已用尽，调用方应停止重试。"""
+        if self._requests_left <= 0:
+            return False
+        self._requests_left -= 1
+        return True
 
     def cookie_header(self) -> dict[str, str]:
         if not self._cookies:
@@ -165,6 +192,15 @@ class DouyinShareSession:
             text = ""
             solved = False
             for attempt in range(MAX_ATTEMPTS):
+                if not self._spend_request():
+                    # 预算用尽：把已经拿到的内容交回去，让上层决定（换路径或报错）。
+                    # 继续连发探测只会把出口 IP 打进 __ac_nonce 限流页，
+                    # 那之后就怎么重试都没用了 —— 见 MAX_REQUESTS_PER_WORK 的说明。
+                    logger.warning(
+                        f"[douyin] 本条作品的请求预算已用尽"
+                        f"（{MAX_REQUESTS_PER_WORK} 次），停止重试"
+                    )
+                    return text
                 try:
                     response = await client.get(url, headers=self.cookie_header())
                 except Exception:

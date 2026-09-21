@@ -100,3 +100,46 @@ def classify_media_response(content_type: str | None, head: bytes) -> str | None
 
     # 3) 认不出就放行
     return None
+
+
+# 图片容器的魔数 → 后缀。只列**有把握**的几种：
+# 签名太短的（如 BMP 的 "BM"）容易撞，宁可不认 —— 与上面同一个原则。
+_IMAGE_SIGNATURES: tuple[tuple[bytes, str], ...] = (
+    (b"\xff\xd8\xff", ".jpg"),
+    (b"\x89PNG\r\n\x1a\n", ".png"),
+    (b"GIF87a", ".gif"),
+    (b"GIF89a", ".gif"),
+)
+
+# ftyp 容器的 brand → 后缀（ISO-BMFF，AVIF / HEIC 都走这个盒子）
+_FTYP_BRANDS = {
+    b"avif": ".avif",
+    b"avis": ".avif",
+    b"heic": ".heic",
+    b"heix": ".heic",
+    b"hevc": ".heic",
+    b"mif1": ".heic",
+}
+
+
+def sniff_image_ext(head: bytes) -> str | None:
+    """按开头字节判断图片真实容器，返回建议后缀；认不出返回 ``None``。
+
+    用途是「把后缀校正成真实格式」：本仓原先按 URL 后缀定名，URL 没有后缀就
+    一律 ``.jpg`` —— 于是 WebP / PNG 会被存成 ``.jpg``。后缀不对会让下游
+    （协议端、图片查看器）按错的容器去解，人工排查时也看不出真实格式。
+
+    同样只认有把握的：认不出**保持原样**，绝不猜。
+    """
+    if not head:
+        return None
+    for signature, ext in _IMAGE_SIGNATURES:
+        if head.startswith(signature):
+            return ext
+    # WebP：RIFF....WEBP（第 4-8 字节是长度，可能是任意值，所以要跳过）
+    if head[:4] == b"RIFF" and head[8:12] == b"WEBP":
+        return ".webp"
+    # AVIF / HEIC：....ftyp<brand>
+    if head[4:8] == b"ftyp":
+        return _FTYP_BRANDS.get(head[8:12])
+    return None

@@ -49,6 +49,13 @@ class DouyinParser(BaseParser):
     async def _parse_douyin(self, searched: re.Match[str]):
         ty, vid = searched.group("ty"), searched.group("vid")
 
+        # 重置本条作品的请求预算。**必须在这里、只重置一次**：预算要跨下面所有
+        # URL 变体共享 —— 4 个 URL 各自重试一轮就是最坏 48 次 GET，
+        # 正是最容易把出口 IP 打进限流页的形状（见 session.MAX_REQUESTS_PER_WORK）。
+        from .session import get_share_session
+
+        get_share_session(type(self)).start_work()
+
         # 1) HTML _ROUTER_DATA 路径。零签名成本，配会话 cookie 后最稳。
         #    slides 类型也试 /share/note/<id>/ —— 抖音两种写法都有，
         #    而 /share/slides/<id>/ 现在不返回 _ROUTER_DATA。

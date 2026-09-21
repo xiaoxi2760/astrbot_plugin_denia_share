@@ -13,7 +13,7 @@ import aiofiles
 from astrbot.api import logger
 
 from .media_utils import merge_av, safe_unlink, generate_file_name
-from .media_verify import HEAD_PROBE_BYTES, classify_media_response
+from .media_verify import HEAD_PROBE_BYTES, classify_media_response, sniff_image_ext
 from .constants import COMMON_HEADER, DOWNLOAD_TIMEOUT
 from .exception import IgnoreException, DownloadException
 
@@ -36,6 +36,18 @@ MAX_CONCURRENT_MEDIA_DOWNLOADS = 3
 
 # m3u8 分片数上限：字节上限之外再兜一层，防止「超多超小分片」把循环拖死
 MAX_M3U8_SEGMENTS = 3000
+
+# ============================ 独立于配置的硬上限 ============================
+#
+# 配置项 ``MAX_SIZE_MB`` 是**用户可控**的（能填到 4GB，也能填 0 = 不限制），
+# 也就是说「用户配错了就没有闸」。而媒体体积完全由远端决定 —— 一个被投毒的
+# 直链、一张解压炸弹图就能把磁盘吃光。下面两条是**最后一道闸**：
+# 生效值 = min(用户配置, 硬上限)，用户配置为 0 时硬上限仍然生效。
+#
+# 数值沿用 yaya（作者自己的另一个插件）：对一个群聊机器人来说，单条媒体
+# 没有理由超过 2GB，单张图片没有理由超过 64MB。
+HARD_MAX_MEDIA_BYTES = 2 * 1024 * 1024 * 1024  # 视频 / 音频 2GB
+HARD_MAX_IMAGE_BYTES = 64 * 1024 * 1024  # 图片 64MB
 
 
 class StreamDownloader:
@@ -117,7 +129,7 @@ class StreamDownloader:
         """
         return file_path.with_name(f"{file_path.name}.{uuid4().hex[:8]}.part")
 
-    def _validate_content_length(self, response: httpx.Response) -> int | None:
+    def _validate_content_length(self, response: httpx.Response, max_bytes: int) -> int | None:
         """校验明确声明的响应大小。
 
         抖音等平台 CDN 常用 ``Transfer-Encoding: chunked``，此时**不会**返回
@@ -126,6 +138,9 @@ class StreamDownloader:
 
         上游 rika 在 2026-09 修复了此问题：旧实现把缺失的 Content-Length 当成 0，
         会直接取消下载——抖音视频因此全部下不下来。
+
+        ``max_bytes`` 由调用方传入（图片与视频的上限不同，见 ``_max_bytes`` /
+        ``_image_max_bytes``）。
         """
         content_length = response.headers.get("Content-Length")
         if not content_length:
@@ -137,14 +152,13 @@ class StreamDownloader:
             raise IgnoreException
 
         # 体积上限：超过限制的媒体直接放弃，避免下载完才发现发不出去
-        if self.max_size_mb > 0 and content_length > self.max_size_mb * 1024 * 1024:
+        if max_bytes > 0 and content_length > max_bytes:
             size_mb = content_length / 1024 / 1024
+            limit_mb = max_bytes // 1024 // 1024
             logger.warning(
-                f"媒体大小 {size_mb:.1f}MB 超过上限 {self.max_size_mb}MB，取消下载: {response.url}"
+                f"媒体大小 {size_mb:.1f}MB 超过上限 {limit_mb}MB，取消下载: {response.url}"
             )
-            raise IgnoreException(
-                f"媒体大小({size_mb:.1f}MB)超过上限({self.max_size_mb}MB)"
-            )
+            raise IgnoreException(f"媒体大小({size_mb:.1f}MB)超过上限({limit_mb}MB)")
         return content_length
 
     @staticmethod
@@ -163,7 +177,23 @@ class StreamDownloader:
 
     @property
     def _max_bytes(self) -> int:
-        return self.max_size_mb * 1024 * 1024 if self.max_size_mb > 0 else 0
+        """视频 / 音频的生效上限 = min(用户配置, 硬上限)。
+
+        用户配置为 0（不限制）时**硬上限仍然生效** —— 否则「不限制」等于没闸，
+        而媒体体积由远端决定（见 ``HARD_MAX_MEDIA_BYTES`` 处的说明）。
+        """
+        configured = self.max_size_mb * 1024 * 1024 if self.max_size_mb > 0 else 0
+        if configured <= 0:
+            return HARD_MAX_MEDIA_BYTES
+        return min(configured, HARD_MAX_MEDIA_BYTES)
+
+    @property
+    def _image_max_bytes(self) -> int:
+        """图片的生效上限 = min(用户配置, 图片硬上限)。"""
+        configured = self.max_size_mb * 1024 * 1024 if self.max_size_mb > 0 else 0
+        if configured <= 0:
+            return HARD_MAX_IMAGE_BYTES
+        return min(configured, HARD_MAX_IMAGE_BYTES)
 
     @staticmethod
     def _reject_if_not_media(response, head: bytes) -> None:
@@ -197,12 +227,15 @@ class StreamDownloader:
         *,
         file_path: Path,
         headers: dict[str, str],
+        max_bytes: int | None = None,
         chunk_size: int = 64 * 1024,
     ) -> Path:
         part = self._part_path(file_path)
+        # 不传就是媒体上限；图片由 download_img 显式传图片上限（见 _image_max_bytes）
+        limit = self._max_bytes if max_bytes is None else max_bytes
         async with self.client.stream("GET", url, headers=headers, follow_redirects=True) as response:
             response.raise_for_status()
-            self._validate_content_length(response)
+            self._validate_content_length(response, limit)
             received_bytes = 0
             head = b""
             try:
@@ -218,7 +251,7 @@ class StreamDownloader:
                         await file.write(chunk)
                         received_bytes += len(chunk)
                         # chunked 场景没有 Content-Length，边下边判大小
-                        if self._max_bytes and received_bytes > self._max_bytes:
+                        if limit > 0 and received_bytes > limit:
                             mb = received_bytes / 1024 / 1024
                             logger.warning(
                                 f"媒体 url: {response.url}, 下载到 {mb:.1f}MB 超过上限，中断"
@@ -229,7 +262,7 @@ class StreamDownloader:
                             # except 在句柄关闭后统一删（对照 _validate_downloaded_bytes：
                             # 它在句柄外，删得掉）。
                             raise IgnoreException(
-                                f"媒体大小超过上限({self.max_size_mb}MB)"
+                                f"媒体大小超过上限({limit // 1024 // 1024}MB)"
                             )
             except BaseException:
                 # 句柄已关闭，这里删得掉。必须写 BaseException：CancelledError 不是
@@ -237,7 +270,7 @@ class StreamDownloader:
                 # 会一直躺在缓存目录里（TTL 兜底是事后补救，不如当场删）。
                 await safe_unlink(part)
                 raise
-            await self._validate_downloaded_bytes(part, str(response.url), received_bytes)
+            await self._validate_downloaded_bytes(part, str(response.url), received_bytes, limit)
         os.replace(part, file_path)
         return file_path
 
@@ -247,6 +280,7 @@ class StreamDownloader:
         *,
         file_path: Path,
         headers: dict[str, str],
+        max_bytes: int | None = None,
     ) -> Path:
         try:
             import curl_cffi
@@ -263,12 +297,13 @@ class StreamDownloader:
             session_kwargs["proxies"] = {"http": self.proxies, "https": self.proxies}
 
         part = self._part_path(file_path)
+        limit = self._max_bytes if max_bytes is None else max_bytes
         async with curl_cffi.AsyncSession(**session_kwargs) as session:
             response: curl_cffi.Response = await session.get(
                 url, headers=headers, timeout=DOWNLOAD_TIMEOUT, stream=True,
             )
             response.raise_for_status()
-            self._validate_content_length(response)
+            self._validate_content_length(response, limit)
             received_bytes = 0
             head = b""
             try:
@@ -282,19 +317,19 @@ class StreamDownloader:
                             self._reject_if_not_media(response, head)
                         await file.write(chunk)
                         received_bytes += len(chunk)
-                        if self._max_bytes and received_bytes > self._max_bytes:
+                        if limit > 0 and received_bytes > limit:
                             # 同 httpx 通道：**不能在句柄内删**（Windows 上
                             # unlink 会 PermissionError(WinError 32) 并被 safe_unlink
                             # 吞掉），抛出去交给下面的 except 在句柄关闭后删。
                             raise IgnoreException(
-                                f"媒体大小超过上限({self.max_size_mb}MB)"
+                                f"媒体大小超过上限({limit // 1024 // 1024}MB)"
                             )
             except BaseException:
                 # 与 httpx 通道保持一致：必须捕 BaseException，
                 # CancelledError 不是 Exception 的子类，取消时的半截 .part 也要清。
                 await safe_unlink(part)
                 raise
-            await self._validate_downloaded_bytes(part, str(response.url), received_bytes)
+            await self._validate_downloaded_bytes(part, str(response.url), received_bytes, limit)
         os.replace(part, file_path)
         return file_path
 
@@ -306,6 +341,7 @@ class StreamDownloader:
         ext_headers: dict[str, str] | None = None,
         chunk_size: int = 64 * 1024,
         slots: asyncio.Semaphore | None = None,
+        max_bytes: int | None = None,
     ) -> Path:
         if not file_name:
             file_name = generate_file_name(url)
@@ -314,6 +350,9 @@ class StreamDownloader:
             return file_path
 
         headers = {**self.headers, **(ext_headers or {})}
+        # 不传就是「媒体上限」（视频 / 音频）；图片由 download_img 传图片上限。
+        # 两者都由 `min(用户配置, 硬上限)` 算出 —— 见 HARD_MAX_* 的说明。
+        limit = self._max_bytes if max_bytes is None else max_bytes
 
         # 并发闸门：图集场景下每个条目都会走到这里，远端给多少就并发多少。
         # 视频 / 音频走单独的池（见 MAX_CONCURRENT_MEDIA_DOWNLOADS 的说明）。
@@ -322,12 +361,15 @@ class StreamDownloader:
                 return file_path
             try:
                 return await self._download_file_with_httpx(
-                    url, file_path=file_path, headers=headers, chunk_size=chunk_size
+                    url, file_path=file_path, headers=headers,
+                    max_bytes=limit, chunk_size=chunk_size,
                 )
             except httpx.HTTPError as primary_error:
                 from .config import get_config
                 try:
-                    return await self._download_file_with_curl_cffi(url, file_path=file_path, headers=headers)
+                    return await self._download_file_with_curl_cffi(
+                        url, file_path=file_path, headers=headers, max_bytes=limit,
+                    )
                 except IgnoreException:
                     # 「体积超限 / 分片超限」这类**策略跳过**不是下载失败。
                     # 包装成 DownloadException 会让缺料审计把它当成真失败 ——
@@ -484,7 +526,38 @@ class StreamDownloader:
     ) -> Path:
         if img_name is None:
             img_name = generate_file_name(url, ".jpg")
-        return await self._download_file(url, file_name=img_name, ext_headers=ext_headers)
+        path = await self._download_file(
+            url, file_name=img_name, ext_headers=ext_headers,
+            max_bytes=self._image_max_bytes,
+        )
+        return await self._align_image_suffix(path)
+
+    async def _align_image_suffix(self, path: Path) -> Path:
+        """按实际字节把图片后缀校正成真实格式。
+
+        本仓原先按 URL 后缀定名，URL 没有后缀就一律 ``.jpg`` —— 于是 WebP / PNG
+        会被存成 ``.jpg``。后缀不对会让下游（协议端、图片查看器）按错的容器去解，
+        人工排查时也看不出真实格式。**认不出格式时保持原样**（不猜），
+        与 ``media_verify`` 的「只拒绝有把握的」同一个原则。
+        """
+        try:
+            with path.open("rb") as fp:
+                head = fp.read(16)
+        except OSError:
+            return path
+        real = sniff_image_ext(head)
+        if not real or path.suffix.lower() == real:
+            return path
+        target = path.with_suffix(real)
+        if target.exists():
+            return path
+        try:
+            path.rename(target)
+        except OSError:
+            # 改名失败不该让整条下载失败：原文件还在，只是后缀不准
+            logger.debug(f"图片后缀校正失败: {path}", exc_info=True)
+            return path
+        return target
 
     async def download_av_and_merge(
         self,

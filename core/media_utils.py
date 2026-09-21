@@ -13,6 +13,17 @@ from urllib.parse import urlparse
 
 from astrbot.api import logger
 
+# 防解压炸弹：PIL 的默认上限约 89M 像素，且只在超过**两倍**时才抛错，
+# 1~2 倍之间仅发一条 warning。本仓的图全部来自远端，一张 30000×30000 的 PNG
+# 解压后能吃掉几 GB 内存 —— 显式压到 64M 像素：超过 128M 像素直接抛
+# DecompressionBombError，而不是把进程拖死。
+try:
+    from PIL import Image as _PILImage
+
+    _PILImage.MAX_IMAGE_PIXELS = 64 * 1024 * 1024
+except Exception:  # PIL 缺失时本模块的其他功能仍要可用
+    pass
+
 
 def fmt_duration(duration: float) -> str:
     """格式化媒体时长，超过 1 小时后显示为 h:mm:ss。"""
