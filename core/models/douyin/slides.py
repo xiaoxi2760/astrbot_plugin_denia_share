@@ -6,6 +6,8 @@ from random import choice
 from msgspec import Struct, field
 from msgspec.json import Decoder
 
+from .video import first_url
+
 
 class PlayAddr(Struct):
     url_list: list[str]
@@ -46,8 +48,13 @@ class SlidesData(Struct):
         return self.author.nickname
 
     @property
-    def avatar_url(self) -> str:
-        return choice(self.author.avatar_thumb.url_list)
+    def avatar_url(self) -> str | None:
+        """头像直链；``url_list`` 为空时返回 ``None``。
+
+        与 ``video.py`` 同一个形状：调用点在解析器的 try 之外，
+        裸 ``choice([])`` 抛的 ``IndexError`` 会打断「换下一条路径」。
+        """
+        return first_url(self.author.avatar_thumb.url_list)
 
     @property
     def image_urls(self) -> list[str]:

@@ -9,6 +9,19 @@ from msgspec.json import Decoder
 from ...exception import ParseException
 
 
+def first_url(url_list: list[str] | None) -> str | None:
+    """从 ``url_list`` 里随机取一条；空列表返回 ``None``。
+
+    **不要裸用 ``choice()``**：空列表会抛 ``IndexError``，而调用它的属性
+    （``video_url`` / ``cover_url`` / ``avatar_url``）都在解析器的 try **之外**
+    被读 —— ``IndexError`` 不是 ``ParseException`` 的子类，``_parse_douyin``
+    的 ``except ParseException`` 接不住，会把「换下一条路径」打断，
+    slidesinfo 与签名 Web API 两级兜底**完全不执行**。
+    也就是说：一个装饰性字段（头像）为空，就能让整条抖音链路从三级退化到一级。
+    """
+    return choice(url_list) if url_list else None
+
+
 class Avatar(Struct):
     url_list: list[str]
 
@@ -52,11 +65,15 @@ class VideoData(Struct):
 
     @property
     def video_url(self) -> str | None:
-        return choice(self.video.play_addr.url_list).replace("playwm", "play") if self.video else None
+        if not self.video:
+            return None
+        url = first_url(self.video.play_addr.url_list)
+        # playwm 是带水印的播放地址，play 是去水印的
+        return url.replace("playwm", "play") if url else None
 
     @property
     def cover_url(self) -> str | None:
-        return choice(self.video.cover.url_list) if self.video else None
+        return first_url(self.video.cover.url_list) if self.video else None
 
     @property
     def duration(self) -> int | None:
@@ -64,10 +81,12 @@ class VideoData(Struct):
 
     @property
     def avatar_url(self) -> str | None:
-        if avatar := self.author.avatar_thumb:
-            return choice(avatar.url_list)
-        elif avatar := self.author.avatar_medium:
-            return choice(avatar.url_list)
+        # 两个字段都试：thumb 存在但 url_list 为空时退到 medium。
+        # 原先是「thumb 存在就 choice 它的 url_list」—— 空列表直接抛，头像这个
+        # 纯装饰字段能把整条解析链打断（详见 first_url 的说明）。
+        for avatar in (self.author.avatar_thumb, self.author.avatar_medium):
+            if avatar and (url := first_url(avatar.url_list)):
+                return url
         return None
 
 

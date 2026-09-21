@@ -2,8 +2,8 @@
 # 上游项目：https://github.com/iris1598/astrbot_plugin_rika_share
 # 本仓库对其做过修改；完整归属见项目根目录 README「许可与致谢」。
 
+from datetime import timezone
 from re import sub
-from time import mktime, strptime
 from msgspec import Struct
 from msgspec.json import Decoder
 
@@ -112,9 +112,32 @@ class WeiboData(Struct):
         return f"https://weibo.com/{self.user.id}/{self.bid}"
 
     @property
-    def timestamp(self) -> int:
-        create_at = strptime(self.created_at, "%a %b %d %H:%M:%S %z %Y")
-        return int(mktime(create_at))
+    def timestamp(self) -> int | None:
+        """发布时间的 Unix 时间戳；解析不出来返回 ``None``。
+
+        **不用 ``strptime`` 的 ``%a %b``**：它们跟随进程 locale
+        （``_strptime`` 按 ``locale.getlocale(LC_TIME)`` 构造匹配表），
+        宿主把 LC_TIME 切到中文后 ``'Mon Jan 01 ...'`` 会解析失败并抛
+        ``ValueError`` —— 而本属性在 ``_collect_result`` 里、位于任何 try 之外，
+        异常会一路穿到事件层，用户只看到「解析异常」+堆栈。
+        twitter 解析器早就为同一个坑换掉了这个写法
+        （见 ``parsers/twitter.py`` 的 ``_parse_created_at``），微博这里是漏改。
+
+        改用与 locale 无关的 RFC 2822 解析：微博的
+        ``Mon Jan 01 00:00:00 +0800 2024`` 正好是它的兼容格式。
+        顺带修掉一个隐蔽错误 —— 原先的 ``mktime`` 会**忽略** ``%z`` 解析出的
+        偏移、按本地时区解释，所以在非 +0800 的机器上算出来的时间戳本来就是错的。
+        """
+        if not self.created_at:
+            return None
+        try:
+            from email.utils import parsedate_to_datetime
+            parsed = parsedate_to_datetime(str(self.created_at))
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=timezone.utc)
+            return int(parsed.timestamp())
+        except Exception:
+            return None
 
 
 class WeiboResponse(Struct):
