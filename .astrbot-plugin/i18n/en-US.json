@@ -1,7 +1,8 @@
 {
   "metadata": {
     "display_name": "Hope Parser",
-    "short_desc": "Auto-parse shared links from Bilibili, Douyin, Kuaishou, Weibo, Xiaohongshu, Twitter, AcFun, NGA, GitHub, Pixiv and Steam"
+    "short_desc": "Auto-parse shared links from Bilibili, Douyin, Kuaishou, Weibo, Xiaohongshu, Twitter, AcFun, NGA, GitHub, Pixiv and Steam",
+    "desc": "Auto-parse shared links from 11 platforms and render them as share cards, with a built-in Dashboard page.\n\n- Just send a link in chat; no command needed\n- Cards: 4 layouts x light/dark themes, adjustable accent color, gradient and watermark\n- Dashboard: overview, manual parsing, parse cache, UI and card appearance, all settings\n- When videos can't be sent across Docker containers, use a shared cache dir or the media relay\n\nSee the repository README for details. MIT licensed; parts of the parser framework and card renderer are based on astrbot_plugin_rika_share (MIT) and Johnserf-Seed/f2 (Apache-2.0)."
   },
   "pages": {
     "denia": {
