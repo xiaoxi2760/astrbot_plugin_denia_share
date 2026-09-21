@@ -1,198 +1,93 @@
 # 希望解析器
 
-AstrBot 链接分享自动解析插件：把分享链接解析成结构化内容，渲染成分享卡片发送。
+AstrBot 插件：把群里的分享链接解析成内容，渲染成卡片发出来。
 
-支持 **B站 / 抖音 / 快手 / 微博 / 小红书 / Twitter(X) / AcFun / NGA / GitHub / Pixiv / Steam** 十一个平台，
-另有网页截图（`/shot`）与 Pixiv 关键词搜索（`/pixiv`）。
+支持 **B站 / 抖音 / 快手 / 微博 / 小红书 / Twitter(X) / AcFun / NGA / GitHub / Pixiv / Steam**
+十一个平台，另有网页截图（`/shot`）与 Pixiv 搜索（`/pixiv`）。不够用还可以自己加平台，
+见[自定义解析器](#自定义解析器)。
 
-插件在 AstrBot Dashboard 里带一个自己的页面：状态总览、手动解析预览卡片、解析缓存管理、
-界面与卡片外观自定义、全部配置项维护。
+## 各平台解析什么
 
-## 功能
-
-| 平台 | 解析内容 |
+| 平台 | 内容 |
 | --- | --- |
 | B站 | 视频 / 动态 / 直播 / 专栏 / 收藏夹 |
-| 抖音 | 视频 / 图集 |
-| 快手 | 视频 / 图集 |
+| 抖音、快手 | 视频 / 图集 |
 | 微博 | 正文 / 视频 / 长文 |
 | 小红书 | 笔记（图文 / 视频），图片与封面统一改写为无水印原图 |
 | Twitter / X | 推文（图片 / 视频） |
 | AcFun | 视频 |
 | NGA | 帖子 |
 | GitHub | 仓库卡片：星标 / 分支 / 未关闭 issue / 主语言 / 许可 / topics / 最近提交 |
-| Pixiv | 作品解析 + 关键词搜索（强制过滤非全年龄内容） |
-| Steam | 商店页：名称 / 简介 / 开发商 / 发行日期 / 类型 / 国区价格 / 折扣，可选历史最低价 |
+| Pixiv | 作品；`xRestrict != 0` 的内容**一律拦截**，不提供开关 |
+| Steam | 商店页：名称 / 简介 / 开发商 / 发行日期 / 类型 / 国区价格 / 折扣 |
 
-解析结果可渲染成分享卡片（**4 种布局 × 深浅双主题**），也可关闭渲染回退为纯文本。
-
+结果会渲染成分享卡片（**4 种布局 × 深浅双主题**），也可以在配置里关掉、回退纯文本。
 另外支持 QQ 小程序分享卡片（`Json` 消息段）里的链接提取，以及 OneBot 合并转发发送。
-
-**还支持自定义解析器**：把一个 `.py` 文件放进数据目录的 `custom_parsers/`，
-即可新增平台，不用改插件代码。详见[自定义解析器](#自定义解析器)。
 
 ## 安装
 
 1. 把 `astrbot_plugin_denia_share` 放进 AstrBot 的 `data/plugins/` 目录
 2. 安装依赖：`pip install -r requirements.txt`
-3. 重启 AstrBot，在 WebUI 的插件管理里启用
+3. 重启 AstrBot，在插件管理里启用
 
-> 网页界面需要 AstrBot **>= 4.25.3**（用到了官方的 Plugin Pages 机制）。
-> 在更老的版本上插件照常工作，只是没有这个页面。
+> 自带的网页界面需要 AstrBot **>= 4.25.3**。更老的版本插件照常工作，只是没有这个页面。
 
-## 命令
+## 用法
 
-| 命令 | 说明 | 权限 |
+**群里直接发链接就会被解析**，不需要命令。命令只有这几条：
+
+| 命令 | 作用 | 权限 |
 | --- | --- | --- |
 | `/shot <网址>` | 网页截图 | 全部 |
 | `/pixiv <关键词>` | Pixiv 搜索，最多 6 张，强制过滤非全年龄 | 全部 |
-| `/bili_login` | B站扫码登录，Cookie 持久化 | 管理员 |
+| `/bili_login` | B站扫码登录（想下 1080P 及以上才需要） | 管理员 |
 | `/bili_check` | 检查 B站 Cookie 是否有效 | 全部 |
 | `/denia_status` | 查看插件运行状态 | 管理员 |
 | `/denia_clear` | 立即清空解析缓存 | 管理员 |
 
-链接解析不需要命令：群里直接发链接即可。
-
 ## 网页界面
 
-插件在 Dashboard 里带一个页面（侧边栏「插件 WebUI → 希望解析器」，或从插件详情页的 Pages 进入），
-分五个标签：
+Dashboard 侧边栏「插件 WebUI → 希望解析器」，分五个标签：
 
-| 标签 | 内容 |
+| 标签 | 用途 |
 | --- | --- |
-| **总览** | 启用平台数、解析记录数、缓存占用、卡片渲染状态；B站扫码登录 / 检测 / 清除；媒体发送方式与风险提示；平台一键开关（含自定义解析器的启停） |
-| **解析** | 手动粘贴链接立刻预览卡片（可临时换主题 / 布局重渲染），另含网页截图小工具；底部是自定义解析器的加载 / 启停管理，改完 .py 点「重新加载」再贴链接即可验证 |
-| **缓存** | 解析记录的搜索、平台筛选、来源筛选、分页、卡片预览、单条删除或连文件一起删；过期文件清理、记录与缓存文件的分别清空 |
-| **外观** | 上半「界面自定义」只改网页观感（主题跟随 / 覆盖、强调色预设 + 自定义拾色器、圆角、紧凑模式、动效）；下半「卡片设计器」改的是真正发出的卡片，右侧实时预览，改完约 0.45 秒重渲染 |
-| **配置** | 全部 38 个配置项按「大类 → 分组 → 子组」三级组织：顶部吸顶导航分 4 个大类（基础 / 平台接入 / 输出与投递 / 高级与维护），分组卡片可折叠，组内再按子组分段；支持跨大类搜索，未保存的修改在大类标签与组头上都有计数 |
+| **总览** | 运行状态、B站扫码登录、平台一键开关（含自定义解析器的启停） |
+| **解析** | 手动粘贴链接预览卡片（可临时换主题 / 布局），网页截图小工具，自定义解析器管理 |
+| **缓存** | 解析记录的搜索 / 筛选 / 分页 / 预览 / 删除，以及缓存清理 |
+| **外观** | 上半改网页观感，下半是卡片设计器（右侧实时预览，边调边看） |
+| **配置** | 全部配置项，按大类分组、可折叠、可搜索 |
 
-**两套「外观」是刻意分开的**：
+配置改完**保存即生效**，不需要重载插件。
 
-| | 界面自定义 | 卡片设计器 |
-| --- | --- | --- |
-| 影响范围 | 只有这个网页 | 真正发出去的卡片 |
-| 存放位置 | `plugin_data/astrbot_plugin_denia_share/webui_appearance.json` | 插件配置（`RENDER_*`） |
-| 保存链路 | 独立接口，白名单键 + 回读二次校验 | 走配置页同一条保存链路，保存即生效 |
+**两套「外观」是刻意分开的**：界面自定义只改你自己看到的这个网页，卡片设计器改的才是
+真正发出去的卡片。
 
-外观页的预览用的是内置示例数据，**不联网、不写解析记录**，改参数不会污染缓存。
+## 配置
 
-实现用的是 AstrBot 官方的 **Plugin Pages**：页面放在插件目录 `pages/` 下，
-由 Dashboard 以受限 iframe 加载，通过 `window.AstrBotPluginPage` bridge 调用插件注册的 Web API。
-因此：
-
-- 插件**不需要自己起 HTTP 服务**，也不引入任何前端框架或 CDN 资源，离线可用
-- 页面跟随 Dashboard 的亮 / 暗主题
-- **配置保存后即时生效**，不需要重载插件：解析器、渲染器、截图服务、下载器参数都会按新配置重建
-  （只有「缓存清理间隔」要重载才生效）
-- 卡片图片不通过 URL 暴露（受限 iframe 带不上鉴权头），预览是把图片缩成 base64 随 JSON 返回；
-  要看原图走页面上的「下载」按钮
-
-原生插件配置面板已隐藏，避免两处入口写同一份配置。
-
-## 配置项
-
-全部 38 项，分 8 组，常用在前。这 8 组与页面里的分组一一对应。
-
-### 解析设置
+一共 38 项，分 8 组。最常动的几项：
 
 | 项 | 默认 | 说明 |
 | --- | --- | --- |
-| `DISABLED_PLATFORMS` | 空 | 禁用的平台，逗号分隔 |
-| `VIDEO_DURATION_MAXIMUM` | 480 秒 | 视频最大时长，超限不下载但保留标题封面 |
-| `VIDEO_SIZE_MAXIMUM_MB` | 100 | 单个视频体积上限，建议 ≤60（QQ 大文件上传易失败） |
-| `SEND_ERROR_MESSAGES` | 关 | 解析失败是否回消息；关闭只写日志，群里更安静 |
-
-### B站设置
-
-| 项 | 默认 | 说明 |
-| --- | --- | --- |
-| `BILI_CK` | 空 | 建议用 `/bili_login` 扫码；配了才能下 1080P 及以上 |
-| `BILI_QUALITY` | 1080P | 360P / 480P / 720P / 1080P / 1080P+ / 4K / 8K |
-
-### Steam 设置
-
-| 项 | 默认 | 说明 |
-| --- | --- | --- |
-| `STEAM_REGION` | `cn` | 价格地区，决定官方价格的货币，同时用作史低数据源的 country |
-| `ITAD_API_KEY` | 空 | 只有要「历史最低价」才需要，免费申请。留空不显示史低，其余照常 |
-
-### 网页截图
-
-| 项 | 默认 | 说明 |
-| --- | --- | --- |
-| `SCREENSHOT_BACKEND` | `thum` | `thum` 免 key；`cloudflare` 功能更强但需账号 |
-| `SCREENSHOT_FALLBACK` | 关 | 匹配不到平台的链接是否自动截图 |
-| `CF_ACCOUNT_ID` | 空 | 仅 cloudflare 后端需要 |
-| `CF_API_TOKEN` | 空 | 仅 cloudflare 后端需要，需带 Browser Rendering 权限 |
-
-### 卡片外观
-
-| 项 | 默认 | 说明 |
-| --- | --- | --- |
-| `RENDER_ENABLED` | 开 | 关闭后回退纯文本 |
-| `RENDER_THEME` | `dark` | `dark` / `light` |
-| `RENDER_LAYOUT` | `standard` | `standard` 标准 / `magazine` 杂志 / `immersive` 沉浸 / `feed` 信息流 |
-| `RENDER_WIDTH` | 800 px | 卡片宽度 520~1080 |
-| `RENDER_COVER_FULL_SIZE` | 关 | 封面按原始尺寸展示，不裁切 |
-| `RENDER_FONT_PATH` | 空 | 卡片出现方块字时才需要指定字体文件 |
-| `RENDER_ACCENT_COLOR` | 空 | 自定义强调色，`#RRGGBB`；留空 = 跟随平台主色 |
-| `RENDER_WATERMARK` | `希望解析` | 页脚水印文字，最多 12 字；**留空 = 不显示水印** |
-| `RENDER_DESC_MAX_LINES` | 0 | 正文最大行数，0 = 不限（按布局自适应），上限 12 |
-| `RENDER_SHOW_AVATAR` | 开 | 是否显示作者头像；关闭后作者行紧凑居中 |
-| `RENDER_SHOW_PLAY_BUTTON` | 开 | 视频封面中央的毛玻璃播放按钮；关掉后封面更干净 |
-| `RENDER_GRADIENT_TOP` | 空 | 背景渐变顶部色，`#RRGGBB`；留空 = 用主题自带渐变 |
-| `RENDER_GRADIENT_BOTTOM` | 空 | 背景渐变底部色，同上 |
-
-这些都能在「外观 → 卡片设计器」里边调边看，不必手填配置。
-
-### 媒体发送
-
-| 项 | 默认 | 说明 |
-| --- | --- | --- |
-| `CACHE_DIR` | 空 | 共享缓存目录（容器内路径）。留空 = 插件数据目录 |
-| `MEDIA_RELAY_ENABLED` | 关 | 把已下载的视频注册成临时 HTTP 链接再发送 |
-| `MEDIA_RELAY_CALLBACK_URL` | 空 | 协议端可达的回调地址，如 `http://astrbot:6185`；留空回退全局 `callback_api_base` |
-| `MEDIA_RELAY_TTL` | 300 秒 | 中转链接有效期，最小 30 |
-
-详见下面「媒体发送：Docker 分容器部署必看」。
-
-### 高级设置
-
-| 项 | 默认 | 说明 |
-| --- | --- | --- |
-| `XHS_CK` | 空 | 小红书 Cookie |
-| `PIXIV_CK` | 空 | Pixiv Cookie，留空也能搜；填了收录更全（R18 仍会被过滤） |
-| `GITHUB_TOKEN` | 空 | 建议填，免 token 时 60 次 / 小时且按出口 IP 计 |
-| `PROXY` | 空 | 全局代理，如 `http://127.0.0.1:7897`，作用于媒体下载与自建请求 |
-| `TWITTER_MEDIA_PROXY_BASE` | 空 | twimg 反代根地址，服务器连不上 X 的 CDN 时填 |
-
-### 维护
-
-| 项 | 默认 | 说明 |
-| --- | --- | --- |
+| `DISABLED_PLATFORMS` | 空 | 关掉不想解析的平台，逗号分隔 |
+| `VIDEO_DURATION_MAXIMUM` / `VIDEO_SIZE_MAXIMUM_MB` | 480 秒 / 100 MB | 超限不下载视频，卡片照发 |
+| `SEND_ERROR_MESSAGES` | 关 | 解析失败要不要在群里回一句；关了更安静 |
+| `BILI_CK` | 空 | 建议用 `/bili_login` 扫码，配了才能下 1080P 及以上 |
+| `PROXY` | 空 | 全局代理，作用于媒体下载与自建请求 |
+| `GITHUB_TOKEN` | 空 | 建议填：免 token 只有 60 次/小时，且按出口 IP 计，共享 IP 下极易被限流 |
 | `CACHE_TTL_HOURS` | 24 小时 | 缓存保留时长，0 = 不自动清理 |
-| `CACHE_CLEANUP_INTERVAL_MINUTES` | 60 分钟 | 后台清理任务间隔，改动需重载插件 |
-| `DEBUG_LOG_ENABLED` | 开 | 关闭后只保留警告与错误日志 |
 
-`_conf_schema.json` 必须与 `core/config.py` 里的 `CONFIG_META` 保持一致：
-它是配置项的唯一定义来源，`_conf_schema.json` 由它生成。AstrBot 加载配置时会**剔除 schema 之外的键**，
-两边一旦不一致，用户保存的值会在下次重载时静默丢失 —— 插件启动时会自检并在不一致时打警告。
+其余（Steam 地区与史低 key、网页截图后端、卡片外观、媒体发送、小红书 / Pixiv Cookie 等）
+都在网页界面的「配置」页里，带说明、可搜索，不用手改 json。
+卡片外观建议直接在「外观 → 卡片设计器」里调。
 
-## 媒体发送：Docker 分容器部署必看
+## Docker 分容器部署：视频发不出去
 
-AstrBot 把插件发出的媒体交给协议端时，各类消息段的处理方式并不一样：
+AstrBot 把图片和语音转成 base64 发出，**视频却是原样带文件路径**（`file:///...`）——
+所以 AstrBot 与 NapCat 等协议端不在同一个容器时，图文和语音正常，只有视频发不出去。
+两种解法，配一个即可：
 
-| 消息段 | AstrBot 的处理 | 跨容器 |
-| --- | --- | --- |
-| 图片 / 语音 | 先转成 `base64://` | ✅ 不碰文件系统，没事 |
-| **视频** | 原样发出，字段是 `file:///AstrBot/data/...` | ❌ 协议端读不到这个路径 |
-
-也就是说：**astrbot 与 NapCat 等协议端分在不同容器时，图文和语音正常，只有视频发不出去。**
-两种解法，二选一即可（也可以都配）。
-
-### ① 共享缓存目录（本地文件方式）
-
-配置「媒体发送 → 共享缓存目录」填一个**容器内路径**，并让所有相关容器都把宿主机同一个目录挂到它上面：
+**① 共享缓存目录** —— 配「媒体发送 → 共享缓存目录」填一个容器内路径，并让所有相关容器
+把宿主机同一个目录挂到**同一个绝对路径**上，例如：
 
 ```yaml
 services:
@@ -204,309 +99,40 @@ services:
       - /srv/astrbot/data/shared:/app/sharedFolder/denia_share   # 必须是同一路径
 ```
 
-然后配置里填 `/app/sharedFolder/denia_share/cache`。这样插件生成的
-`file:///app/sharedFolder/denia_share/cache/xxx.mp4` 在协议端容器里也成立。
+然后配置里填 `/app/sharedFolder/denia_share/cache`。
 
-- 一定要写**同一个绝对路径**：两个 compose 文件放在不同目录时，各自的 `./data` 指向不同位置，
-  会出现「看着挂了其实不是同一份」
-- 留空 = 用插件数据目录（默认行为不变）；填了但目录不可用 / 不可写会**打警告并回退**，
-  不会把下载整个搞坏
+**② 媒体中转** —— 配「媒体发送 → 启用媒体中转」，把下载好的视频注册成 AstrBot 的临时
+HTTP 链接再发送，协议端只要能访问那个地址就行，**不需要共享挂载**；同一 Docker 网络里
+可直接填 `http://astrbot:6185`。
 
-### ② 媒体中转（链接方式）
-
-配置「媒体发送 → 启用媒体中转」，把已下载的视频注册进 AstrBot 的 `file_token_service`，
-拿到 `{回调地址}/api/file/<token>` 后用链接发送。协议端只要能访问到那个地址就行，**不需要共享挂载**。
-
-- 「AstrBot 回调地址」留空时回退 AstrBot 全局 `callback_api_base`
-- 同一 Docker 网络内可以直接用容器名：`http://astrbot:6185`
-- 地址必须带 `http://` / `https://`，否则不启用（避免生成协议端无法识别的链接）
-- 任何一步失败（没配地址、文件不存在、注册异常）都会**回退成本地文件发送**，不会把视频丢掉
-
-> 「首页 → 总览」里有一张「媒体发送」卡片，会在「检测到在容器里但两条路都没铺」时给出 ⚠️ 提示。
-
-## 平台细节
-
-### B站：未登录也能拿到 720P
-
-B站的清晰度上限由服务端按登录态决定，与用什么方式取流无关。但**同一匿名状态下，两条取流路径给到的结果不同**
-（实测 2026-09-17，BV1uth56uEz3，5 分 09 秒）：
-
-| 路径 | 服务端 `quality` | 实际给到的流 |
-| --- | --- | --- |
-| DASH（`fnval=4048`） | 64（720P） | 只有 **480P** 和 360P，没有 720P 流 |
-| html5 / MP4 单文件 | 64（720P） | 单个合并好的 **720P** 文件，35.3 MB（360P 只有 11.2 MB） |
-
-`accept_quality` 里列出的 1080P+ / 1080P 是「诱饵」，匿名下并不真的给流。
-
-所以插件采用：**DASH 拿不到流、或拿到的流低于目标档位时，回退 html5 单文件 MP4**，
-且只在 html5 档位确实更高时才替换（避免登录后目标设 4K、DASH 给 1080P 却被降到 720P）。
-
-要 1080P 及以上仍然必须配置 Cookie（`/bili_login`）。
-
-### B站：受限视频会说明原因
-
-充电专属 / 大会员专享 / 付费专享 / 登录后可看的视频拿不到完整流。插件会**在卡片与消息里
-说明是哪一种**，而不是笼统地报一句「视频下载失败」——后者分不清「该去登录开会员」还是
-「过一会儿重试」。
-
-只拿到试看片段时，提示里还会带上「可解析时长 / 全长」（如 `3:12 / 16:24`）。
-判定依据是播放接口返回的分段时长与全长之差，**不需要会员账号就能看出来**。
-
-### 网页截图
-
-两个后端，配置 `SCREENSHOT_BACKEND` 切换：
-
-| 后端 | 凭据 | 实测 | 适用 |
-| --- | --- | --- | --- |
-| `thum`（默认） | 免 key | 连打 4/4 成功，900×900 | 一般资讯站、博客、商品页 |
-| `cloudflare` | Account ID + API Token | 未实测（需账号） | 要截长图 / 等待 JS / 指定选择器 |
-
-命令 `/shot <网址>`；也可开启 `SCREENSHOT_FALLBACK`，让匹配不到任何平台的链接自动截图
-（默认关，避免群里刷图）。
-
-局限：强反爬站点截不到内容（实测知乎只返回 16KB 空白图），thum.io 也拿不到 JS 渲染后的长图。
-
-### Pixiv 内容过滤
-
-Pixiv 的 `xRestrict` 字段 0 = 全年龄、1 = R18、2 = R18G，本插件对非 0 一律拦截，**不提供开关**。
-
-实测未登录时搜索结果 `xRestrict` 恒为 0，但配置 Cookie 后收录更全的同时也会开始出现 R18 ——
-过滤逻辑与是否登录无关，配 Cookie 不会放宽。这是为了不在群里发出违规内容。
-
-### Steam 与「历史价格」
-
-三层数据源，任何一层失败都不影响其它层：
-
-| 层 | 来源 | 凭据 | 提供 |
-| --- | --- | --- | --- |
-| 1 | Steam 官方 `appdetails` | 免 key | 名称 / 简介 / 开发商 / 发行日期 / 类型 / **国区价格** |
-| 2 | CheapShark | 免 key | Metacritic、Steam 好评率、当前折扣率 |
-| 3 | IsThereAnyDeal | **需 key** | 真史低 `historyLow`（全部 / 近一年 / 近三月） |
-
-关于史低的实测结论（2026-09-19）：
-
-- Steam 官方接口**不提供**任何历史价格
-- SteamDB 的 `steamdb.info/api` 已 403 被 Cloudflare 拦死，社区也明确禁止爬取
-- CheapShark 的 `cheapestPriceEver` 字段**实测三个游戏恒为 None**，已不可依赖
-- 所以真史低只能用 ITAD，且必须申请 key（免费：<https://isthereanydeal.com/apps>）
-
-**没填 key 时插件照常工作，只是不显示史低这一行。**
-
-注意价格显示：国区价来自官方接口（¥），折扣率那行的美元价来自 CheapShark，两者不同源，
-已标注「美元区」避免混淆。实测样例（2026-09-19，国区）：
-
-```
-艾尔登法环  FromSoftware, Inc.
-价格: ¥ 298.00
-当前折扣: -10%（美元区 $53.88 / 原价 $59.99）
-Metacritic: 94
-Steam 评价: Very Positive (94%)
-```
-
-### GitHub 速率限制
-
-**建议填 `GITHUB_TOKEN`**：免 token 限额 60 次 / 小时且**按出口 IP 计算**，
-共享出口（代理、容器 NAT）下几乎必被限流；填了提升到 5000 次 / 小时。
+两种方式失败都会**回退成本地文件发送**，不会把视频丢掉。总览页检测到「在容器里但两条路
+都没铺」时会给出提示。
 
 ## 自定义解析器
 
-插件内置 11 个平台。想加第 12 个（或改掉某个内置平台的行为），**不用改插件代码**——
-把一个 `.py` 文件放进数据目录即可。
+想加第 12 个平台（或改掉某个内置平台的行为），不用改插件代码：把一个 `.py` 文件放进
+插件数据目录的 `custom_parsers/`，点网页界面「解析 → 自定义解析器」的「重新加载」即生效，
+之后群里发链接一样会被解析。
 
-### 目录在哪
+**说明就在那个目录里** —— 首次运行会写入一份 `README.md`（用法、与内置平台的优先级规则、
+接口版本、加载失败原因）和一份 `TEMPLATE.py.txt` 模板，复制模板改一改即可。
+加载状态与失败原因显示在「解析 → 自定义解析器」卡上，不用翻日志。
 
-```
-<AstrBot 数据目录>/plugin_data/astrbot_plugin_denia_share/custom_parsers/
-```
+> ⚠️ 那个目录里的文件会被**直接执行**，权限等同于插件自身。只放自己写的、或完整读懂的代码。
 
-具体路径在网页界面「解析 → 自定义解析器」那张卡上直接写着，点「打开目录」的提示也取自那里。
-首次运行会自动创建该目录，并放一份 `TEMPLATE.py.txt` 模板（复制、去掉 `.txt` 后缀即可）。
+## 许可
 
-### 怎么用
-
-1. 把模板复制成 `my_site.py`（**必须以 `.py` 结尾**，`_` 开头的文件会被跳过）
-2. 改里面的平台键、平台名、`@handle` 正则与解析逻辑
-3. 回到网页界面「解析 → 自定义解析器」，点 **「重新加载」** —— 立刻生效，不用重启插件
-4. 新平台会出现在「平台开关」里，可以像内置平台一样单独启停
-5. 之后**群里直接发链接就会被解析**，和内置平台没有任何区别（卡片、解析记录、平台开关都走同一条链路）
-
-保存配置、切换平台开关也会顺带重新扫描一次目录，所以改完文件随手保存个配置也能生效。
-
-删掉（或改了平台键）之后点一次「重新加载」，旧实例会被一起卸掉 —— 不会出现
-「文件删了但那个平台还在解析」的情况。
-
-#### 和内置平台冲突时谁优先
-
-内置平台的链接**优先由内置平台处理**：写一个匹配 `bilibili.com` 的自定义解析器，
-只要 B站 还在启用状态，链接就还是走内置的那条。
-
-想让它接管，就先进「平台开关」把对应的内置平台**关掉** —— 内置处理器不再认领，
-链接才会落到你的自定义解析器上。
-
-另外，平台键不能与内置的 11 个重名（`bilibili` / `douyin` / `kuaishou` / `weibo` /
-`xiaohongshu` / `twitter` / `nga` / `acfun` / `github` / `pixiv` / `steam`），
-重名会被拒绝加载；要顶替内置平台的行为，请另起一个平台键（如 `bilibili_hd`）。
-
-### 一个最小的例子
-
-```python
-PARSER_API_VERSION = 1        # 必须声明，见下
-PLATFORM_NAME = "示例站"       # 出现在平台列表与解析记录里
-PLATFORM_CARD_NAME = ""       # 卡片里的叫法，留空 = 同正式名
-
-from astrbot_plugin_denia_share.core.base_parser import BaseParser, handle
-from astrbot_plugin_denia_share.core.data import platform_of
-
-
-class ExampleParser(BaseParser):
-    # 平台键：小写英文。会出现在「禁用的平台」配置与解析记录里。
-    platform = platform_of("example")
-
-    # 第一个参数是关键词（链接里必须包含它才会走到这个处理器，比正则快），
-    # 第二个参数是匹配链接的正则。
-    @handle("example.com", r"example\.com/(?:post|p)/(?P<pid>\d+)")
-    async def _parse(self, searched):
-        pid = searched.group("pid")
-        url = f"https://example.com/post/{pid}"
-
-        # 自建 httpx 客户端必须走 self.new_client()（或 client_kwargs）：
-        # 它会带上超时、证书校验开关与全局代理。裸建 AsyncClient 会让
-        # 「只在环境变量里配代理」的部署静默直连。
-        async with self.new_client() as client:
-            response = await client.get(url, headers=self.headers)
-            response.raise_for_status()
-
-        # 下载媒体交给 self.downloader，返回值直接塞进 create_* 即可：
-        # 它们接受「URL 字符串」或「下载任务」，进度与并发由下载器统一管。
-        return self.result(
-            url=url,
-            title="标题",
-            text="正文",
-            author=self.create_author("作者名", "https://example.com/a.jpg"),
-            contents=[self.create_image("https://example.com/1.jpg")],
-        )
-```
-
-可用的构建件与内置解析器完全一样：`self.result()` / `self.create_author()` /
-`self.create_video()` / `self.create_image()` / `self.create_images()` /
-`self.create_audio()` / `self.new_client()` / `self.client_kwargs()` /
-`self.get_redirect_url()` / `self._add_limit_warning()`，以及
-`ParseException`（解析失败，会换下一条路径）与 `IgnoreException`（策略跳过，不算失败）。
-照着 `core/parsers/github.py` 或 `core/parsers/pixiv.py` 抄最快——这两个最短。
-
-### 接口版本
-
-文件里必须声明 `PARSER_API_VERSION`，且与插件当前的接口版本一致（当前为 **1**）。
-不一致时**拒绝加载**并在页面上说明原因，而不是加载进来后在某个角落里以奇怪的方式失败。
-
-插件的 `BaseParser` 接口会随版本演进（历史上 `create_gif` 就被删过）。所以升级插件后，
-如果你的文件突然不加载了，先看页面上的提示——多半是接口版本变了，对着
-`TEMPLATE.py.txt` 改一下即可。
-
-### 加载失败会怎样
-
-**一个文件写错不会拖垮插件，也不会影响别的自定义解析器。** 每个文件独立加载：
-
-- 语法错、缺 `PARSER_API_VERSION`、版本不匹配、没有 `BaseParser` 子类、
-  类里没有 `platform`、没有 `@handle`、一个文件里定义了多个解析器类、
-  平台键与内置平台重名、文件超过 512 KB —— 每一种都会被拒绝
-- 失败原因原样显示在「自定义解析器」卡片里（红框），**不需要去翻服务器日志**
-- 成功的那些照常工作
-
-### ⚠️ 安全提示
-
-**这个目录里的文件会被直接执行**，权限等同于插件自身。插件不做沙箱（在进程内 exec 的
-Python 代码没法可靠沙箱化），所以：
-
-- 只放**自己写的**或**完整读过、看懂的**代码
-- 不要从网上随手抄一段来路不明的解析器丢进去
-- 这个目录刻意**不做成配置项** —— 可配置就等于把「执行任意代码」变成一个能在网页上改的字段
-
-另外，`__init__` 里不要做网络请求：加载会在保存配置、切换平台时反复触发。
-
-## 目录结构
-
-```
-astrbot_plugin_denia_share/
-├── main.py                  插件入口：平台分发、命令、发送、WebUI 注册
-├── metadata.yaml            插件元数据（AstrBot 读取）
-├── _conf_schema.json        配置契约（与 core/config.py 的 CONFIG_META 一致）
-├── logo.png                 插件 logo
-├── requirements.txt
-├── .astrbot-plugin/i18n/    插件页面与元数据的多语言文案
-├── pages/denia/             网页界面（单页面 + 内部标签导航）
-│   ├── index.html
-│   ├── style.css            主题变量、布局与组件样式
-│   ├── ui.js                DOM / 提示条 / 弹窗 / 格式化等通用件
-│   ├── app.js               页面框架：bridge、导航、视图挂载
-│   ├── prefs.js             界面外观偏好（主题色 / 圆角 / 紧凑 / 动效的存取与 CSS 变量派生）
-│   └── views/               overview / parse / cache / appearance / config 五个标签页
-└── core/
-    ├── base_parser.py       解析器基类：URL 注册、懒下载、媒体构建
-    ├── data.py              解析结果数据模型（ParseResult 等）
-    ├── task.py              PathTask：结果的懒加载包装
-    ├── download.py          下载器：流式下载、体积上限、代理
-    ├── card_renderer.py     分享卡片渲染（约 2300 行 Pillow）
-    ├── screenshot.py        网页截图（thum / Cloudflare 双后端）
-    ├── webui.py             网页界面的后端接口层（23 个路由）
-    ├── custom_parsers.py    用户自定义解析器：目录扫描、动态加载、失败隔离
-    ├── relay.py             媒体中转：本地文件 → 临时 HTTP 链接
-    ├── history.py           解析记录持久化（history.jsonl）
-    ├── config.py            配置元数据与读写（CONFIG_META 是唯一来源）
-    ├── constants.py         常量与平台枚举
-    ├── exception.py         异常类型
-    ├── media_utils.py       媒体与文件工具（ffmpeg、缓存清理、时长格式化）
-    ├── cookie_utils.py      Cookie 工具
-    ├── models/              平台接口数据模型（msgspec）
-    │   ├── bilibili/        视频 / 动态 / 专栏 / 直播 / 收藏夹
-    │   ├── douyin/          视频 / 图集
-    │   ├── weibo/           长文 / 详情 / 通用
-    │   ├── xiaohongshu/     explore / discovery
-    │   ├── kuaishou/
-    │   └── acfun/
-    └── parsers/             平台解析器，一个平台一个模块
-        ├── bilibili.py  kuaishou.py  weibo.py  xiaohongshu.py
-        ├── twitter.py  acfun.py  nga.py  github.py  pixiv.py  steam.py
-        └── douyin/          抖音（唯一需要拆包的平台）
-            ├── parser.py    解析主流程
-            ├── sign.py      a_bogus 签名
-            └── web.py       网页客户端（ttwid 会话）
-```
-
-命名约定：`models/` 下的子目录名与 `parsers/` 下的解析器名一一对应，
-`parsers/bilibili.py` 对应 `models/bilibili/`，不用缩写。
-
-## 开发状态
-
-| 模块 | 状态 |
-| --- | --- |
-| 仓库骨架 / 插件注册 | ✅ |
-| 解析层（`core/parsers/`） | ✅ 11 个平台 |
-| 分享卡片渲染（`core/card_renderer.py`） | ✅ 4 布局 × 深浅双主题，可自定义强调色 / 渐变 / 水印 / 正文行数 / 头像 / 播放按钮 |
-| 下载器（`core/download.py`） | ✅ 含体积上限与代理 |
-| 网页截图（`core/screenshot.py`） | ✅ 双后端，thum 免 key / Cloudflare 需账号 |
-| 网页界面（`pages/` + `core/webui.py`） | ✅ 总览 / 解析 / 缓存 / 外观 / 配置 五个标签 |
-| 媒体发送（`core/relay.py`） | ✅ 共享缓存目录 + 媒体中转两套 |
-| 解析记录（`core/history.py`） | ✅ JSONL 落盘，默认保留 500 条 |
-| 配置（`_conf_schema.json` + `core/config.py`） | ✅ 8 组 38 项，页面内维护、保存即生效 |
-
-## 许可与致谢
-
-本项目以 MIT License 发布，详见 [LICENSE](LICENSE)。
-
-引用了第三方代码的部分只有这两处：
+MIT，详见 [LICENSE](LICENSE)。引用了两处第三方代码：
 
 | 来源 | 许可 | 用到哪里 |
 | --- | --- | --- |
-| [astrbot_plugin_rika_share](https://github.com/iris1598/astrbot_plugin_rika_share) | MIT | 解析框架（`base_parser` / `data` / `task` / `models`）、分享卡片渲染器 `core/card_renderer.py`、B站 / 微博 / 小红书 / AcFun / NGA 的解析实现、抖音的 HTML 取流路径、快手的页面结构、Twitter 的 vxtwitter 兜底、网页截图的 Cloudflare 后端（其 `cloudflare_screenshot.py` 的精简版） |
-| [Johnserf-Seed/f2](https://github.com/Johnserf-Seed/f2) | Apache-2.0 | 抖音 `a_bogus` 签名（`core/parsers/douyin/sign.py`，文件头保留了 `SPDX-License-Identifier: Apache-2.0`） |
+| [astrbot_plugin_rika_share](https://github.com/iris1598/astrbot_plugin_rika_share) | MIT | 解析框架、卡片渲染器，以及 B站 / 微博 / 小红书 / AcFun / NGA 的解析实现等 |
+| [Johnserf-Seed/f2](https://github.com/Johnserf-Seed/f2) | Apache-2.0 | 抖音 `a_bogus` 签名（`core/parsers/douyin/sign.py`） |
 
-其余部分（GitHub / Pixiv / Steam 解析、网页界面与外观自定义、媒体发送的两套机制、
-卡片外观配置项等）为本项目实现。
+其余部分（GitHub / Pixiv / Steam 解析、网页界面与外观自定义、媒体发送、卡片外观配置项等）
+为本项目实现。Apache-2.0 全文随包附在 `LICENSES/Apache-2.0.txt`，相关源文件头都带来源说明。
 
-- Apache-2.0 全文随包附在 `LICENSES/Apache-2.0.txt`
-- 上表里列到的源文件，文件头都带一行来源说明
-  （`# 本文件包含衍生自 astrbot_plugin_rika_share（MIT License）的代码`），
-  README 与 `core/__init__.py` / `core/parsers/__init__.py` 只做汇总，不替代它们
-- 注意：rika_share 上游本身没有 per-file 版权头，声明只在其仓库的 LICENSE 里；
-  这里的文件头是本项目为满足 MIT「在副本中保留声明」而额外补的
+## 开发
+
+目录结构、各平台的实现细节与实测结论、配置项契约、网页界面的实现机制等在
+[DEVELOPMENT.md](DEVELOPMENT.md)。
