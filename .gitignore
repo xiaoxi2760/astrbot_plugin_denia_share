@@ -12,3 +12,6 @@ data/
 .vscode/
 .DS_Store
 Thumbs.db
+
+# 开发向文档（目录结构 / 平台实测结论 / 配置项契约 / 网页界面实现机制）：留本地，不进仓库
+DEVELOPMENT.md
