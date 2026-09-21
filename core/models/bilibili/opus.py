@@ -77,8 +77,21 @@ class OpusItem(Struct):
         return self.item.basic.title if self.item.basic else None
 
     @property
-    def name_avatar(self) -> tuple[str, str]:
-        author_module = next(module.module_author for module in self.item.modules if module.module_author)
+    def name_avatar(self) -> tuple[str, str | None]:
+        """作者名与头像；取不到作者时给占位名，而不是抛 ``StopIteration``。
+
+        调用点直接 ``create_author(*opus_data.name_avatar)`` 解包，而
+        ``_parse_bilibli_api_opus`` 是专栏 / 动态 / 图文 / ``t.bili`` 四条入口的
+        共同出口 —— 抛异常会让四条入口一起退化成「解析异常」+堆栈，尽管正文与
+        图片其实都已经拿到了。作者是装饰性字段，缺了不该毁掉整条结果。
+        占位名与渲染层的兜底措辞保持一致（``card_renderer`` 用的就是「未知作者」）。
+        """
+        author_module = next(
+            (module.module_author for module in self.item.modules if module.module_author),
+            None,
+        )
+        if author_module is None:
+            return "未知作者", None
         return author_module.name, author_module.face
 
     @property

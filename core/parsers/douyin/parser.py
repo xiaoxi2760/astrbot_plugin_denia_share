@@ -137,7 +137,13 @@ class DouyinParser(BaseParser):
             response = await client.get(url, params=params)
             response.raise_for_status()
 
-        slides_data = slides_decoder.decode(response.content).aweme_details[0]
+        aweme_details = slides_decoder.decode(response.content).aweme_details
+        if not aweme_details:
+            # 裸下标 [] 会抛 IndexError —— 虽然这一条被 _parse_douyin 的裸
+            # except Exception 接得住（会继续走签名 API），但日志只剩
+            # "list index out of range"，看不出是「接口没给作品」。
+            raise ParseException("图文接口没有返回任何作品")
+        slides_data = aweme_details[0]
         author = self.create_author(slides_data.name, slides_data.avatar_url)
         result = self.result(title=slides_data.desc, author=author, timestamp=slides_data.create_time)
 
