@@ -49,17 +49,10 @@ def _astrbot_callback_base() -> str:
 
 PLUGIN_NAME = "astrbot_plugin_denia_share"
 
-# 插件目录与列表页用的 logo。页面左上角那个小方块直接用它 —— 只此一份，
-# 换 logo 只需替换元数据目录下这张图，不必再改页面。
-PLUGIN_DIR = Path(__file__).resolve().parent.parent
-LOGO_PATH = PLUGIN_DIR / "logo.png"
-
 # 缩略图/预览图的最大宽度与体积上限。
 # 预览图要经 postMessage 传进 iframe，几 MB 的 base64 会明显卡顿，所以宁可不给。
 PREVIEW_MAX_WIDTH = 640
 PREVIEW_MAX_BYTES = 3 * 1024 * 1024
-# 左上角只显示 34px，128px 足够（HiDPI 下也不糊），又不必把 126 KB 原图塞进 JSON
-LOGO_MAX_WIDTH = 128
 MAX_URL_LENGTH = 2048
 MAX_QUERY_LIMIT = 100
 
@@ -170,16 +163,12 @@ class WebUIApi:
 
     def __init__(self, plugin: Any):
         self.plugin = plugin
-        # 左上角 logo 的 base64 只算一次。文件不在运行中变，换了 logo 重启即可；
-        # 缓存成 "" 表示「算过了，但没有」，避免每次进页面都去读盘 + 编码。
-        self._logo_data_url: str | None = None
 
     # ==================== 注册 ==================== #
 
     def register(self) -> None:
         context = self.plugin.context
         routes: tuple[tuple[str, Callable[..., Any], tuple[str, ...], str], ...] = (
-            ("/logo", self.logo, ("GET",), "插件 logo（页面左上角用）"),
             ("/overview", self.overview, ("GET",), "插件总览与状态"),
             ("/config", self.get_config, ("GET",), "读取全部配置项"),
             ("/config", self.save_config, ("POST",), "保存配置项"),
@@ -206,21 +195,6 @@ class WebUIApi:
         )
         for suffix, handler, methods, desc in routes:
             context.register_web_api(f"/{PLUGIN_NAME}{suffix}", handler, list(methods), desc)
-
-    # ==================== logo ==================== #
-
-    async def logo(self):
-        """插件 logo 的 base64 data URL，供页面左上角显示。
-
-        原图在插件目录根下（``logo.png``，256×256 / 126 KB），这里缩到 128px 再编码：
-        页面里那个位置只有 34px，没必要把原图塞进 JSON 传进 iframe。
-        取不到图时返回空串，页面会退回文字兜底。
-        """
-        if self._logo_data_url is None:
-            self._logo_data_url = await asyncio.to_thread(
-                _image_data_url, LOGO_PATH, LOGO_MAX_WIDTH
-            ) or ""
-        return _json_response({"data": self._logo_data_url})
 
     # ==================== 总览 ==================== #
 
