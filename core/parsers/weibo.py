@@ -3,12 +3,14 @@
 # 本仓库对其做过修改；完整归属见项目根目录 README「许可与致谢」。
 
 """微博解析器"""
+import asyncio
 import re
 from time import time
 from uuid import uuid4
 from typing import ClassVar
 from bs4 import Tag, BeautifulSoup
-from httpx import Cookies, AsyncClient
+from astrbot.api import logger
+from httpx import AsyncClient
 from ..base_parser import (
     MAX_IMAGES_PER_RESULT,
     BaseParser,
@@ -17,6 +19,79 @@ from ..base_parser import (
     handle,
 )
 from ..data import Platform, ImageContent, platform_of
+
+
+# ============================ 微博访客身份 ============================
+#
+# 微博对**完全没有 Cookie** 的请求会返回 403/418（风控），带一份「访客身份」
+# 就能正常拿到数据。本仓原先在 parse_weibo_id 里显式传 cookies=Cookies()
+# （主动不带），匿名时很容易被拦 —— 前身插件 yaya 的做法是先去 genvisitor2
+# 取一份访客身份再请求。
+#
+# 访客身份由 visitor.passport.weibo.cn 下发，取一次就够（但会过期），所以：
+# 拿到就缓存 → 请求被风控时清掉 → 下一次自动重取。
+
+_visitor_cookies: dict[str, str] | None = None
+_visitor_lock: asyncio.Lock | None = None
+
+
+def _get_visitor_lock() -> asyncio.Lock:
+    """懒建锁。
+
+    **不在模块级直接 ``asyncio.Lock()``**：那会在「还没有事件循环」时构造。
+    懒建就没有这个问题。
+    """
+    global _visitor_lock
+    if _visitor_lock is None:
+        _visitor_lock = asyncio.Lock()
+    return _visitor_lock
+
+
+def clear_visitor_cookies() -> None:
+    """丢弃缓存的访客身份（下一次请求会重新获取）。"""
+    global _visitor_cookies
+    _visitor_cookies = None
+
+
+async def get_visitor_cookies(parser) -> dict[str, str] | None:
+    """获取（并缓存）微博访客 Cookie；取不到返回 ``None``。
+
+    **取不到不抛异常**：退回「不带 Cookie 请求」正是本仓原来的行为，比让整条
+    解析失败好。并发时只发一次请求（双检锁）。
+    """
+    global _visitor_cookies
+    if _visitor_cookies:
+        return _visitor_cookies
+    async with _get_visitor_lock():
+        if _visitor_cookies:  # 等锁期间别人可能已经取到了
+            return _visitor_cookies
+        try:
+            async with AsyncClient(**parser.client_kwargs(
+                headers={
+                    **parser.headers,
+                    "referer": "https://visitor.passport.weibo.cn/",
+                },
+            )) as client:
+                response = await client.post(
+                    "https://visitor.passport.weibo.cn/visitor/genvisitor2",
+                    content="cb=visitor_gray_callback",
+                    headers={"content-type": "application/x-www-form-urlencoded"},
+                )
+        except Exception as error:
+            logger.warning(f"微博访客身份获取失败，改用匿名请求：{error}")
+            return None
+        if response.status_code != 200:
+            logger.warning(
+                f"微博访客身份获取失败（HTTP {response.status_code}），改用匿名请求"
+            )
+            return None
+        cookies = {key: value for key, value in response.cookies.items()}
+        if not cookies:
+            logger.warning("微博访客身份响应里没有 Cookie，改用匿名请求")
+            return None
+        _visitor_cookies = cookies
+        logger.debug(f"微博访客身份已获取（{len(cookies)} 个 Cookie）")
+        return _visitor_cookies
 
 
 class WeiBoParser(BaseParser):
@@ -63,7 +138,9 @@ class WeiBoParser(BaseParser):
 
         url = "https://card.weibo.com/article/m/aj/detail"
         params = {"_rid": str(uuid4()), "id": _id, "_t": int(time() * 1000)}
-        async with AsyncClient(**self.client_kwargs(headers=self.headers)) as client:
+        async with AsyncClient(**self.client_kwargs(
+            headers=self.headers, cookies=await get_visitor_cookies(self),
+        )) as client:
             response = await client.get(url, params=params)
             response.raise_for_status()
 
@@ -97,7 +174,9 @@ class WeiBoParser(BaseParser):
         # self.headers 里是小写 referer，这里必须同键名小写覆盖，否则会发出两个 Referer
         headers = {**self.headers, "referer": f"https://h5.video.weibo.com/show/{fid}", "Content-Type": "application/x-www-form-urlencoded"}
         post_content = 'data={"Component_Play_Playinfo":{"oid":"' + fid + '"}}'
-        async with AsyncClient(**self.client_kwargs(headers=headers)) as client:
+        async with AsyncClient(**self.client_kwargs(
+            headers=headers, cookies=await get_visitor_cookies(self),
+        )) as client:
             response = await client.post(req_url, content=post_content)
             response.raise_for_status()
 
@@ -134,12 +213,15 @@ class WeiBoParser(BaseParser):
             **self.client_kwargs(
                 headers=headers,
                 follow_redirects=False,
-                cookies=Cookies(),
+                # 访客身份：完全不带 Cookie 时微博会返回 403/418（见文件顶部说明）
+                cookies=await get_visitor_cookies(self),
             )
         ) as client:
             response = await client.get(url)
             if response.status_code != 200:
                 if response.status_code in (403, 418):
+                    # 访客身份可能已过期：清掉缓存，下一次请求会自动重取一份再试
+                    clear_visitor_cookies()
                     raise ParseException(f"被风控拦截({response.status_code}), 可尝试更换 UA/Referer 或稍后重试")
                 raise ParseException(f"获取数据失败 {response.status_code}")
             ctype = response.headers.get("content-type", "")
