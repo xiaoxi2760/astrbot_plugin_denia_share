@@ -1,4 +1,4 @@
-/* 达妮娅分享 · 界面外观偏好（从 app.js 抽出，app.js 只留视图框架）
+/* 希望解析器 · 界面外观偏好（从 app.js 抽出，app.js 只留视图框架）
  *
  * 职责：主题色 / 圆角 / 紧凑 / 动效 / 主题覆盖 的存取与 CSS 变量派生。
  * - 存：POST appearance → 插件数据目录 webui_appearance.json（只影响本页面）

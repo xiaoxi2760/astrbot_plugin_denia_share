@@ -1,11 +1,11 @@
 {
   "metadata": {
-    "display_name": "达妮娅分享",
+    "display_name": "希望解析器",
     "short_desc": "链接分享自动解析，支持 B站|抖音|快手|微博|小红书|Twitter|AcFun|NGA|GitHub|Pixiv|Steam"
   },
   "pages": {
     "denia": {
-      "title": "达妮娅分享",
+      "title": "希望解析器",
       "description": "总览运行状态、手动解析链接、管理解析缓存、自定义界面与卡片外观、维护全部配置项。"
     }
   }

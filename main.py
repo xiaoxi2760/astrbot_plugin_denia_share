@@ -1,5 +1,5 @@
 """
-达妮娅分享 - 链接分享自动解析插件
+希望解析器 - 链接分享自动解析插件
 
 支持 B站 | 抖音 | 快手 | 微博 | 小红书 | Twitter | AcFun | NGA | GitHub | Pixiv | Steam
 另有网页截图（thum.io / Cloudflare 双后端）与 Pixiv 关键词搜索。
@@ -123,7 +123,7 @@ class _EventUrlWrapper:
 
 
 @register(
-    "达妮娅分享",
+    "希望解析器",
     "xiaoxi2760",
     # 平台列表也从 PLATFORMS 派生：这是第 5 处会写出平台名的地方，
     # 手写一份就等于又埋一个「改了这里忘了那里」
@@ -982,7 +982,7 @@ class DeniaSharePlugin(Star):
         return ParseResult(
             platform=platform_of(PlatformEnum.BILIBILI),
             author=Author(
-                name="达妮娅示例频道",
+                name="希望示例频道",
                 avatar=PathTask(_static(avatar_path)),
                 description="本卡片为离线示例，用于预览外观效果",
             ),
@@ -1051,7 +1051,7 @@ class DeniaSharePlugin(Star):
 
     async def _build_output(self, result: ParseResult) -> tuple[str, list[list]]:
         """统一构建 (标题头, 内容节点列表)。"""
-        header = f"达妮娅分享 | {result.platform.display_name} - {result.content_type}"
+        header = f"希望解析器 | {result.platform.display_name} - {result.content_type}"
         if result.author:
             header += f" @{result.author.name}"
 
@@ -1608,14 +1608,14 @@ class DeniaSharePlugin(Star):
     @filter.permission_type(filter.PermissionType.ADMIN)
     @filter.command("denia_status")
     async def denia_status(self, event: AstrMessageEvent):
-        """查看达妮娅分享的运行状态"""
+        """查看希望解析器的运行状态"""
         from . import __version__
 
         platforms = "、".join(self.parsers) if self.parsers else "（无）"
         backend = self.screenshot.backend
         shot_ready = "已就绪" if self.screenshot.is_configured else "未配置"
         yield event.plain_result(
-            f"达妮娅分享 v{__version__}\n"
+            f"希望解析器 v{__version__}\n"
             f"已启用平台：{platforms}\n"
             f"卡片渲染：{'开' if self._renderer.enabled else '关'}\n"
             f"B站 Cookie：{'已配置' if self._bili_cookie else '未配置'}\n"
