@@ -13,6 +13,8 @@ from urllib.parse import urlparse
 
 from astrbot.api import logger
 
+from .exception import MediaProcessException
+
 # 防解压炸弹：PIL 的默认上限约 89M 像素，且只在超过**两倍**时才抛错，
 # 1~2 倍之间仅发一条 warning。本仓的图全部来自远端，一张 30000×30000 的 PNG
 # 解压后能吃掉几 GB 内存 —— 显式压到 64M 像素：超过 128M 像素直接抛
@@ -217,7 +219,9 @@ async def exec_ffmpeg_cmd(cmd: list[str]) -> None:
             *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
         )
     except FileNotFoundError:
-        raise RuntimeError("ffmpeg 未安装或无法找到可执行文件")
+        # 本机没装 ffmpeg（或它不在 PATH 里）。抛专门的类型而不是 RuntimeError：
+        # B站的 CDN 重试循环要能认出「换地址也没用」，从而直接打断、不再重下整段视频。
+        raise MediaProcessException("ffmpeg 未安装或无法找到可执行文件")
 
     try:
         _, stderr = await process.communicate()
