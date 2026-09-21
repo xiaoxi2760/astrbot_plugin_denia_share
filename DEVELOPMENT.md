@@ -45,7 +45,9 @@ astrbot_plugin_denia_share/
 
 ## 配置项（全 38 项 / 8 组）
 
-分组与网页界面里的一一对应，常见项在 README 里另有一张速查表。
+**这张表是「有哪些配置项」在文档侧的唯一完整清单**（README 只留一张常见项速查表，
+不逐项复制）。总共 38 项里有一项（`HTTP_VERIFY_SSL`）标了 `invisible`，只存在于 json，
+不出现在配置页 —— 所以用户在实际页面上看到的是 37 项。分组与网页界面里的一一对应。
 
 ### 解析设置
 
@@ -114,6 +116,7 @@ astrbot_plugin_denia_share/
 | `PIXIV_CK` | 空 | Pixiv Cookie，留空也能搜；填了收录更全（R18 仍会被过滤） |
 | `GITHUB_TOKEN` | 空 | 建议填，免 token 时 60 次 / 小时且按出口 IP 计 |
 | `PROXY` | 空 | 全局代理，如 `http://127.0.0.1:7897`，作用于媒体下载与自建请求 |
+| `HTTP_VERIFY_SSL` | 开 | HTTPS 证书校验。**`invisible`，不出现在配置页**，只能改 json；只有自建反代 / 内网镜像的证书链有问题时才临时关掉 |
 | `TWITTER_MEDIA_PROXY_BASE` | 空 | twimg 反代根地址，服务器连不上 X 的 CDN 时填 |
 
 ### 维护
