@@ -92,15 +92,28 @@ PLATFORMS: Final[dict[str, PlatformMeta]] = {
     "steam": PlatformMeta("steam", "Steam"),
 }
 
-# 平台的正式名与固定顺序，供 WebUI 的平台开关与筛选下拉使用。
-# 键必须与 main.py 里 parsers 字典的键、以及 DISABLED_PLATFORMS 的取值一致。
-# 这两个名字保留是因为 WebUI 里已经在用，但**值都从 PLATFORMS 派生**，
-# 不要再往这里手写平台名。
+# 平台的正式名，供 WebUI 的平台开关与筛选下拉使用。键必须与 main.py 里
+# parsers 字典的键、以及 DISABLED_PLATFORMS 的取值一致。
+# 这个字典是**原地增删**的，所以已经 import 它的模块都能看到自定义平台。
 PLATFORM_DISPLAY_NAMES: Final[dict[str, str]] = {
     key: meta.display_name for key, meta in PLATFORMS.items()
 }
 
-PLATFORM_ORDER: Final[tuple[str, ...]] = tuple(PLATFORMS)
+# 内置平台键的**快照**。「这是不是内置平台」不能靠「PLATFORMS 里有没有这个键」
+# 来判断 —— 自定义解析器会被注册进 PLATFORMS，那个判断在注册之后就失真了。
+BUILTIN_PLATFORM_KEYS: Final[frozenset[str]] = frozenset(PLATFORMS)
+
+
+def platform_order() -> tuple[str, ...]:
+    """平台键的展示顺序：内置平台在前（顺序固定），自定义平台按注册顺序追加。
+
+    **必须走函数，不能是常量。** 自定义平台是运行时注册的，而
+    ``from .constants import PLATFORM_ORDER`` 拿到的是**导入那一刻的元组快照**
+    —— 之后重新赋值不会同步给已经导入过的模块，症状是「自定义平台能解析，
+    但平台开关和筛选下拉里根本没有它」（2026-09-21 实测踩到）。
+    ``PLATFORMS`` 本身是保序字典，所以直接派生即可。
+    """
+    return tuple(PLATFORMS)
 
 
 def platform_meta(key: "str | PlatformEnum") -> PlatformMeta:
@@ -111,3 +124,39 @@ def platform_meta(key: "str | PlatformEnum") -> PlatformMeta:
     """
     name = key.value if isinstance(key, PlatformEnum) else str(key)
     return PLATFORMS.get(name) or PlatformMeta(name, name)
+
+
+def is_custom_platform(key: "str | PlatformEnum") -> bool:
+    """该平台键是否来自用户自定义解析器（WebUI 用它分组显示）。"""
+    name = key.value if isinstance(key, PlatformEnum) else str(key)
+    return name in PLATFORMS and name not in BUILTIN_PLATFORM_KEYS
+
+
+def register_platform(key: str, display_name: str = "", card_name: str = "") -> None:
+    """注册一个自定义平台，并同步更新派生的名字表与顺序表。
+
+    **PLATFORMS 仍然是平台名的唯一真相** —— 这里只是把「唯一真相」从纯常量
+    扩展成「常量 + 运行时注册」。所以自定义解析器也不需要手写展示名字面量：
+    在文件里声明 ``PLATFORM_NAME``，由 ``custom_parsers`` 转交到这里。
+
+    同名重复注册按「后写覆盖」处理；调用方（``custom_parsers``）负责先
+    ``unregister_platform``，别指望这里帮你清理。
+    """
+    name = str(key).strip()
+    if not name:
+        return
+    PLATFORMS[name] = PlatformMeta(name, display_name or name, card_name or "")
+    PLATFORM_DISPLAY_NAMES[name] = PLATFORMS[name].display_name
+
+
+def unregister_platform(key: str) -> None:
+    """撤掉一个自定义平台。
+
+    **内置平台不会被撤掉** —— 解析器热更新会反复走注册/反注册，万一哪里把内置
+    平台的键传进来，平台列表会静默少一项（而卡片里仍会打印它的名字）。
+    """
+    name = str(key).strip()
+    if not name or name in BUILTIN_PLATFORM_KEYS:
+        return
+    PLATFORMS.pop(name, None)
+    PLATFORM_DISPLAY_NAMES.pop(name, None)

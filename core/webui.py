@@ -29,7 +29,11 @@ from astrbot.api import logger
 
 from .card_renderer import LAYOUT_NAMES, ShareCardRenderer
 from .config import config_meta_payload, get_config, verify_schema_alignment
-from .constants import PLATFORM_DISPLAY_NAMES, PLATFORM_ORDER
+from .constants import (
+    PLATFORM_DISPLAY_NAMES,
+    is_custom_platform,
+    platform_order,
+)
 from .exception import IgnoreException, ParseException
 from .media_utils import clear_cache_dir, cleanup_cache_dir, is_docker_environment
 from .relay import resolve_callback_base
@@ -170,6 +174,8 @@ class WebUIApi:
             ("/config", self.save_config, ("POST",), "保存配置项"),
             ("/config/reset", self.reset_config, ("POST",), "恢复默认配置"),
             ("/platforms", self.toggle_platform, ("POST",), "启用/禁用平台"),
+            ("/custom_parsers", self.custom_parsers, ("GET",), "自定义解析器列表"),
+            ("/custom_parsers/reload", self.reload_custom_parsers, ("POST",), "重新加载自定义解析器"),
             ("/parse", self.parse_url, ("POST",), "手动解析链接"),
             ("/render", self.render_cached, ("POST",), "按指定外观重新渲染卡片"),
             ("/preview/sample", self.sample_preview, ("POST",), "离线示例卡片预览"),
@@ -201,8 +207,11 @@ class WebUIApi:
                 "name": name,
                 "label": PLATFORM_DISPLAY_NAMES.get(name, name),
                 "enabled": name in plugin.parsers,
+                # 前端把自定义解析器单独分组显示（它们能加载失败、能被重新加载，
+                # 内置平台没有这些状态）
+                "custom": is_custom_platform(name),
             }
-            for name in PLATFORM_ORDER
+            for name in platform_order()
         ]
         files, size = await asyncio.to_thread(_dir_stats, plugin.cache_dir)
         history = await asyncio.to_thread(plugin.history.stats)
@@ -274,7 +283,7 @@ class WebUIApi:
         payload["values"] = pconfig.current_values()
         payload["platforms"] = [
             {"name": name, "label": PLATFORM_DISPLAY_NAMES.get(name, name)}
-            for name in PLATFORM_ORDER
+            for name in platform_order()
         ]
         payload["problems"] = self._schema_problems()
         return _json_response(payload)
@@ -351,8 +360,8 @@ class WebUIApi:
         disabled = [item for item in pconfig.DISABLED_PLATFORMS if item != name]
         if not enabled:
             disabled.append(name)
-        # 保持 PLATFORM_ORDER 的顺序，读起来稳定
-        disabled = [item for item in PLATFORM_ORDER if item in disabled]
+        # 保持 platform_order() 的顺序，读起来稳定
+        disabled = [item for item in platform_order() if item in disabled]
 
         changed, errors = pconfig.apply_updates(
             {"DISABLED_PLATFORMS": ",".join(disabled)}
@@ -375,6 +384,68 @@ class WebUIApi:
                 "enabled": name in self.plugin.parsers,
             }
         )
+
+    # ==================== 自定义解析器 ==================== #
+
+    def _custom_parser_payload(self) -> dict[str, Any]:
+        """把加载结果整理成页面需要的结构。
+
+        刻意把 ``errors`` 一并返回：用户写错了文件，唯一的反馈渠道就是这个页面
+        （日志在服务器上，写自定义解析器的人未必看得到）。
+        """
+        from .custom_parsers import API_VERSION, MAX_FILE_BYTES, TEMPLATE_NAME
+
+        plugin = self.plugin
+        loader = getattr(plugin, "_custom_loader", None)
+        result = getattr(plugin, "_custom_result", None)
+        directory = (
+            loader.directory
+            if loader is not None
+            else plugin._data_dir / "custom_parsers"
+        )
+
+        entries = []
+        for entry in (result.entries if result else []):
+            entries.append(
+                {
+                    "file": entry.file,
+                    "key": entry.key,
+                    "label": entry.display_name,
+                    "keywords": list(entry.keywords),
+                    "enabled": not entry.disabled and entry.parser is not None,
+                }
+            )
+        errors = [
+            {"file": item.file, "reason": item.reason}
+            for item in (result.errors if result else [])
+        ]
+        return {
+            "dir": str(directory),
+            "api_version": API_VERSION,
+            "max_file_kb": MAX_FILE_BYTES // 1024,
+            "template": TEMPLATE_NAME,
+            "entries": entries,
+            "errors": errors,
+        }
+
+    async def custom_parsers(self):
+        return _json_response(self._custom_parser_payload())
+
+    async def reload_custom_parsers(self):
+        """重新扫描目录并立刻生效（不需要重载插件）。
+
+        这里**不用 ``to_thread``**：加载过程会写全局平台注册表（``PLATFORMS`` /
+        ``platform_order()``）与解析器表，跨线程改这些只会引入难查的中间态。
+        扫描与 exec 都是毫秒级，且这是用户手动点的低频操作。
+        """
+        try:
+            self.plugin.reload_custom_parsers()
+        except Exception as error:  # noqa: BLE001 —— 兜底，加载器本身不该抛
+            logger.warning("[denia_share] 重新加载自定义解析器失败", exc_info=True)
+            return _error(f"重新加载失败：{type(error).__name__}: {error}")
+        payload = self._custom_parser_payload()
+        payload["platforms"] = sorted(self.plugin.parsers)
+        return _json_response(payload)
 
     # ==================== 手动解析 ==================== #
 
@@ -849,7 +920,7 @@ class WebUIApi:
                 },
                 "platforms": [
                     {"name": name, "label": PLATFORM_DISPLAY_NAMES.get(name, name)}
-                    for name in PLATFORM_ORDER
+                    for name in platform_order()
                 ],
             }
         )

@@ -466,6 +466,25 @@ textarea.input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--
 .row-sub { color: var(--text-3); }
 .row-actions { display: flex; gap: 6px; flex: 0 0 auto; }
 .pager { display: flex; align-items: center; justify-content: center; gap: 12px; padding: 10px 0 2px; color: var(--text-2); font-size: 12px; }
+
+/* ---------------- 自定义解析器（总览页） ---------------- */
+
+.parser-note { margin: 0 0 8px; font-size: 11.5px; line-height: 1.6; color: var(--text-3); word-break: break-all; }
+.parser-note.warn { color: var(--warn); }
+.parser-error {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-top: 8px;
+  padding: 9px 12px;
+  border-radius: var(--radius);
+  border: 1px solid var(--err);
+  background: var(--err-soft);
+  font-size: 11.5px;
+  line-height: 1.55;
+}
+.parser-error strong { font-family: var(--mono); font-size: 11px; color: var(--err); }
+.parser-error span { color: var(--text-2); word-break: break-word; }
 /* ---------------- 表单（配置页） ---------------- */
 
 .field { padding: 10px 0; border-top: 1px dashed var(--border); }
@@ -607,6 +626,7 @@ textarea.input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--
   border-left: 3px solid var(--accent);
 }
 .toast.ok { border-left-color: var(--ok); }
+.toast.warn { border-left-color: var(--warn); }
 .toast.err { border-left-color: var(--err); }
 @keyframes toast-in {
   from { opacity: 0; transform: translateX(16px); }
