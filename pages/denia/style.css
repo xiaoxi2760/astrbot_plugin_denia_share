@@ -467,7 +467,7 @@ textarea.input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--
 .row-actions { display: flex; gap: 6px; flex: 0 0 auto; }
 .pager { display: flex; align-items: center; justify-content: center; gap: 12px; padding: 10px 0 2px; color: var(--text-2); font-size: 12px; }
 
-/* ---------------- 自定义解析器（总览页） ---------------- */
+/* ---------------- 自定义解析器（解析页） ---------------- */
 
 .parser-note { margin: 0 0 8px; font-size: 11.5px; line-height: 1.6; color: var(--text-3); word-break: break-all; }
 .parser-note.warn { color: var(--warn); }
@@ -536,6 +536,75 @@ textarea.input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--
   z-index: 5;
   animation: view-in 0.24s var(--ease);
 }
+
+/* 配置页分级：吸顶工具条（搜索 + 大类导航）、子组标题、折叠箭头、未保存标记 */
+
+/* 工具条吸顶：stage-body 是滚动容器，翻长列表时搜索与大类导航始终在手边。
+   注意别给 .card 直接加 sticky —— 只有配置页这张工具卡需要。 */
+.cfg-toolbar {
+  position: sticky;
+  top: 0;
+  z-index: 6;
+}
+
+.cfg-tabs-row { margin-top: 10px; overflow-x: auto; }
+.cfg-tabs { flex-wrap: nowrap; }
+
+/* 大类标签上的未保存数徽标（非激活态用 warn 色，激活态跟随强调色） */
+.seg button .seg-badge {
+  margin-left: 6px;
+  min-width: 16px;
+  height: 15px;
+  padding: 0 4px;
+  border-radius: 8px;
+  background: var(--warn);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+  vertical-align: 1px;
+}
+.seg button.is-active .seg-badge { background: var(--accent); color: var(--accent-text); }
+
+/* 分组卡头是可点的整行按钮（原先 ＋/－ 文本符号换成 chevron 箭头） */
+.cfg-group-head {
+  width: 100%;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  padding: 0;
+}
+.cfg-group-head h2 { display: flex; align-items: center; gap: 7px; }
+.chev {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  flex: 0 0 7px;
+  border-right: 1.8px solid currentColor;
+  border-bottom: 1.8px solid currentColor;
+  transform: rotate(45deg); /* 展开：朝下 */
+  transition: transform var(--dur) var(--ease);
+}
+.chev.closed { transform: rotate(-45deg); } /* 收起：朝右 */
+
+.cfg-dirty { color: var(--accent); font-size: 11.5px; font-weight: 500; }
+
+/* 组内第三级小标题（子组）：细字 + 间距分段，不加整行横线，
+   横线交给 .field 自己的 dashed border-top，两条线叠一起会花 */
+.cfg-subhead {
+  margin: 12px 0 0;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--text-3);
+  letter-spacing: 0.5px;
+}
+.cfg-subhead:first-child { margin-top: 2px; }
 
 /* ---------------- 布局辅助 ---------------- */
 

@@ -1,10 +1,11 @@
 /* 达妮娅分享 · 插件页面入口
  *
  * 职责：等 bridge 就绪 → 渲染左导航 → 挂载当前视图 → 提供共用的 API 封装。
- * 业务都在 views/ 下，本文件保持「框架层」的轻量。
+ * 业务都在 views/ 下，界面外观偏好在 prefs.js，本文件保持「框架层」的轻量。
  */
 
 import { h, clear, toast } from "./ui.js";
+import { ACCENT_PRESETS, prefs, applyPrefs, loadPrefs } from "./prefs.js";
 import { createOverviewView } from "./views/overview.js";
 import { createParseView } from "./views/parse.js";
 import { createCacheView } from "./views/cache.js";
@@ -21,7 +22,7 @@ const VIEWS = {
   },
   parse: {
     title: "解析",
-    sub: "手动输入链接，立刻看到卡片效果",
+    sub: "手动解析与截图测试，管理自定义解析器",
     factory: createParseView,
   },
   cache: {
@@ -36,7 +37,7 @@ const VIEWS = {
   },
   config: {
     title: "配置",
-    sub: "全部配置项，保存后立即生效",
+    sub: "按「大类 → 分组 → 子组」组织的全部配置项，保存后立即生效",
     factory: createConfigView,
   },
 };
@@ -54,86 +55,8 @@ export const api = {
   },
 };
 
-/* ---------------- 界面外观偏好 ---------------- */
-
-const ACCENT_PRESETS = {
-  "": null, // 跟随默认
-  "#2F6FDD": { a: "#2F6FDD", b: "#7A5CFF", dark: ["#6EA6F5", "#9A7CFF"] },
-  "#FB7299": { a: "#FB7299", b: "#FF9A6C", dark: ["#FB8AB0", "#FF9A6C"] },
-  "#2EC4B6": { a: "#2EC4B6", b: "#5C8AFF", dark: ["#4FD8CB", "#7FA3FF"] },
-  "#F59E0B": { a: "#F59E0B", b: "#EF6351", dark: ["#F7B84B", "#F2806E"] },
-  "#8B5CF6": { a: "#8B5CF6", b: "#EC4899", dark: ["#A78BFA", "#F472B6"] },
-  "#10B981": { a: "#10B981", b: "#3B82F6", dark: ["#34D399", "#60A5FA"] },
-};
-
-const prefs = {
-  accent: "",
-  accent_custom: "",
-  radius: "m",
-  compact: false,
-  animations: true,
-  theme_override: "follow",
-};
-
-function isDark() {
-  return document.documentElement.dataset.theme === "dark";
-}
-
-function hexToRgb(hex) {
-  const v = hex.replace("#", "");
-  return [0, 2, 4].map((i) => parseInt(v.slice(i, i + 2), 16));
-}
-
-function applyPrefs() {
-  const root = document.documentElement;
-  root.dataset.radius = prefs.radius || "m";
-  root.dataset.compact = prefs.compact ? "1" : "0";
-  root.dataset.motion = prefs.animations ? "1" : "0";
-
-  const key = prefs.accent || "";
-  const custom = prefs.accent_custom || "";
-  const src = key === "custom" ? custom : key;
-  const preset = ACCENT_PRESETS[key];
-  let a;
-  let b;
-  if (preset) {
-    [a, b] = isDark() ? preset.dark : [preset.a, preset.b];
-  } else if (src && /^#[0-9a-fA-F]{6}$/.test(src)) {
-    a = src;
-    b = src;
-  }
-  if (a) {
-    const [r, g, bl] = hexToRgb(a);
-    const dark = isDark();
-    root.style.setProperty("--accent", a);
-    root.style.setProperty("--accent-2", b);
-    root.style.setProperty("--accent-soft", `rgba(${r},${g},${bl},${dark ? 0.18 : 0.13})`);
-    root.style.setProperty("--accent-ring", `rgba(${r},${g},${bl},0.4)`);
-    root.style.setProperty("--accent-text", dark ? "#0d1420" : "#ffffff");
-    root.style.setProperty("--bg-grad-a", `rgba(${r},${g},${bl},${dark ? 0.09 : 0.07})`);
-  } else {
-    for (const name of ["--accent", "--accent-2", "--accent-soft", "--accent-ring", "--accent-text", "--bg-grad-a"]) {
-      root.style.removeProperty(name);
-    }
-  }
-}
-
-async function loadPrefs() {
-  try {
-    const payload = await api.get("appearance");
-    const saved = (payload && payload.prefs) || {};
-    for (const key of Object.keys(prefs)) {
-      if (saved[key] !== undefined && saved[key] !== null) prefs[key] = saved[key];
-    }
-  } catch (error) {
-    console.warn("读取外观偏好失败，使用默认值", error);
-  }
-  // 主题覆盖：follow 时不碰 data-theme（跟随 Dashboard）
-  if (prefs.theme_override === "light" || prefs.theme_override === "dark") {
-    document.documentElement.dataset.theme = prefs.theme_override;
-  }
-  applyPrefs();
-}
+/* 界面外观偏好已抽到 ./prefs.js（ACCENT_PRESETS / prefs / applyPrefs / loadPrefs），
+ * 这里只保留视图框架。 */
 
 const state = {
   view: "overview",
@@ -290,7 +213,7 @@ async function boot() {
     });
   }
 
-  await loadPrefs();
+  await loadPrefs(api);
 
   ctx.setConnection(true, "已连接");
   await switchView("overview");

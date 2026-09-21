@@ -35,10 +35,42 @@ CONFIG_GROUPS: tuple[tuple[str, str], ...] = (
     ("维护", "缓存与调试，改动后立即生效"),
 )
 
+# 大类（一级分组）：把 CONFIG_GROUPS 按使用场景再归并，WebUI 配置页按
+# 「大类 → 分组 → （可选）子组 → 配置项」三级展示。仅影响展示层，不参与存储契约
+# （_conf_schema.json 仍按「分组」生成，键与默认值都不变，无需重新生成）。
+CONFIG_SECTIONS: tuple[dict[str, Any], ...] = (
+    {
+        "key": "basic",
+        "label": "基础",
+        "description": "解析行为与发送策略，日常最常改",
+        "groups": ("解析设置",),
+    },
+    {
+        "key": "platform",
+        "label": "平台接入",
+        "description": "各平台的凭据、清晰度与第三方数据源",
+        "groups": ("B站设置", "Steam 设置", "网页截图"),
+    },
+    {
+        "key": "output",
+        "label": "输出与投递",
+        "description": "卡片怎么渲染、视频怎么送到消息平台",
+        "groups": ("卡片外观", "媒体发送"),
+    },
+    {
+        "key": "advanced",
+        "label": "高级与维护",
+        "description": "凭据、网络与缓存调试，一般用不到",
+        "groups": ("高级设置", "维护"),
+    },
+)
+
 # 配置项元数据。字段说明：
 #   key/group/label/type/default/hint 必填；type 取值 string | text | int | bool | select
 #   secret=True 表示前端以密码框展示（仅遮罩显示，配置文件里仍是明文，与原生面板一致）
 #   options/labels 仅 select 使用；min/max/unit 仅 int 使用；placeholder 仅输入框使用
+#   subgroup 可选：组内第三级小标题（配置项多的分组按它再分段，如「卡片外观」
+#   按 基础/内容元素/配色 拆分）；不带 subgroup 的项排在同组最前
 CONFIG_META: tuple[dict[str, Any], ...] = (
     # ---------------- 解析设置 ---------------- #
     {
@@ -122,6 +154,7 @@ CONFIG_META: tuple[dict[str, Any], ...] = (
     {
         "key": "SCREENSHOT_BACKEND",
         "group": "网页截图",
+        "subgroup": "通用",
         "label": "截图后端",
         "type": "select",
         "default": "thum",
@@ -132,6 +165,7 @@ CONFIG_META: tuple[dict[str, Any], ...] = (
     {
         "key": "SCREENSHOT_FALLBACK",
         "group": "网页截图",
+        "subgroup": "通用",
         "label": "匹配不到平台的链接自动截图",
         "type": "bool",
         "default": False,
@@ -140,6 +174,7 @@ CONFIG_META: tuple[dict[str, Any], ...] = (
     {
         "key": "CF_ACCOUNT_ID",
         "group": "网页截图",
+        "subgroup": "Cloudflare 后端",
         "label": "Cloudflare Account ID",
         "type": "string",
         "default": "",
@@ -148,6 +183,7 @@ CONFIG_META: tuple[dict[str, Any], ...] = (
     {
         "key": "CF_API_TOKEN",
         "group": "网页截图",
+        "subgroup": "Cloudflare 后端",
         "label": "Cloudflare API Token",
         "type": "string",
         "default": "",
@@ -158,6 +194,7 @@ CONFIG_META: tuple[dict[str, Any], ...] = (
     {
         "key": "RENDER_ENABLED",
         "group": "卡片外观",
+        "subgroup": "基础",
         "label": "启用卡片渲染",
         "type": "bool",
         "default": True,
@@ -166,6 +203,7 @@ CONFIG_META: tuple[dict[str, Any], ...] = (
     {
         "key": "RENDER_THEME",
         "group": "卡片外观",
+        "subgroup": "基础",
         "label": "卡片主题",
         "type": "select",
         "default": "dark",
@@ -176,6 +214,7 @@ CONFIG_META: tuple[dict[str, Any], ...] = (
     {
         "key": "RENDER_LAYOUT",
         "group": "卡片外观",
+        "subgroup": "基础",
         "label": "卡片布局",
         "type": "select",
         "default": "standard",
@@ -186,6 +225,7 @@ CONFIG_META: tuple[dict[str, Any], ...] = (
     {
         "key": "RENDER_WIDTH",
         "group": "卡片外观",
+        "subgroup": "基础",
         "label": "卡片宽度",
         "type": "int",
         "default": 800,
@@ -197,6 +237,7 @@ CONFIG_META: tuple[dict[str, Any], ...] = (
     {
         "key": "RENDER_COVER_FULL_SIZE",
         "group": "卡片外观",
+        "subgroup": "内容元素",
         "label": "封面按原始尺寸展示",
         "type": "bool",
         "default": False,
@@ -205,6 +246,7 @@ CONFIG_META: tuple[dict[str, Any], ...] = (
     {
         "key": "RENDER_FONT_PATH",
         "group": "卡片外观",
+        "subgroup": "基础",
         "label": "自定义字体文件",
         "type": "string",
         "default": "",
@@ -213,6 +255,7 @@ CONFIG_META: tuple[dict[str, Any], ...] = (
     {
         "key": "RENDER_ACCENT_COLOR",
         "group": "卡片外观",
+        "subgroup": "配色",
         "label": "自定义强调色",
         "type": "string",
         "default": "",
@@ -223,6 +266,7 @@ CONFIG_META: tuple[dict[str, Any], ...] = (
     {
         "key": "RENDER_WATERMARK",
         "group": "卡片外观",
+        "subgroup": "内容元素",
         "label": "卡片水印文字",
         "type": "string",
         "default": "希望解析",
@@ -232,6 +276,7 @@ CONFIG_META: tuple[dict[str, Any], ...] = (
     {
         "key": "RENDER_DESC_MAX_LINES",
         "group": "卡片外观",
+        "subgroup": "内容元素",
         "label": "正文最大行数",
         "type": "int",
         "default": 0,
@@ -243,6 +288,7 @@ CONFIG_META: tuple[dict[str, Any], ...] = (
     {
         "key": "RENDER_SHOW_AVATAR",
         "group": "卡片外观",
+        "subgroup": "内容元素",
         "label": "显示作者头像",
         "type": "bool",
         "default": True,
@@ -251,6 +297,7 @@ CONFIG_META: tuple[dict[str, Any], ...] = (
     {
         "key": "RENDER_SHOW_PLAY_BUTTON",
         "group": "卡片外观",
+        "subgroup": "内容元素",
         "label": "封面播放按钮",
         "type": "bool",
         "default": True,
@@ -259,6 +306,7 @@ CONFIG_META: tuple[dict[str, Any], ...] = (
     {
         "key": "RENDER_GRADIENT_TOP",
         "group": "卡片外观",
+        "subgroup": "配色",
         "label": "背景渐变·顶部色",
         "type": "string",
         "default": "",
@@ -269,6 +317,7 @@ CONFIG_META: tuple[dict[str, Any], ...] = (
     {
         "key": "RENDER_GRADIENT_BOTTOM",
         "group": "卡片外观",
+        "subgroup": "配色",
         "label": "背景渐变·底部色",
         "type": "string",
         "default": "",
@@ -280,6 +329,7 @@ CONFIG_META: tuple[dict[str, Any], ...] = (
     {
         "key": "CACHE_DIR",
         "group": "媒体发送",
+        "subgroup": "方式一 · 本地共享目录",
         "label": "共享缓存目录",
         "type": "string",
         "default": "",
@@ -295,6 +345,7 @@ CONFIG_META: tuple[dict[str, Any], ...] = (
     {
         "key": "MEDIA_RELAY_ENABLED",
         "group": "媒体发送",
+        "subgroup": "方式二 · 中转链接",
         "label": "启用媒体中转",
         "type": "bool",
         "default": False,
@@ -306,6 +357,7 @@ CONFIG_META: tuple[dict[str, Any], ...] = (
     {
         "key": "MEDIA_RELAY_CALLBACK_URL",
         "group": "媒体发送",
+        "subgroup": "方式二 · 中转链接",
         "label": "AstrBot 回调地址",
         "type": "string",
         "default": "",
@@ -318,6 +370,7 @@ CONFIG_META: tuple[dict[str, Any], ...] = (
     {
         "key": "MEDIA_RELAY_TTL",
         "group": "媒体发送",
+        "subgroup": "方式二 · 中转链接",
         "label": "中转链接有效期",
         "type": "int",
         "default": 300,
@@ -330,6 +383,7 @@ CONFIG_META: tuple[dict[str, Any], ...] = (
     {
         "key": "XHS_CK",
         "group": "高级设置",
+        "subgroup": "平台凭据",
         "label": "小红书 Cookie",
         "type": "text",
         "default": "",
@@ -339,6 +393,7 @@ CONFIG_META: tuple[dict[str, Any], ...] = (
     {
         "key": "PIXIV_CK",
         "group": "高级设置",
+        "subgroup": "平台凭据",
         "label": "Pixiv Cookie",
         "type": "text",
         "default": "",
@@ -348,6 +403,7 @@ CONFIG_META: tuple[dict[str, Any], ...] = (
     {
         "key": "GITHUB_TOKEN",
         "group": "高级设置",
+        "subgroup": "平台凭据",
         "label": "GitHub Token",
         "type": "string",
         "default": "",
@@ -357,6 +413,7 @@ CONFIG_META: tuple[dict[str, Any], ...] = (
     {
         "key": "PROXY",
         "group": "高级设置",
+        "subgroup": "网络",
         "label": "全局代理",
         "type": "string",
         "default": "",
@@ -366,6 +423,7 @@ CONFIG_META: tuple[dict[str, Any], ...] = (
     {
         "key": "HTTP_VERIFY_SSL",
         "group": "高级设置",
+        "subgroup": "网络",
         "label": "校验 HTTPS 证书",
         "type": "bool",
         "default": True,
@@ -377,6 +435,7 @@ CONFIG_META: tuple[dict[str, Any], ...] = (
     {
         "key": "TWITTER_MEDIA_PROXY_BASE",
         "group": "高级设置",
+        "subgroup": "网络",
         "label": "Twitter 图片/视频反代根地址",
         "type": "string",
         "default": "",
@@ -387,6 +446,7 @@ CONFIG_META: tuple[dict[str, Any], ...] = (
     {
         "key": "CACHE_TTL_HOURS",
         "group": "维护",
+        "subgroup": "缓存清理",
         "label": "缓存保留时长",
         "type": "int",
         "default": 24,
@@ -398,6 +458,7 @@ CONFIG_META: tuple[dict[str, Any], ...] = (
     {
         "key": "CACHE_CLEANUP_INTERVAL_MINUTES",
         "group": "维护",
+        "subgroup": "缓存清理",
         "label": "缓存清理间隔",
         "type": "int",
         "default": 60,
@@ -409,6 +470,7 @@ CONFIG_META: tuple[dict[str, Any], ...] = (
     {
         "key": "DEBUG_LOG_ENABLED",
         "group": "维护",
+        "subgroup": "日志",
         "label": "输出调试日志",
         "type": "bool",
         "default": True,
@@ -431,8 +493,26 @@ _DEFAULTS: dict[str, Any] = {item["key"]: item["default"] for item in CONFIG_MET
 
 
 def config_meta_payload() -> dict[str, Any]:
-    """返回供 WebUI 渲染的配置元数据（分组 + 全部配置项定义）。"""
+    """返回供 WebUI 渲染的配置元数据（大类 + 分组 + 全部配置项定义）。
+
+    ``groups`` 保持扁平结构不变（向后兼容，旧前端/脚本直接读它）；
+    ``sections`` 是大类视角的导航：配置页按「大类 → 分组 → 子组 → 配置项」
+    渲染，子组来自配置项的可选 ``subgroup`` 字段。
+    """
     return {
+        "sections": [
+            {
+                "key": section["key"],
+                "label": section["label"],
+                "description": section["description"],
+                # 只带真实存在的分组：CONFIG_SECTIONS 写错组名时这里静默收窄，
+                # 由 section_coverage_problems() 在自检里把问题报出来
+                "groups": [
+                    name for name in section["groups"] if name in CONFIG_GROUP_KEYS
+                ],
+            }
+            for section in CONFIG_SECTIONS
+        ],
         "groups": [
             {
                 "name": name,
@@ -443,6 +523,34 @@ def config_meta_payload() -> dict[str, Any]:
         ],
         "items": [dict(item) for item in CONFIG_META],
     }
+
+
+def section_coverage_problems() -> list[str]:
+    """校验 CONFIG_SECTIONS 对 CONFIG_GROUPS 的覆盖，返回问题列表（空 = 正常）。
+
+    每个分组必须恰好归属一个大类；引用不存在的分组、一个分组进两个大类、
+    分组没有归属，都会报出来。不在 import 时断言 —— 配置模块在 stub 环境里
+    也要能 import，覆盖问题由自检（test/webui/selfcheck.py）钉住。
+    """
+    problems: list[str] = []
+    known = {name for name, _ in CONFIG_GROUPS}
+    seen: dict[str, str] = {}
+    for section in CONFIG_SECTIONS:
+        for group in section["groups"]:
+            if group not in known:
+                problems.append(
+                    f"大类「{section['label']}」引用了不存在的分组「{group}」"
+                )
+            elif group in seen:
+                problems.append(
+                    f"分组「{group}」同时属于「{seen[group]}」和「{section['label']}」"
+                )
+            else:
+                seen[group] = section["label"]
+    for name, _ in CONFIG_GROUPS:
+        if name not in seen:
+            problems.append(f"分组「{name}」没有归属任何大类")
+    return problems
 
 
 def coerce_value(item: dict[str, Any], raw: Any) -> tuple[Any, str | None]:

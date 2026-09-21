@@ -45,8 +45,8 @@ export function createOverviewView(ctx) {
     if (showBusy) ctx.setHead("加载中…");
     const [overview, cachePage, customParsers] = await Promise.all([
       ctx.api.get("overview"),
-      ctx.api.get("cache", { limit: 5, offset: 0 }),
-      // 自定义解析器列表拉不到不该让整页失败（老版本后端没有这个接口）
+      ctx.api.get("cache", { limit: 3, offset: 0 }),
+      // 只拿加载失败数做角标提示；列表拉不到（老版本后端）就静默省略
       ctx.api.get("custom_parsers").catch(() => null),
     ]);
     data = overview;
@@ -112,8 +112,7 @@ export function createOverviewView(ctx) {
           h("dd", {
             text: `解析结果 ${data.memory.result_cache} 条 · 卡片 ${data.memory.render_cache} 条`,
           }),
-          h("dt", { text: "缓存目录" }),
-          h("dd", { text: data.cache.dir }),
+          // 「缓存目录」不在这里重复 —— 媒体发送卡里展示的是当前生效值（含回退后的）
           h("dt", { text: "数据目录" }),
           h("dd", { text: data.data_dir }),
         ]),
@@ -123,9 +122,11 @@ export function createOverviewView(ctx) {
     left.appendChild(renderBiliCard());
     left.appendChild(renderMediaCard());
 
+    // 自定义解析器的管理卡（目录 / 重载 / 报错详情）在「解析」页；
+    // 这里只放一张紧凑开关卡，把右栏高度补齐到与左栏齐平
     const right = h("div", {}, [
       renderPlatformCard(),
-      renderCustomParserCard(),
+      renderCustomParserMini(),
       renderRecentCard(),
     ]);
 
@@ -374,122 +375,55 @@ export function createOverviewView(ctx) {
 
   function renderPlatformCard() {
     const grid = h("div", { class: "platform-grid" });
-    // 自定义解析器单独一张卡（它们有「加载失败」「重新加载」这些内置平台没有的状态）
+    // 自定义平台不进这张卡：它们在下面有紧凑开关卡，管理（目录/重载/报错）在解析页
     for (const platform of data.platforms.filter((item) => !item.custom)) {
       grid.appendChild(platformChip(platform));
     }
     return card("平台开关", "点击切换，立即生效", [grid]);
   }
 
-  /* ---------------- 自定义解析器 ---------------- */
+  /* ---------------- 自定义解析器（紧凑开关卡） ---------------- */
 
-  function renderCustomParserCard() {
-    const info = custom || {};
-    const entries = info.entries || [];
-    const errors = info.errors || [];
+  /** 只显示「有没有 + 启停开关」，管理（目录 / 重载 / 报错详情）在「解析」页。 */
+  function renderCustomParserMini() {
+    const customs = (data.platforms || []).filter((item) => item.custom);
+    const errors = (custom && custom.errors) || [];
     const body = [];
 
-    body.push(
-      h("p", {
-        class: "parser-note",
-        text: `目录：${info.dir || "（未知）"} —— 把 .py 文件放进去，点「重新加载」即生效，不用重启插件。`,
-      }),
-    );
-
-    if (entries.length) {
-      body.push(
-        h(
-          "div",
-          { class: "list" },
-          entries.map((entry) => {
-            const platform = (data.platforms || []).find(
-              (item) => item.name === entry.key,
-            );
-            const on = platform ? platform.enabled : entry.enabled;
-            return h("div", { class: "row" }, [
-              h("div", { class: "row-main" }, [
-                h("div", { class: "row-title" }, [entry.label || entry.key]),
-                h("div", {
-                  class: "row-meta",
-                  text: `${entry.file} · 匹配 ${(entry.keywords || []).join(" / ") || "（无）"}`,
-                }),
-              ]),
-              h("div", { class: "row-actions" }, [
-                platform
-                  ? h("button", {
-                      class: "btn tiny",
-                      type: "button",
-                      text: on ? "禁用" : "启用",
-                      onClick: (event) =>
-                        togglePlatform(
-                          { ...platform, enabled: on },
-                          event.currentTarget,
-                        ),
-                    })
-                  : null,
-              ]),
-            ]);
-          }),
-        ),
-      );
+    if (customs.length) {
+      // 与上面平台开关同一款 chip，复用 platformChip / togglePlatform
+      body.push(h("div", { class: "platform-grid" }, customs.map(platformChip)));
     } else {
-      body.push(emptyBox("还没有自定义解析器。"));
-    }
-
-    for (const err of errors) {
       body.push(
-        h("div", { class: "parser-error" }, [
-          h("strong", { text: err.file }),
-          h("span", { text: err.reason }),
-        ]),
+        h("p", {
+          class: "card-note",
+          text: "无 —— 在数据目录 custom_parsers/ 放 .py 文件即可扩展平台",
+        }),
       );
     }
-
-    body.push(
-      h("p", {
-        class: "parser-note",
-        text:
-          `文件里必须声明 PARSER_API_VERSION = ${info.api_version}（当前接口版本）。` +
-          `模板见目录里的 ${info.template}，单个文件上限 ${info.max_file_kb} KB。`,
-      }),
-    );
-    body.push(
-      h("p", {
-        class: "parser-note warn",
-        text: "这些文件会被直接执行（等同插件自身权限），请只放自己写的或看懂的代码。",
-      }),
-    );
-
-    const actions = h("button", {
-      class: "btn tiny",
-      type: "button",
-      text: "重新加载",
-      onClick: (event) => reloadCustomParsers(event.currentTarget),
-    });
+    if (errors.length) {
+      body.push(
+        h("p", {
+          class: "parser-note warn",
+          style: { cursor: "pointer" },
+          title: "去「解析」页查看详情",
+          text: `${errors.length} 个文件加载失败，点这里去「解析」页查看`,
+          onClick: () => ctx.goTo("parse"),
+        }),
+      );
+    }
 
     return card(
       "自定义解析器",
-      errors.length ? `${errors.length} 个文件加载失败` : "",
+      customs.length ? `${customs.length} 个 · 点击切换启停` : null,
       body,
-      actions,
+      h(
+        "button",
+        { class: "btn tiny", type: "button", onClick: () => ctx.goTo("parse") },
+        "去管理",
+      ),
       errors.length ? "err" : "",
     );
-  }
-
-  async function reloadCustomParsers(button) {
-    await withBusy(button, async () => {
-      try {
-        custom = await ctx.api.post("custom_parsers/reload", {});
-        await load(false);
-        toast(
-          `已重新加载：成功 ${(custom.entries || []).length} 个，失败 ${(custom.errors || []).length} 个`,
-          (custom.errors || []).length ? "warn" : "ok",
-        );
-        render();
-      } catch (error) {
-        toast(`重新加载失败：${error.message}`, "err");
-      }
-    });
   }
 
   async function togglePlatform(platform, button) {
@@ -525,7 +459,14 @@ export function createOverviewView(ctx) {
             "div",
             { class: "list" },
             recent.map((record) =>
-              h("div", { class: "row" }, [
+              // 整行可点跳缓存页：原先每行一个「去管理」按钮，五行五个同样的按钮，
+              // 纯粹占高度 —— 卡头的「查看全部」保留，行内按钮删掉
+              h("div", {
+                class: "row",
+                style: { cursor: "pointer" },
+                title: "去缓存页管理",
+                onClick: () => ctx.goTo("cache"),
+              }, [
                 h("div", { class: "row-main" }, [
                   h("div", {
                     class: "row-title",
@@ -537,22 +478,11 @@ export function createOverviewView(ctx) {
                   }),
                 ]),
                 h("div", { class: "row-meta", text: fmtTime(record.created_at) }),
-                h("div", { class: "row-actions" }, [
-                  h(
-                    "button",
-                    {
-                      class: "btn tiny",
-                      type: "button",
-                      onClick: () => ctx.goTo("cache"),
-                    },
-                    "去管理",
-                  ),
-                ]),
               ]),
             ),
           );
 
-    return card("最近解析", "最近 5 条", [body], h(
+    return card("最近解析", "最近 3 条", [body], h(
       "button",
       { class: "btn tiny", type: "button", onClick: () => ctx.goTo("cache") },
       "查看全部",
