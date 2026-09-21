@@ -225,6 +225,17 @@ export function createConfigView(ctx) {
       );
     }
 
+    // secret 判断必须放在 text 之前：BILI_CK / XHS_CK / PIXIV_CK 都是
+    // type="text" + secret=true（长 Cookie 想要多行输入框），原先会先命中下面的
+    // textarea 分支 → 遮罩与「显示/隐藏」按钮对它们完全失效，Cookie 明文显示在页面上。
+    if (item.secret) {
+      return secretInput(
+        value === null || value === undefined ? "" : String(value),
+        (next) => setDraft(item.key, next),
+        item.placeholder || "",
+      );
+    }
+
     if (item.type === "text") {
       return h("textarea", {
         class: "input",
@@ -233,14 +244,6 @@ export function createConfigView(ctx) {
         spellcheck: "false",
         onInput: (event) => setDraft(item.key, event.target.value),
       });
-    }
-
-    if (item.secret) {
-      return secretInput(
-        value === null || value === undefined ? "" : String(value),
-        (next) => setDraft(item.key, next),
-        item.placeholder || "",
-      );
     }
 
     return h("input", {

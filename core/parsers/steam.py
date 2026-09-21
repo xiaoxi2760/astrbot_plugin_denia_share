@@ -27,13 +27,17 @@ from astrbot.api import logger
 from ..base_parser import BaseParser, PlatformEnum, ParseException, handle, COMMON_TIMEOUT
 from ..config import get_config
 from ..data import Platform, platform_of
+from ... import __version__
 
 APPDETAILS_URL = "https://store.steampowered.com/api/appdetails/"
 CHEAPSHARK_URL = "https://www.cheapshark.com/api/1.0"
 ITAD_BASE = "https://api.isthereanydeal.com"
 
-# CheapShark 要求描述性 UA
-CHEAPSHARK_UA = "DeniaShare/0.5.0 (+https://github.com/xiaoxi2760/astrbot_plugin_denia_share)"
+# CheapShark 要求描述性 UA。版本号取自包级 ``__version__``，别再手写。
+CHEAPSHARK_UA = (
+    f"DeniaShare/{__version__} "
+    "(+https://github.com/xiaoxi2760/astrbot_plugin_denia_share)"
+)
 
 _STEAM_UA = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "

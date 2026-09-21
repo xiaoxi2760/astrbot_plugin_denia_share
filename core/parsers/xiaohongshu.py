@@ -58,6 +58,49 @@ class XiaoHongShuParser(BaseParser):
             logger.warning(f"parse_explore failed, error: {e}, fallback to parse_discovery")
             return await self.parse_discovery(f"{xhs_domain}/discovery/item/{query}")
 
+    # originalUrl 参数的域名白名单（含子域）。见 _is_trusted_note_url 的说明。
+    _TRUSTED_HOSTS: ClassVar[tuple[str, ...]] = (
+        "xiaohongshu.com", "xhslink.com", "xhslink.cn",
+    )
+
+    @handle("xiaohongshu.com", r"[?&]originalUrl=(?P<encoded>[^&\s]+)")
+    async def _parse_safe_landing(self, searched: re.Match[str]):
+        """安全落地页：真正的作品 id 藏在 ``originalUrl`` 参数里，而且是 URL-encoded 的。
+
+        这类链接的 path 只有 ``/explore``（没有 id），上面那条
+        ``(explore|discovery/item)/<id>`` **完全匹配不上** → 落到
+        「没有平台规则能匹配」→ 走截图兜底（默认关）→ 用户看不到任何反应。
+
+        恢复出真实 URL 后交给 ``_parse_common`` 的同一条链路（含它的
+        explore → discovery 兜底）。注意这条 pattern 注册在 ``_parse_common`` **之后**：
+        既带 id 又带 originalUrl 的链接应该按 path 里的 id 走，不该被这里改写。
+        """
+        from urllib.parse import unquote
+
+        recovered = unquote(searched.group("encoded"))
+        if not self._is_trusted_note_url(recovered):
+            # 不校验域名的话，一个构造出来的 originalUrl=https://evil.example/
+            # 就能让解析器去请求任意外站 —— 这是 SSRF 的最小版本。
+            raise ParseException("安全落地页里的 originalUrl 不是小红书域名，已拒绝")
+        _, matched = self.search_url(recovered)
+        return await self._parse_common(matched)
+
+    @classmethod
+    def _is_trusted_note_url(cls, url: str) -> bool:
+        """``originalUrl`` 的域名白名单校验（含子域，拒绝非 http(s) 协议）。"""
+        from urllib.parse import urlparse
+
+        try:
+            parsed = urlparse(str(url or ""))
+        except (TypeError, ValueError):
+            return False
+        if parsed.scheme.lower() not in ("http", "https"):
+            return False
+        host = (parsed.hostname or "").lower().rstrip(".")
+        return any(
+            host == domain or host.endswith(f".{domain}") for domain in cls._TRUSTED_HOSTS
+        )
+
     async def parse_explore(self, url: str, xhs_id: str):
         from ..models.xiaohongshu.explore import decoder as explore_decoder
 
@@ -131,6 +174,11 @@ class XiaoHongShuParser(BaseParser):
             result.video = self.create_video(video_url, self._no_watermark(cover_url), duration)
         elif img_urls := note_data.image_urls:
             result.contents.extend(self.create_images([self._no_watermark(u) for u in img_urls]))
+        else:
+            # 既不是视频也没有图片：抛出去让三级兜底继续。返回零媒体的空结果会让
+            # 用户拿到只有标题的卡片且零警告 —— parse_explore 早就有同样的守卫，
+            # 同一个文件里两条路径不一致（这条是补上的）。
+            raise ParseException("图文详情里既没有视频也没有图片")
         return result
 
     @staticmethod

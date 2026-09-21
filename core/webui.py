@@ -231,6 +231,9 @@ class WebUIApi:
                 },
                 "bili": {
                     "configured": bool(plugin._bili_cookie),
+                    # 前端总览页读它显示「已配置（N 字符）」。这个字段原先只在
+                    # bili/status 里给过，这里漏了 → 总览恒显「已配置（0 字符）」。
+                    "cookie_length": len(plugin._bili_cookie or ""),
                     "quality": pconfig.BILI_QUALITY,
                     "login_active": active_login,
                 },
@@ -357,6 +360,12 @@ class WebUIApi:
         runtime: dict[str, Any] = {}
         if changed:
             runtime = await self.plugin.apply_runtime_config()
+        else:
+            # 没变化也要给一份 runtime：前端用 result.runtime.platforms 判断
+            # 「这个平台现在还是不是启用的」，字段缺失时前端会把该平台显示成禁用
+            # （后端明明什么都没改）。这里不调 apply_runtime_config —— 它带副作用
+            # （重建解析器/渲染器），没变化时不该跑。
+            runtime = {"rebuilt": False, "platforms": sorted(self.plugin.parsers)}
         return _json_response(
             {
                 "changed": changed,
@@ -402,9 +411,11 @@ class WebUIApi:
             return _error(f"解析出错：{str(exc)[:160]}", 500)
 
         elapsed_ms = int((time.perf_counter() - started) * 1000)
-        # 与聊天链路的 _process_url 用同一个键，否则同一链接会各缓存一份
+        # 与聊天链路的 _process_url 用同一个键，否则同一链接会各缓存一份；
+        # 也必须走 _remember_result —— 直接写字典会绕过 MAX_RESULT_CACHE_ENTRIES
+        # 上限，只用网页解析的部署里这个缓存会无界增长。
         cache_key = plugin.result_cache_key(url)
-        plugin._result_cache[cache_key] = result
+        plugin._remember_result(cache_key, result)
 
         payload = await self._preview_payload(
             result,
@@ -446,6 +457,15 @@ class WebUIApi:
         record: bool,
     ) -> dict[str, Any]:
         """把 ParseResult 整理成页面需要的预览结构。"""
+        # 与聊天链路的 _deliver 同一个顺序：**先结算媒体、再渲染卡片**。
+        # 少了这一步，WebUI 手动解析的记录里 media_files 与缺料警告会恒为空
+        # （视频/音频任务还没结算 → resolved 是 None；审计从未跑过 → warnings 空）；
+        # 而且卡片渲染会把 warnings 算进产物缓存 key，晚于渲染就等于卡片永远不带缺料信息。
+        try:
+            await result.audit_missing_media()
+        except Exception:
+            logger.warning("[denia_share] WebUI 媒体结算失败", exc_info=True)
+
         card = await self._render_card(result, cache_key, overrides)
 
         record_id = ""
@@ -900,6 +920,12 @@ class WebUIApi:
             return _error("ttl_hours 需要大于 0（0 表示不自动清理）")
 
         removed = await cleanup_cache_dir(self.plugin.cache_dir, ttl_hours=ttl)
+        if removed:
+            # 删掉的文件可能正是内存缓存里记着的本地路径 —— 不清的话，之后命中缓存
+            # 会把**已删除的路径**交给协议端（到发送时才发现文件没了）。
+            # 与 clear_cache(scope=files) 保持一致，别只清一半。
+            self.plugin._result_cache.clear()
+            self.plugin._render_cache.clear()
         files, size = await asyncio.to_thread(_dir_stats, self.plugin.cache_dir)
         return _json_response(
             {

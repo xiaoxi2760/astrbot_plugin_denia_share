@@ -117,6 +117,11 @@ class DynamicModule(Struct):
     module_author: AuthorInfo
     module_dynamic: dict[str, Any] | None = None
     module_stat: dict[str, Any] | None = None
+    # 这是 ``major`` 属性的懒加载缓存，不是远端数据。**msgspec 不把下划线前缀当
+    # 非字段**（``msgspec.structs.fields()`` 里就有它），所以它确实出现在字段表里；
+    # 但远端 JSON 没有这个键、解码时走默认 None，本仓也不 encode 这些模型，
+    # 所以只是语义不够纯，没有功能影响。
+    # **不要改成 ClassVar** —— 那是类级共享，不同动态实例会串缓存（读到别人的 major）。
     _cached_major: DynamicMajor | None = None
 
     @property

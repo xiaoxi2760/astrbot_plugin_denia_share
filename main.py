@@ -1251,6 +1251,10 @@ class DeniaSharePlugin(Star):
         try:
             while _time.time() - start < QR_CODE_EXPIRE_TIME:
                 if not self._bili_http_session or self._bili_http_session.closed:
+                    # 这里 break 会跳过 while 的 else（只有「时间耗尽」才走 else），
+                    # 不显式置状态的话 UI 会一直显示「等待扫码」直到 300 秒回收。
+                    state["state"] = "failed"
+                    state["message"] = "登录会话已关闭，请重新获取二维码"
                     break
                 try:
                     async with self._bili_http_session.get(
@@ -1334,8 +1338,12 @@ class DeniaSharePlugin(Star):
                 key=lambda kv: kv[1].get("started_at") or 0.0,
             )
             for old_id, _ in ordered[: len(ordered) - LOGIN_STATE_MAX]:
-                if old_id in self._bili_login_tasks:
-                    continue  # 还在跑的任务不能丢，UI 要读它的进度
+                # old_id == task_id 是「正在收尾的这条」：调用方在 finally 里已经先把
+                # 本任务从 _bili_login_tasks 里 pop 掉了，所以下面那条豁免对它无效 ——
+                # 一旦它恰好是最旧的一条，最终状态会被自己这次清理删掉，UI 再也读不到
+                # 「登录成功」。所以本任务要单独豁免。
+                if old_id == task_id or old_id in self._bili_login_tasks:
+                    continue  # 本任务与还在跑的任务都不能丢，UI 要读它的进度
                 self._bili_login_states.pop(old_id, None)
 
         async def _delayed_drop() -> None:

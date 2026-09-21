@@ -5,7 +5,6 @@
 """
 
 import os
-import re
 import asyncio
 import hashlib
 import time
@@ -13,11 +12,6 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 from astrbot.api import logger
-
-
-def keep_zh_en_num(text: str) -> str:
-    """保留字符串中的中英文和数字"""
-    return re.sub(r"[^\u4e00-\u9fa5a-zA-Z0-9\-_]", "", text.replace(" ", "_"))
 
 
 def fmt_duration(duration: float) -> str:
@@ -82,7 +76,7 @@ def ensure_cache_marker(cache_dir: Path, *, allow_nonempty: bool = False) -> boo
 
 
 async def cleanup_cache_dir(cache_dir: Path, ttl_hours: int) -> int:
-    """清理缓存目录中超过 TTL 的过期文件。
+    """清理缓存目录中超过 TTL 的过期文件（**递归**，含子目录）。
 
     目录没有缓存哨兵时直接返回 0 —— 说明它不是插件认领的缓存目录，
     宁可不清也不能清错。
@@ -116,7 +110,10 @@ async def cleanup_cache_dir(cache_dir: Path, ttl_hours: int) -> int:
     # clear_cache_dir 一直是豁免的，只有这里漏了。
     marker = cache_dir / CACHE_MARKER_NAME
 
-    for f in cache_dir.iterdir():
+    # **递归遍历**：截图落在 cache_dir/screenshot/ 这类子目录里，只看顶层的话
+    # 它们永远不会过期 —— 缓存页的体积一直涨，而「清理过期文件」清不动它。
+    # clear_cache_dir 一直用的是 rglob，两者语义本来就该一致。
+    for f in cache_dir.rglob("*"):
         if not f.is_file() or f == marker:
             continue
         try:
@@ -260,48 +257,6 @@ async def merge_av(
         raise
     await asyncio.gather(safe_unlink(v_path), safe_unlink(a_path))
     logger.info(f"Merged {output_path.name}, {fmt_size(output_path)}")
-
-
-async def merge_av_h264(
-    *,
-    v_path: Path,
-    a_path: Path,
-    output_path: Path,
-) -> None:
-    """合并视频和音频，并使用 H.264 编码"""
-    logger.info(f"Merging {v_path.name} and {a_path.name} to {output_path.name} with H.264")
-
-    cmd = [
-        "ffmpeg",
-        "-y",
-        "-i",
-        str(v_path),
-        "-i",
-        str(a_path),
-        "-c:v",
-        "libx264",
-        "-preset",
-        "medium",
-        "-crf",
-        "23",
-        "-c:a",
-        "aac",
-        "-b:a",
-        "128k",
-        "-map",
-        "0:v:0",
-        "-map",
-        "1:a:0",
-        str(output_path),
-    ]
-    try:
-        await exec_ffmpeg_cmd(cmd)
-    except BaseException:
-        # 同 merge_av：捕 BaseException，取消时也要清掉残缺输出
-        await safe_unlink(output_path)
-        raise
-    await asyncio.gather(safe_unlink(v_path), safe_unlink(a_path))
-    logger.info(f"Merged {output_path.name} with H.264, {fmt_size(output_path)}")
 
 
 async def encode_video_to_h264(video_path: Path) -> Path:

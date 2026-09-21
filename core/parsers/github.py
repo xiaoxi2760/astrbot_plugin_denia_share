@@ -14,11 +14,17 @@ from astrbot.api import logger
 from ..base_parser import BaseParser, PlatformEnum, ParseException, handle
 from ..config import get_config
 from ..data import Platform, platform_of
+from ... import __version__
 
 API_BASE = "https://api.github.com"
 
-# 描述性 UA：GitHub 要求，且便于官方联系
-USER_AGENT = "DeniaShare/0.5.0 (+https://github.com/xiaoxi2760/astrbot_plugin_denia_share)"
+# 描述性 UA：GitHub 要求，且便于官方联系。
+# 版本号取自包级 ``__version__``，别再手写 —— 原先这里与 steam.py 各手写了一份，
+# 插件已经 0.6.x 而它们还停在 0.5.0。
+USER_AGENT = (
+    f"DeniaShare/{__version__} "
+    "(+https://github.com/xiaoxi2760/astrbot_plugin_denia_share)"
+)
 
 
 def _fmt_count(n: int | None) -> str:

@@ -2113,6 +2113,13 @@ class ShareCardRenderer:
 
         title_font = self._font(_L.F_TITLE, bold=True)
         title_lines = self._fit_lines(d["title"], title_font, inner_w, 2) if d["title"] else []
+        # 正文 / 图集 / 转发：另外三种布局（standard / magazine / feed）都画了，
+        # 只有沉浸布局漏了 —— 后果是 9 张图的小红书图集选沉浸布局只出 1 张
+        # （首图被提升成 hero），正文与转发引用一起静默消失。
+        desc_font = self._font(_L.F_DESC)
+        desc_lines = self._fit_lines(d["text"], desc_font, inner_w, self._desc_line_cap(4)) if d["text"] else []
+        grid_h = self._grid_metrics(len(d["grid"]), inner_w, _L.GRID_GAP)[0]
+        quote_h = self._measure_quote(result.repost, inner_w) if result.repost else 0
         stats_h, stat_rows = self._stat_rows_height(d, inner_w)
         warnings_h = self._warning_block_height(d["warnings"], inner_w)
 
@@ -2122,12 +2129,18 @@ class ShareCardRenderer:
             stack += len(title_lines) * _L.F_TITLE_LINE_H + 18
         if d["author"]:
             stack += 64 + 16
+        if desc_lines:
+            stack += len(desc_lines) * _L.F_DESC_LINE_H + 16
         if stats_h:
             stack += stats_h + 16
         if d["online_text"]:
             stack += 36
         if warnings_h:
             stack += warnings_h + 16
+        if grid_h:
+            stack += grid_h + 20
+        if quote_h:
+            stack += quote_h + 20
         stack += 96  # 页脚
         full_hero_h = self._hero_aspect_height(d["hero"], self.width, round(self.width * 1.02))
         card_h = max(full_hero_h, _L.HERO_BADGE_TOP + _L.HERO_BADGE_H + stack + 48)
@@ -2225,6 +2238,12 @@ class ShareCardRenderer:
                 self._draw_text(draw, (name_x, y + 64 - 24), d["author_desc"], _L.F_SIGN,
                                 (255, 255, 255, 175))
             y += 64 + 16
+        if desc_lines:
+            # 沉浸布局的文字统一是白色系（浮在 scrim 上），正文照此配色
+            for line in desc_lines:
+                self._draw_text(draw, (pad, y), line, _L.F_DESC, (255, 255, 255, 220))
+                y += _L.F_DESC_LINE_H
+            y += 16
         if stat_rows:
             label_font = self._font(_L.F_STAT_LABEL)
             value_font = self._font(_L.F_STAT_VALUE, bold=True)
@@ -2250,6 +2269,12 @@ class ShareCardRenderer:
         if d["warnings"]:
             y = self._draw_warning_block(canvas, draw, theme, d["warnings"], y, inner_w, on_image=True)
             draw = ImageDraw.Draw(canvas)
+        # 图集与转发：与另外三种布局同一处理（图块本身是图片、引用块自带毛玻璃底，
+        # 都不依赖卡片底色，所以不需要 on_image 变体）
+        y = self._draw_grid_block(canvas, draw, theme, d["grid"], y, inner_w, _L.GRID_GAP)
+        draw = ImageDraw.Draw(canvas)
+        y = self._draw_quote_block(canvas, draw, theme, accent_rgb, result, y, inner_w)
+        draw = ImageDraw.Draw(canvas)
         self._footer_block(canvas, draw, theme, accent, accent_rgb, result, y, inner_w,
                            on_image=True)
 

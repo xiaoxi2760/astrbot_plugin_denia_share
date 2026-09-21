@@ -12,7 +12,7 @@ import httpx
 import aiofiles
 from astrbot.api import logger
 
-from .media_utils import merge_av, safe_unlink, generate_file_name, is_module_available
+from .media_utils import merge_av, safe_unlink, generate_file_name
 from .media_verify import HEAD_PROBE_BYTES, classify_media_response
 from .constants import COMMON_HEADER, DOWNLOAD_TIMEOUT
 from .exception import IgnoreException, DownloadException
