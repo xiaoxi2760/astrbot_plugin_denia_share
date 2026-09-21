@@ -32,6 +32,21 @@ _KEY_PATTERNS = "_key_patterns"
 MAX_IMAGES_PER_RESULT = 50
 
 
+def _retrieve_task_exception(task: "asyncio.Task") -> None:
+    """把已结束任务的异常「取回」一次，避免无人 await 时 asyncio 打整段堆栈。
+
+    ``Task`` 的异常只有在被 ``await`` / ``exception()`` 取回后才算已处理；
+    ``PathTask`` 包出来的任务**有可能永远没人 await**（结果在交付前就被丢掉），
+    这时 asyncio 会把异常打成「Task exception was never retrieved」+ traceback。
+
+    取回**不改变语义**：之后 ``await`` 同一个任务照样抛原异常。
+    只对「异常本身是设计好的信号（如按策略跳过）」的任务用，别拿它掩盖真故障 ——
+    真故障的留痕在 ``PathTask.safe_get`` 与缺料审计里。
+    """
+    if not task.cancelled():
+        task.exception()
+
+
 def handle(keyword: str, pattern: str):
     """注册处理器装饰器"""
     def decorator(func):
@@ -227,7 +242,13 @@ class BaseParser:
                     raise IgnoreException(
                         f"视频时长({fmt_duration(duration)})超过限制({fmt_duration(pconfig.VIDEO_DURATION_MAXIMUM)})，跳过下载"
                     )
-                path_task = _skip_video_download()
+                # 包成 Task 并**立刻取回一次异常**：这是「按策略跳过」的**信号**，
+                # 不是故障。结果若在交付前就被丢掉（解析器随后抛了别的异常、
+                # 三级兜底换了路径），就没有人 await 它，asyncio 会把这个设计好的
+                # 信号打成「Task exception was never retrieved」+ 整段堆栈
+                # （自检里已现过一次）。取回不影响语义：后面 await 它照样抛。
+                path_task = asyncio.create_task(_skip_video_download())
+                path_task.add_done_callback(_retrieve_task_exception)
                 video_content = VideoContent(PathTask(path_task), duration=duration, is_gif=is_gif)
                 if cover_url:
                     video_content.cover = PathTask(
@@ -250,9 +271,30 @@ class BaseParser:
             cover_task = self.downloader.download_img(cover_url, ext_headers=self.headers)
         else:
             async def extract_cover():
+                """从视频里抽第一帧当封面；失败返回 ``None``，**不向上抛**。
+
+                这个协程有可能**没有人 await**（视频被策略跳过、结果在交付前就
+                被丢弃、解析器随后抛了别的异常），异常若裸着出去就会以
+                「Task exception was never retrieved」+ 一整段 ffmpeg stderr 的
+                形态落进日志（自检里已经现过一次）。这里收口成 ``None``：
+                与「封面没落盘」的既有语义一致（缺料审计照常记一笔「封面」），
+                只是把不可读的噪音换成一条能定位的 warning。
+                """
+                from astrbot.api import logger
                 from .media_utils import extract_video_first_frame
-                video_path = await path_task.get()
-                return await extract_video_first_frame(video_path)
+
+                try:
+                    video_path = await path_task.get()
+                except Exception as exc:  # noqa: BLE001 —— 视频本身就不可用
+                    logger.warning(
+                        f"抽取视频封面失败（视频不可用）: {type(exc).__name__}: {exc}"
+                    )
+                    return None
+                try:
+                    return await extract_video_first_frame(video_path)
+                except Exception as exc:  # noqa: BLE001 —— ffmpeg 失败/未安装
+                    logger.warning(f"抽取视频封面失败: {type(exc).__name__}: {exc}")
+                    return None
             cover_task = extract_cover()
 
         video_content.cover = PathTask(cover_task)

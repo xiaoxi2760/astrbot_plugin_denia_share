@@ -44,7 +44,7 @@ from .core.data import (
 from .core.history import HistoryStore, ParseRecord
 from .core.relay import register_file
 from .core.constants import (
-    PLATFORM_DISPLAY_NAMES, PlatformEnum, platform_meta,
+    PLATFORM_DISPLAY_NAMES, PlatformEnum, is_custom_platform, platform_meta,
 )
 # 版本号只认 __init__.py 那一处：register 装饰器直接读它，
 # 不用再在装饰器里手写一遍版本字符串（以前改版本要同时改三处，漏一处就版本不一致）
@@ -267,6 +267,9 @@ class DeniaSharePlugin(Star):
         # 用户自定义解析器的加载器。延迟到 _init_parsers 里建（那时 downloader 已就绪）
         self._custom_loader: CustomParserLoader | None = None
         self._custom_result: CustomParserLoadResult | None = None
+        # 上一轮装进 self.parsers 的自定义平台键。重扫时靠它把**已经不存在**的
+        # 平台（文件被删/改名，或新版本加载失败）摘掉 —— 见 _init_custom_parsers。
+        self._custom_parser_keys: set[str] = set()
         self._init_parsers()
         self._result_cache: dict[str, ParseResult] = {}
         self._render_cache: dict[str, Path] = {}
@@ -388,6 +391,19 @@ class DeniaSharePlugin(Star):
             self.downloader, skip_keys=set(self.disabled_platforms)
         )
         self._custom_result = result
+        # 先把上一轮装进去的自定义平台摘掉，再装这一轮的。
+        #
+        # **不能只 update**：dict.update 只覆盖同名键，删掉（或改了平台键）的文件
+        # 会把自己的旧实例留在 self.parsers 里 —— 平台列表里已经没有它了
+        # （加载器的 _purge 反注册了展示名），但实例还在：
+        #   · WebUI 手动解析照旧用**旧代码**解析（_match_parser 找得到它）
+        #   · toggle_platform 会对它回「未知平台」（展示名已不在 PLATFORM_DISPLAY_NAMES）
+        # 也就是「看起来删了、其实还在跑」，本仓最贵的那类 bug。
+        # 用自己记的键来摘，而不是 is_custom_platform(key)：后者查的是 PLATFORMS，
+        # 而 _purge 已经把旧键从那里删掉了，问它只会得到「这不是自定义平台」。
+        for stale_key in self._custom_parser_keys:
+            self.parsers.pop(stale_key, None)
+        self._custom_parser_keys = set(result.parsers)
         self.parsers.update(result.parsers)
 
     def reload_custom_parsers(self) -> CustomParserLoadResult:
@@ -509,6 +525,34 @@ class DeniaSharePlugin(Star):
     async def steam_handler(self, event: AstrMessageEvent, matched: re.Match | None = None):
         async for r in self._dispatch(event, "steam"):
             yield r
+
+    @filter.regex(URL_PATTERN)
+    async def custom_parser_handler(self, event: AstrMessageEvent, matched: re.Match | None = None):
+        """自定义解析器的聊天入口。
+
+        内置平台各有自己的 ``@filter.regex(<域名>)`` 处理器，而自定义平台是
+        **运行时**才知道的，没法为它生成静态过滤器 —— 所以这里用一个通用 URL
+        处理器兜住它们。少了这一条，自定义解析器只能在网页上手动解析：
+        群里发链接**零反应**（加载成功、平台开关里能看到它、自检也过，但聊天
+        链路根本没有入口）。这就是本仓最贵的那类 bug ——「看起来生效、实际没生效」。
+
+        两条让路规则：
+        - 消息带 JSON 组件（QQ 小程序卡片）时直接返回：``json_card_handler``
+          已经会遍历全部解析器（含自定义），不返回就会把同一链接解析两遍。
+        - URL 归一个**已启用**的内置平台时跳过：那是内置处理器的活，重复处理
+          会发两条。内置平台被禁用时不算命中，此时自定义解析器可以接过去。
+        """
+        if self._has_json_component(event):
+            return
+        for link in dict.fromkeys(URL_PATTERN.findall(event.message_str or "")):
+            if self._match_builtin_parser(link) is not None:
+                continue
+            parser = self._match_custom_parser(link)
+            if parser is None:
+                continue
+            async for r in self._process_url(_EventUrlWrapper(event, link), parser):
+                yield r
+            return
 
     # ==================== 网页截图 ====================
 
@@ -852,6 +896,35 @@ class DeniaSharePlugin(Star):
             try:
                 parser.search_url(url)
                 return name
+            except Exception:
+                continue
+        return None
+
+    def _match_builtin_parser(self, url: str) -> str | None:
+        """该 URL 是否归一个**当前启用**的内置平台；是则返回平台键。
+
+        只在内置平台启用时才算命中：内置平台被禁用后它的处理器会直接 return
+        （``_dispatch`` 里 ``self.parsers.get(name)`` 拿不到），这时应当让自定义
+        解析器接过去 —— README 承诺过自定义解析器可以「改掉某个内置平台的行为」。
+        """
+        for name, parser in self.parsers.items():
+            if is_custom_platform(name):
+                continue
+            try:
+                parser.search_url(url)
+                return name
+            except Exception:
+                continue
+        return None
+
+    def _match_custom_parser(self, url: str):
+        """找出能处理该 URL 的自定义解析器实例；没有则返回 None。"""
+        for name, parser in self.parsers.items():
+            if not is_custom_platform(name):
+                continue
+            try:
+                parser.search_url(url)
+                return parser
             except Exception:
                 continue
         return None
