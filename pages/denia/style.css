@@ -174,7 +174,19 @@ body {
   font-size: 16px;
   font-weight: 600;
   box-shadow: 0 4px 14px -4px var(--accent-ring);
+  overflow: hidden;
 }
+
+/* 拿到 logo 后：把 img 铺满那个方块，文字兜底让位。
+   logo 是方形图，用 cover 裁掉边角不影响识别，也不会有留白。 */
+.rail-logo img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.rail-logo.has-logo .rail-logo-fallback { display: none; }
 
 .rail-brand-text { display: flex; flex-direction: column; min-width: 0; line-height: 1.3; }
 .rail-brand-text strong { font-size: 14px; }

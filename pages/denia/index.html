@@ -11,7 +11,9 @@
     <div class="app">
       <aside class="rail">
         <div class="rail-brand">
-          <span class="rail-logo">达</span>
+          <!-- logo 由 app.js 从 /logo 接口取回后插进来（图在插件根目录 logo.png，
+               缩到 128px 传过来）。取不到时留下面的文字兜底，不要写死图片路径。 -->
+          <span class="rail-logo" id="rail-logo"><span class="rail-logo-fallback">希</span></span>
           <span class="rail-brand-text">
             <strong>希望解析器</strong>
             <em id="brand-version">—</em>
