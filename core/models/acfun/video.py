@@ -4,6 +4,13 @@
 
 from msgspec import Struct
 from msgspec.json import Decoder
+from ...exception import ParseException
+
+
+# 清晰度偏好顺序。**它是「偏好」而不是「白名单」**：取流时必须外层遍历它、
+# 内层找匹配，才能保证 1080p 优先；按远端返回顺序遍历（原实现）会让偏好形同虚设 ——
+# 实测远端给 [360p, 1080p] 时返回 360p，倒过来才返回 1080p。
+_QUALITY_PREFERENCE = ("1080p", "720p", "480p", "360p")
 
 
 class User(Struct):
@@ -35,6 +42,14 @@ class CurrentVideoInfo(Struct):
 
     @property
     def representations(self) -> list[Representation]:
+        """可用的播放流列表；没有 adaptationSet 时返回空列表。
+
+        裸 ``adaptationSet[0]`` 会在空列表时抛 ``IndexError`` —— 这个属性被
+        ``m3u8_url`` 读到，而 ``m3u8_url`` 的调用点在解析器的 try 之外，
+        ``IndexError`` 不是 ``ParseException`` 的子类，内部兜底接不住。
+        """
+        if not self.ksPlayJson.adaptationSet:
+            return []
         return self.ksPlayJson.adaptationSet[0].representation
 
 
@@ -68,12 +83,21 @@ class VideoInfo(Struct, kw_only=True):
 
     @property
     def m3u8_url(self) -> str:
+        """按清晰度偏好挑一条流。
+
+        外层遍历 ``_QUALITY_PREFERENCE``、内层找匹配 —— 原实现是「按远端顺序遍历、
+        命中白名单里任意一档就返回」，所以偏好顺序形同虚设（实测见常量处的注释）。
+        偏好档位都没有时退回远端给的第一条；**一条流都没有才抛 ParseException**，
+        让三级兜底继续走，而不是裸下标 IndexError。
+        """
         representations = self.currentVideoInfo.representations
-        quality_types = ("1080p", "720p", "480p", "360p")
-        for r in representations:
-            if r.qualityType in quality_types:
-                return r.url
-        return representations[0].url
+        for quality in _QUALITY_PREFERENCE:
+            for item in representations:
+                if item.qualityType == quality:
+                    return item.url
+        if representations:
+            return representations[0].url
+        raise ParseException("AcFun 视频没有可用的播放流")
 
 
 decoder = Decoder(VideoInfo)

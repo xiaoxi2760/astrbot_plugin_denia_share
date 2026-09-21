@@ -274,7 +274,10 @@ export function createParseView(ctx) {
         cache_key: last.cache_key,
         preview: previewOverrides(),
       });
-      last = { ...last, ...payload };
+      // render 接口是以 record=False 调的，返回的 record_id 是空串 —— 不能让它
+      // 覆盖解析时保存的记录 id，否则「保存卡片 / 下载」两个按钮会永久变灰
+      // （它们靠 record_id 判断可用性）。
+      last = { ...last, ...payload, record_id: last.record_id || payload.record_id };
       render();
       toast("已按预览外观重新渲染", "ok");
     } catch (error) {

@@ -46,11 +46,6 @@ class VideoContent(MediaContent):
     # （原有一个 gif_path 字段用于存放 ffmpeg 转出的 GIF，全仓无读取点，已删除）
     is_gif: bool = False
 
-    @property
-    def display_duration(self) -> str | None:
-        from .media_utils import fmt_duration
-        return f"时长: {fmt_duration(self.duration)}" if self.duration else None
-
     def __repr__(self) -> str:
         repr = f"VideoContent({self.path_task}"
         if self.cover is not None:

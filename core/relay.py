@@ -24,9 +24,7 @@ AstrBot 把插件发出去的媒体交给协议端时，各类消息段处理方
 
 from __future__ import annotations
 
-import asyncio
 import os
-from typing import Iterable
 
 from astrbot.api import logger
 
@@ -104,16 +102,3 @@ async def register_file(
 
     logger.debug(f"[denia_share] 已注册媒体中转: {path} -> /api/file/{token}")
     return f"{base}/api/file/{token}"
-
-
-async def register_files(
-    file_paths: Iterable[str | os.PathLike],
-    callback_base: str,
-    ttl_seconds: int,
-) -> list[str | None]:
-    """批量并发注册，逐项失败不影响其它项（失败的返回 None）。"""
-    return list(
-        await asyncio.gather(
-            *(register_file(path, callback_base, ttl_seconds) for path in file_paths)
-        )
-    )

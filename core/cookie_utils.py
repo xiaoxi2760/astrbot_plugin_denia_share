@@ -1,39 +1,6 @@
 """Cookie 工具函数"""
 
-from http import cookiejar
 from pathlib import Path
-
-
-def save_cookies_with_netscape(cookies_str: str, file_path: Path, domain: str):
-    """以 netscape 格式保存 cookies"""
-    cj = cookiejar.MozillaCookieJar(file_path)
-    for cookie in cookies_str.split(";"):
-        cookie = cookie.strip()
-        if not cookie or "=" not in cookie:
-            continue
-        name, value = cookie.split("=", 1)
-        cj.set_cookie(
-            cookiejar.Cookie(
-                version=0,
-                name=name,
-                value=value,
-                port=None,
-                port_specified=False,
-                domain="." + domain,
-                domain_specified=True,
-                domain_initial_dot=False,
-                path="/",
-                path_specified=True,
-                secure=True,
-                expires=0,
-                discard=True,
-                comment=None,
-                comment_url=None,
-                rest={"HttpOnly": ""},
-                rfc2109=False,
-            )
-        )
-    cj.save(ignore_discard=True, ignore_expires=True)
 
 
 def ck2dict(cookies_str: str) -> dict[str, str]:
