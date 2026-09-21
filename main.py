@@ -471,77 +471,89 @@ class DeniaSharePlugin(Star):
         async for r in self._process_url(event, parser):
             yield r
 
+    # 内置平台的链接处理器。每条 handler 的 docstring 会**原样显示在插件详情页的
+    # 「指令」列表里**（AstrBot 取 handler.__doc__ 作为描述），所以一句话说清解析什么。
     @filter.regex(BILIBILI_PATTERN)
     async def bilibili_handler(self, event: AstrMessageEvent, matched: re.Match | None = None):
+        """B站链接解析（视频 / 动态 / 直播 / 专栏 / 收藏夹）"""
         async for r in self._dispatch(event, "bilibili"):
             yield r
 
     @filter.regex(DOUYIN_PATTERN)
     async def douyin_handler(self, event: AstrMessageEvent, matched: re.Match | None = None):
+        """抖音链接解析（视频 / 图集）"""
         async for r in self._dispatch(event, "douyin"):
             yield r
 
     @filter.regex(KUAISHOU_PATTERN)
     async def kuaishou_handler(self, event: AstrMessageEvent, matched: re.Match | None = None):
+        """快手链接解析（视频 / 图集）"""
         async for r in self._dispatch(event, "kuaishou"):
             yield r
 
     @filter.regex(WEIBO_PATTERN)
     async def weibo_handler(self, event: AstrMessageEvent, matched: re.Match | None = None):
+        """微博链接解析（正文 / 视频 / 长文）"""
         async for r in self._dispatch(event, "weibo"):
             yield r
 
     @filter.regex(XHS_PATTERN)
     async def xiaohongshu_handler(self, event: AstrMessageEvent, matched: re.Match | None = None):
+        """小红书链接解析（图文 / 视频，图片改写为无水印原图）"""
         async for r in self._dispatch(event, "xiaohongshu"):
             yield r
 
     @filter.regex(TWITTER_PATTERN)
     async def twitter_handler(self, event: AstrMessageEvent, matched: re.Match | None = None):
+        """Twitter / X 链接解析（图片 / 视频）"""
         async for r in self._dispatch(event, "twitter"):
             yield r
 
     @filter.regex(NGA_PATTERN)
     async def nga_handler(self, event: AstrMessageEvent, matched: re.Match | None = None):
+        """NGA 帖子解析"""
         async for r in self._dispatch(event, "nga"):
             yield r
 
     @filter.regex(ACFUN_PATTERN)
     async def acfun_handler(self, event: AstrMessageEvent, matched: re.Match | None = None):
+        """AcFun 视频解析"""
         async for r in self._dispatch(event, "acfun"):
             yield r
 
     @filter.regex(GITHUB_PATTERN)
     async def github_handler(self, event: AstrMessageEvent, matched: re.Match | None = None):
+        """GitHub 仓库卡片（星标 / 分支 / issue / 主语言 / 最近提交）"""
         async for r in self._dispatch(event, "github"):
             yield r
 
     @filter.regex(PIXIV_PATTERN)
     async def pixiv_handler(self, event: AstrMessageEvent, matched: re.Match | None = None):
+        """Pixiv 作品解析（非全年龄内容一律过滤）"""
         async for r in self._dispatch(event, "pixiv"):
             yield r
 
     @filter.regex(STEAM_PATTERN)
     async def steam_handler(self, event: AstrMessageEvent, matched: re.Match | None = None):
+        """Steam 商店页卡片（价格 / 折扣 / 类型，可含历史最低价）"""
         async for r in self._dispatch(event, "steam"):
             yield r
 
+    # 自定义解析器的聊天入口。内置平台各有自己的 ``@filter.regex(<域名>)`` 处理器，
+    # 而自定义平台是**运行时**才知道的，没法为它生成静态过滤器 —— 所以用这个通用 URL
+    # 处理器兜住它们。少了这一条，自定义解析器只能在网页上手动解析：群里发链接**零反应**
+    # （加载成功、平台开关里能看到它、自检也过，但聊天链路根本没有入口）。
+    #
+    # 两条让路规则：
+    # - 消息带 JSON 组件（QQ 小程序卡片）时直接返回：``json_card_handler`` 已经会遍历
+    #   全部解析器（含自定义），不返回就会把同一链接解析两遍。
+    # - URL 归一个**已启用**的内置平台时跳过：那是内置处理器的活，重复处理会发两条。
+    #   内置平台被禁用时不算命中，此时自定义解析器可以接过去。
+    #
+    # 上面这段原本是 handler 的 docstring，会整段显示在插件详情页里，太长，改成注释。
     @filter.regex(URL_PATTERN)
     async def custom_parser_handler(self, event: AstrMessageEvent, matched: re.Match | None = None):
-        """自定义解析器的聊天入口。
-
-        内置平台各有自己的 ``@filter.regex(<域名>)`` 处理器，而自定义平台是
-        **运行时**才知道的，没法为它生成静态过滤器 —— 所以这里用一个通用 URL
-        处理器兜住它们。少了这一条，自定义解析器只能在网页上手动解析：
-        群里发链接**零反应**（加载成功、平台开关里能看到它、自检也过，但聊天
-        链路根本没有入口）。这就是本仓最贵的那类 bug ——「看起来生效、实际没生效」。
-
-        两条让路规则：
-        - 消息带 JSON 组件（QQ 小程序卡片）时直接返回：``json_card_handler``
-          已经会遍历全部解析器（含自定义），不返回就会把同一链接解析两遍。
-        - URL 归一个**已启用**的内置平台时跳过：那是内置处理器的活，重复处理
-          会发两条。内置平台被禁用时不算命中，此时自定义解析器可以接过去。
-        """
+        """自定义解析器的聊天入口（通用 URL 匹配）"""
         if self._has_json_component(event):
             return
         for link in dict.fromkeys(URL_PATTERN.findall(event.message_str or "")):
@@ -618,6 +630,7 @@ class DeniaSharePlugin(Star):
 
     @filter.regex(r".*")
     async def json_card_handler(self, event: AstrMessageEvent, matched: re.Match | None = None):
+        """QQ 小程序分享卡片（Json 消息段）里的链接解析"""
         if not self._has_json_component(event):
             return
         links = self._extract_links_from_event(event)

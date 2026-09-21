@@ -132,6 +132,29 @@ astrbot_plugin_denia_share/
 配置时会**剔除 schema 之外的键**，两边一旦不一致，用户保存的值会在下次重载时静默丢失 ——
 插件启动时会自检并在不一致时打警告。
 
+## 插件详情页显示什么（改文案前先看这里）
+
+AstrBot 插件管理里的详情页直接吃这几个来源，改错一处用户一眼就看到：
+
+| 页面位置 | 来源 | 约束 |
+| --- | --- | --- |
+| 插件名 | `metadata.yaml` 的 `display_name`（i18n 可覆盖） | 中文名的四处清单见 `MAINTENANCE.md`「品牌字串都在哪」 |
+| 插件名下面的说明 | `metadata.yaml` 的 `desc`（i18n `metadata.desc` 可覆盖） | **20 行以内、不套 `##` 标题** —— 它是「插件名下面那段说明」，不是文档 |
+| 卡片短描述 | `short_desc` | 一句话，列清支持的平台 |
+| 信息栏 | `version` / `author` / `astrbot_version` / `repo` / `social_link` / `support_platforms` | `support_platforms` 目前填 `aiocqhttp`：合并转发走 OneBot，其他适配器未实测 |
+| 页面卡片 | `.astrbot-plugin/i18n/*.json` 的 `pages.<目录名>.title` / `description` | 两个语言包都要有 |
+| 指令列表 | **每个 handler 的 docstring** | AstrBot 的 `get_handler_or_create` 取 `handler.__doc__` 当描述，没有就显示「无描述」（`desc=` 可覆盖）。所以每个 `@filter.*` 处理器都要有一句话 docstring，**长说明写在 `#` 注释里** |
+
+自检的 `check_plugin_detail_texts()` 验四件事：`desc` ≤ 20 行、`desc` 里没有标题、
+`support_platforms` 非空、每个 `@filter.*` 处理器都有 docstring 且首行 ≤ 80 字
+（这两处都真出过问题：`desc` 一度写到 70 行把页面撑满；12 条 handler 没有 docstring，
+详情页上是一片「无描述」）。
+
+`desc` 这类「插件名下面」的文案要短，长内容留给 `README.md`。另外 `en-US.json` 缺
+`metadata.desc` 时英文界面会落回中文，所以两个语言包都要写。
+
+已知缺口：配置项文案（i18n 的 `config.*`）目前只有中文，英文界面下配置页仍是中文。
+
 ## 网页界面的实现机制
 
 用的是 AstrBot 官方的 **Plugin Pages**：页面放在插件目录 `pages/` 下，由 Dashboard 以受限

@@ -2,80 +2,28 @@ name: astrbot_plugin_denia_share
 display_name: "希望解析器"
 short_desc: 链接分享自动解析，支持 B站|抖音|快手|微博|小红书|Twitter|AcFun|NGA|GitHub|Pixiv|Steam
 desc: |
-  # 希望解析器
+  自动解析各平台分享链接，渲染为分享卡片发送，并自带 Dashboard 管理页面。
 
-  自动解析各平台分享链接，渲染为分享卡片发送。
+  支持 **B站 / 抖音 / 快手 / 微博 / 小红书 / Twitter(X) / AcFun / NGA / GitHub / Pixiv / Steam**
+  十一个平台（另有网页截图 `/shot` 与 Pixiv 搜索 `/pixiv`），也能用自定义解析器扩展新平台。
 
-  支持：**B站**（视频/动态/直播/专栏/收藏夹）、**抖音**、**快手**、**微博**（含长文）、
-  **小红书**、**Twitter/X**、**AcFun**、**NGA**、**GitHub**（仓库）、**Pixiv**（作品）、
-  **Steam**（商店页，含当前价与折扣；配置 ITAD key 后可显示历史最低价）。
+  - 群里直接发链接即可解析，不需要命令
+  - 卡片 4 种布局 × 深浅双主题，强调色 / 渐变 / 水印可调
+  - 管理页面：总览、手动解析、缓存管理、界面与卡片外观、全部配置项
+  - Docker 分容器部署下视频发不出去时，可选共享缓存目录或媒体中转
 
-  另有网页截图（`/shot`，thum.io 与 Cloudflare 双后端）与 Pixiv 关键词搜索（`/pixiv`）。
+  详细说明见仓库 [README](https://github.com/xiaoxi2760/astrbot_plugin_denia_share#readme)。
 
-  B站在 DASH 达不到目标清晰度时回退 html5 单文件 MP4（匿名下可拿 720P，纯 DASH 只有 480P）；
-  小红书图片与封面统一改写为无水印原图。
-
-  ## 命令
-
-  - `/shot <网址>` 网页截图
-  - `/pixiv <关键词>` Pixiv 搜索（结果强制过滤非全年龄内容）
-  - `/bili_login` 扫码登录 B站（管理员）
-  - `/bili_check` 检查 B站 Cookie 是否有效
-  - `/denia_status` 查看插件运行状态（管理员）
-  - `/denia_clear` 清空解析缓存（管理员）
-
-  ## 网页界面
-
-  插件带一个 Dashboard 页面（侧边栏「插件 WebUI → 希望解析器」，或从插件详情页打开），
-  分五个标签：
-
-  - **总览**：启用平台、解析记录、缓存占用、B站扫码登录、平台一键开关
-  - **解析**：手动粘贴链接立刻预览卡片（可选主题/布局），另含网页截图小工具
-  - **缓存**：解析记录的搜索、筛选、分页、卡片预览与删除，以及缓存文件的清理
-  - **外观**：
-    - *界面自定义*：主题跟随/覆盖、强调色（6 组预设 + 自定义拾色器）、圆角、紧凑模式、
-      动效开关，只影响网页本身，存 `plugin_data/.../webui_appearance.json`
-    - *卡片设计器*：主题、布局、宽度、强调色、背景渐变、水印文字、正文行数、
-      头像开关、封面播放按钮，右侧实时预览（改参数约 0.45 秒后重渲染，不联网、
-      不写解析记录），保存后写进卡片配置，影响真正发出的卡片
-  - **配置**：全部 38 项配置都在这里维护（含原生面板未暴露的卡片宽度、缓存清理间隔等）
-
-  界面偏好与卡片外观刻意分成两套：前者只改网页观感，后者改的是发出去的卡片。
-  配置保存后即时生效，不需要重载插件。
-
-  ## 说明
-
-  **Docker 分容器部署**（AstrBot 与协议端不在同一容器）时，图片和语音能正常发送，
-  但视频会因为协议端读不到插件容器内的文件路径而发不出去。插件提供两种解法，
-  在「媒体发送」配置组里二选一：
-
-  1. **共享缓存目录**：填一个所有容器都挂载了同一宿主目录的容器内路径
-  2. **媒体中转**：把视频注册成 AstrBot 的临时 HTTP 链接再发送，无需共享挂载
-
-  总览页会在两条路都没铺时给出提示。
-
-  本插件**不提供** LLM 文本翻译与「视频仅发送封面」能力。
-
-  Pixiv 模块对非全年龄内容（`xRestrict != 0`）做硬性过滤，不提供开关，
-  配置 Cookie 不会放宽该限制。
-
-  建议填写 `GITHUB_TOKEN`：免 token 时 GitHub API 限额 60 次/小时且按出口 IP 计算，
-  共享 IP 下极易被限流。
-
-  Steam 的历史最低价需要 `ITAD_API_KEY`（免费申请 https://isthereanydeal.com/apps）：
-  Steam 官方接口不提供历史价格，SteamDB 已被 Cloudflare 拦死，
-  CheapShark 的史低字段实测恒为空。未填 key 时只是不显示史低，其余功能照常。
-
-  ## 致谢
-
-  解析框架、分享卡片渲染与部分平台解析基于 astrbot_plugin_rika_share（MIT）；
-  抖音 a_bogus 签名移植自 Johnserf-Seed/f2（Apache-2.0）。
-  以上项目的原始版权声明均保留在对应源文件内。
-version: 0.6.20
+  MIT 许可；解析框架与卡片渲染等部分基于 astrbot_plugin_rika_share（MIT）与
+  Johnserf-Seed/f2（Apache-2.0），来源声明保留在对应源文件内。
+version: 0.6.21
 astrbot_version: ">=4.25.3"
 author: xiaoxi2760
 repo: https://github.com/xiaoxi2760/astrbot_plugin_denia_share
+support_platforms:
+  - aiocqhttp
 social_link: https://github.com/xiaoxi2760
 tags:
   - 链接解析
   - 分享卡片
+
