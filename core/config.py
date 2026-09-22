@@ -70,6 +70,10 @@ CONFIG_SECTIONS: tuple[dict[str, Any], ...] = (
 #   key/group/label/type/default/hint 必填；type 取值 string | text | int | bool | select
 #   secret=True 表示前端以密码框展示（仅遮罩显示，配置文件里仍是明文，与原生面板一致）
 #   options/labels 仅 select 使用；min/max/unit 仅 int 使用；placeholder 仅输入框使用
+#   list=True 表示「逗号分隔字符串」类型的列表项，配置页渲染成标签编辑器
+#   而不是单行输入框（存储格式不变，纯展示层增强）；
+#   list_source="platforms" 时进一步渲染成平台勾选网格（选项取自 config 接口
+#   返回的 platforms 列表），目前仅 DISABLED_PLATFORMS 使用
 #   subgroup 可选：组内第三级小标题（配置项多的分组按它再分段，如「卡片外观」
 #   按 基础/内容元素/配色 拆分）；不带 subgroup 的项排在同组最前
 CONFIG_META: tuple[dict[str, Any], ...] = (
@@ -80,8 +84,9 @@ CONFIG_META: tuple[dict[str, Any], ...] = (
         "label": "禁用的平台",
         "type": "string",
         "default": "",
-        "placeholder": "nga,acfun",
-        "hint": "逗号分隔，留空=全部启用。可用平台见本页下方列表，填错的名字会被忽略",
+        "list": True,
+        "list_source": "platforms",
+        "hint": "勾选=禁用该平台，都不勾=全部启用。「总览」页的平台开关改的是同一份（那边点一下立即生效）",
     },
     {
         "key": "VIDEO_DURATION_MAXIMUM",
@@ -117,6 +122,8 @@ CONFIG_META: tuple[dict[str, Any], ...] = (
     # 名单是**逗号分隔的字符串**，不是列表：本插件的配置是扁平键值，
     # _conf_schema.json 只支持 bool / int / select / string / text，
     # DISABLED_PLATFORMS 已经是这个套路。判定顺序见 core/permissions.py。
+    # list=True 只影响 WebUI 的呈现（标签编辑器，回车添加、点 × 删除），
+    # 存储格式不变。
     {
         "key": "WHITELIST_ENABLE",
         "group": "权限控制",
@@ -133,8 +140,9 @@ CONFIG_META: tuple[dict[str, Any], ...] = (
         "label": "白名单用户",
         "type": "string",
         "default": "",
-        "placeholder": "123456,789012",
-        "hint": "逗号分隔的用户 ID。留空 = 不按用户放行（私聊也会因此被拒）",
+        "list": True,
+        "placeholder": "用户 ID，回车添加",
+        "hint": "留空 = 不按用户放行（私聊也会因此被拒）。支持整串粘贴，逗号 / 空格都能自动拆开",
     },
     {
         "key": "WHITELIST_GROUP",
@@ -143,8 +151,9 @@ CONFIG_META: tuple[dict[str, Any], ...] = (
         "label": "白名单群组",
         "type": "string",
         "default": "",
-        "placeholder": "987654321,123456789",
-        "hint": "逗号分隔的群号。私聊没有群号，不受这一项影响",
+        "list": True,
+        "placeholder": "群号，回车添加",
+        "hint": "私聊没有群号，不受这一项影响。支持整串粘贴，逗号 / 空格都能自动拆开",
     },
     {
         "key": "BLACKLIST_ENABLE",
@@ -162,8 +171,9 @@ CONFIG_META: tuple[dict[str, Any], ...] = (
         "label": "黑名单用户",
         "type": "string",
         "default": "",
-        "placeholder": "123456",
-        "hint": "逗号分隔的用户 ID",
+        "list": True,
+        "placeholder": "用户 ID，回车添加",
+        "hint": "名单里的用户不能触发解析。支持整串粘贴，逗号 / 空格都能自动拆开",
     },
     {
         "key": "BLACKLIST_GROUP",
@@ -172,8 +182,9 @@ CONFIG_META: tuple[dict[str, Any], ...] = (
         "label": "黑名单群组",
         "type": "string",
         "default": "",
-        "placeholder": "987654321",
-        "hint": "逗号分隔的群号。私聊没有群号，不受这一项影响",
+        "list": True,
+        "placeholder": "群号，回车添加",
+        "hint": "私聊没有群号，不受这一项影响。支持整串粘贴，逗号 / 空格都能自动拆开",
     },
     # ---------------- B站设置 ---------------- #
     {

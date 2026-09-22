@@ -20,6 +20,22 @@ import {
   secretInput,
 } from "../ui.js";
 
+/* 列表型配置（黑白名单 / 禁用平台）在存储层仍是逗号分隔字符串 ——
+   _conf_schema.json 只有 string 类型，契约不能动；这里只改编辑体验。
+   拆分规则与后端 core/permissions.py 的 _ID_SPLIT_RE 对齐：
+   逗号 / 中文逗号 / 顿号 / 任意空白都当分隔符。 */
+const LIST_SPLIT_RE = /[,，、\s]+/;
+
+/** 把逗号 / 空白分隔的串解析成去重后的条目数组（保序）。 */
+function parseListValue(raw) {
+  const seen = new Set();
+  for (const part of String(raw ?? "").split(LIST_SPLIT_RE)) {
+    const text = part.trim();
+    if (text) seen.add(text);
+  }
+  return [...seen];
+}
+
 export function createConfigView(ctx) {
   let container = null;
   let meta = { sections: [], groups: [], items: [], platforms: [], problems: [] };
@@ -377,6 +393,347 @@ export function createConfigView(ctx) {
     return h("div", { class: "field" }, parts);
   }
 
+  /* ---------------- 列表型控件（名单编辑器 / 平台勾选） ----------------
+
+     回写时与已存值做**集合级**比较：语义没变就回传已存的原串。
+     不这么做的话，"123, 456" 解析再拼回 "123,456" 这种纯格式差异
+     也会被标成「已改」（setDraft 是精确字符串比较）。 */
+
+  function emitListValue(key, entries) {
+    const joined = entries.join(",");
+    const saved = values[key];
+    const nextSet = parseListValue(joined);
+    const savedSet = parseListValue(saved);
+    const same =
+      nextSet.length === savedSet.length &&
+      nextSet.every((entry) => savedSet.includes(entry));
+    onValueChanged(key, same ? saved : joined);
+  }
+
+  /* 名单编辑器：默认紧凑单行 —— [输入框+添加] [自绘下拉面板]；
+     条目超过 CHIPS_THRESHOLD 个时面板一行一条也扫不动了，自动展开成
+     标签平铺（每个条目一个 chip，点 × 删单个）。两种形态共用同一份 entries。 */
+  function listEditor(item) {
+    let entries = parseListValue(currentValue(item.key));
+    const CHIPS_THRESHOLD = 6;
+
+    // input 节点全程不重建：它要保住焦点（与 onValueChanged 不整页
+    // render 是同一个坑 —— 节点被移出 DOM 焦点就没了）
+    const input = h("input", {
+      class: "input",
+      type: "text",
+      placeholder: item.placeholder || "输入后回车添加",
+      spellcheck: "false",
+    });
+    const addButton = h(
+      "button",
+      {
+        class: "btn",
+        type: "button",
+        onClick: () => {
+          absorbInput();
+          input.focus();
+        },
+      },
+      "添加",
+    );
+    // listHost 里不含 input，每次 commit 整体重建它是安全的
+    const listHost = h("div", { class: "list-editor-host" });
+    // 下拉面板的关闭函数：挂在 document 上的外部点击 / Esc 监听靠它摘掉。
+    // syncList 重建 listHost 之前必须调一次，否则旧面板的监听会越攒越多。
+    let dropClose = null;
+
+    function countText() {
+      return entries.length ? `共 ${entries.length} 项` : "还没有条目";
+    }
+
+    function removeEntry(entry) {
+      entries = entries.filter((current) => current !== entry);
+      commit();
+      input.focus();
+    }
+
+    function chipNode(entry) {
+      return h("span", { class: "tag-chip" }, [
+        h("span", { text: entry }),
+        h(
+          "button",
+          {
+            class: "tag-x",
+            type: "button",
+            title: "移除",
+            onClick: () => removeEntry(entry),
+          },
+          "×",
+        ),
+      ]);
+    }
+
+    /* 紧凑形态的自绘下拉：触发器显示条目预览与总数，面板里每条目一行、
+       行尾 × 一键删除。原生 <select> 删一个条目要「展开 → 找到 → 点删除选中」
+       三步，删完面板还收起、看不到剩了什么；这里删除是就地更新（只摘行、改计数），
+       面板不收起，可以连续清理。Esc / 点面板外关闭。 */
+    function listDropdown() {
+      const triggerText = h("span", { class: "list-drop-text" });
+      const rowsHost = h("div", { class: "list-drop-rows" });
+      const countNode = h("span", { class: "tag-count" });
+      const panel = h("div", { class: "list-drop-panel", hidden: true });
+      const wrap = h("div", { class: "list-drop" });
+
+      function setOpen(open) {
+        panel.hidden = !open;
+        wrap.classList.toggle("is-open", open);
+        if (open) {
+          document.addEventListener("pointerdown", onOutside, true);
+          document.addEventListener("keydown", onKey, true);
+        } else {
+          document.removeEventListener("pointerdown", onOutside, true);
+          document.removeEventListener("keydown", onKey, true);
+        }
+      }
+
+      function onOutside(event) {
+        // 整页 render 会把 wrap 移出 DOM，但 document 监听还在 ——
+        // 靠 isConnected 发现并自清，不然每重建一次就漏一对监听
+        if (!wrap.isConnected || !wrap.contains(event.target)) setOpen(false);
+      }
+
+      function onKey(event) {
+        if (event.key === "Escape") {
+          event.stopPropagation();
+          setOpen(false);
+          trigger.focus();
+        }
+      }
+
+      function syncMeta() {
+        const preview = entries.slice(0, 2).join("、");
+        triggerText.textContent =
+          entries.length > 2 ? `${preview} 等 ${entries.length} 项` : preview;
+        trigger.title = entries.join("、");
+        countNode.textContent = countText();
+      }
+
+      function rowNode(entry) {
+        const row = h("div", { class: "list-drop-row" }, [
+          h("span", { class: "list-drop-entry", text: entry, title: entry }),
+          h(
+            "button",
+            {
+              class: "tag-x",
+              type: "button",
+              title: "移除该条目",
+              onClick: () => {
+                entries = entries.filter((current) => current !== entry);
+                emitListValue(item.key, entries);
+                if (!entries.length) {
+                  // 删空了：回到「还没有条目」占位，面板一起收掉
+                  setOpen(false);
+                  syncList();
+                  input.focus();
+                  return;
+                }
+                row.remove();
+                syncMeta();
+              },
+            },
+            "×",
+          ),
+        ]);
+        return row;
+      }
+
+      async function clearAll() {
+        const ok = await confirmDialog({
+          title: "清空名单",
+          body: `将移除全部 ${entries.length} 个条目（保存后生效）。`,
+          confirmText: "清空",
+          danger: true,
+        });
+        if (!ok) return;
+        entries = [];
+        emitListValue(item.key, entries);
+        setOpen(false);
+        syncList();
+        input.focus();
+      }
+
+      const trigger = h(
+        "button",
+        {
+          class: "list-drop-trigger",
+          type: "button",
+          "aria-haspopup": "true",
+          onClick: () => setOpen(panel.hidden),
+        },
+        [triggerText, h("span", { class: "chev" })],
+      );
+      panel.appendChild(rowsHost);
+      panel.appendChild(
+        h("div", { class: "list-drop-foot" }, [
+          countNode,
+          h(
+            "button",
+            { class: "btn tiny danger", type: "button", onClick: clearAll },
+            "清空",
+          ),
+        ]),
+      );
+      wrap.appendChild(trigger);
+      wrap.appendChild(panel);
+
+      for (const entry of entries) rowsHost.appendChild(rowNode(entry));
+      syncMeta();
+      dropClose = () => setOpen(false);
+      return wrap;
+    }
+
+    function syncList() {
+      if (dropClose) {
+        dropClose();
+        dropClose = null;
+      }
+      clear(listHost);
+      if (!entries.length) {
+        listHost.appendChild(h("div", { class: "tag-count", text: countText() }));
+        return;
+      }
+      if (entries.length <= CHIPS_THRESHOLD) {
+        listHost.appendChild(listDropdown());
+      } else {
+        listHost.appendChild(
+          h("div", { class: "tag-editor" }, [
+            ...entries.map(chipNode),
+            h("span", { class: "tag-count", text: countText() }),
+          ]),
+        );
+      }
+    }
+
+    function commit() {
+      emitListValue(item.key, entries);
+      syncList();
+    }
+
+    /** 把输入框里的内容（可以是粘贴的一整串）拆分吸收成条目。 */
+    function absorbInput() {
+      const parts = parseListValue(input.value);
+      input.value = "";
+      if (!parts.length) return;
+      const known = new Set(entries);
+      let added = false;
+      for (const part of parts) {
+        if (!known.has(part)) {
+          entries.push(part);
+          known.add(part);
+          added = true;
+        }
+      }
+      if (added) commit();
+    }
+
+    input.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === ",") {
+        event.preventDefault();
+        absorbInput();
+      } else if (event.key === "Backspace" && !input.value && entries.length) {
+        entries.pop();
+        commit();
+      }
+    });
+    // 中文逗号 / 顿号在 keydown 里拦不稳（IME 场景 key 不可靠），
+    // 看到分隔符出现在值里就当场吸收，顺手覆盖了整串粘贴的场景
+    input.addEventListener("input", () => {
+      if (/[,，、]/.test(input.value)) absorbInput();
+    });
+    input.addEventListener("blur", absorbInput);
+
+    syncList();
+    return h("div", { class: "list-editor" }, [
+      h("div", { class: "list-editor-row" }, [input, addButton]),
+      listHost,
+    ]);
+  }
+
+  /** 平台勾选网格：勾选 = 禁用（DISABLED_PLATFORMS 专用，选项来自 meta.platforms）。 */
+  function platformPicker(item) {
+    const platforms = meta.platforms || [];
+    const known = new Set(platforms.map((platform) => platform.name));
+    const picked = new Set(
+      parseListValue(currentValue(item.key)),
+    );
+
+    function emit() {
+      // 输出顺序跟平台列表走，已存但不在列表里的旧值排在最后（不静默丢弃）
+      const ordered = platforms
+        .filter((platform) => picked.has(platform.name))
+        .map((platform) => platform.name);
+      emitListValue(
+        item.key,
+        ordered.concat([...picked].filter((name) => !known.has(name))),
+      );
+    }
+
+    const grid = h(
+      "div",
+      { class: "pick-grid" },
+      platforms.map((platform) => {
+        const box = h("input", {
+          type: "checkbox",
+          checked: picked.has(platform.name) ? true : null,
+        });
+        const chip = h(
+          "label",
+          {
+            class: `pick-chip${picked.has(platform.name) ? " is-picked" : ""}`,
+            title: platform.name,
+          },
+          [box, h("span", { text: platform.label || platform.name })],
+        );
+        box.addEventListener("change", () => {
+          if (box.checked) picked.add(platform.name);
+          else picked.delete(platform.name);
+          chip.classList.toggle("is-picked", box.checked);
+          emit();
+        });
+        return chip;
+      }),
+    );
+
+    const parts = [grid];
+    const unknown = [...picked].filter((name) => !known.has(name));
+    if (unknown.length) {
+      // 旧配置里可能留着已下架 / 改名的平台：后端会忽略它们，
+      // 但界面上要看得见、删得掉，不能悄悄丢
+      parts.push(
+        h("div", { class: "tag-editor", style: { marginTop: "8px" } }, [
+          h("span", { class: "tag-count", text: "不在平台列表里的旧值：" }),
+          ...unknown.map((name) => {
+            const chip = h("span", { class: "tag-chip" }, [
+              h("span", { text: name }),
+              h(
+                "button",
+                {
+                  class: "tag-x",
+                  type: "button",
+                  title: "移除",
+                  onClick: () => {
+                    picked.delete(name);
+                    chip.remove();
+                    emit();
+                  },
+                },
+                "×",
+              ),
+            ]);
+            return chip;
+          }),
+        ]),
+      );
+    }
+    return h("div", {}, parts);
+  }
+
   function buildControl(item) {
     const value = currentValue(item.key);
 
@@ -426,6 +783,15 @@ export function createConfigView(ctx) {
           }),
         ),
       );
+    }
+
+    // 列表型分支放在 secret / text 之前：名单项都是 type="string"，
+    // 不在这里拦截就会掉进末尾的单行输入框，回到手打逗号的老路。
+    // （secret 判断之所以也必须在 text 之前，见下面那段注释）
+    if (item.list) {
+      return item.list_source === "platforms"
+        ? platformPicker(item)
+        : listEditor(item);
     }
 
     // secret 判断必须放在 text 之前：BILI_CK / XHS_CK / PIXIV_CK 都是
