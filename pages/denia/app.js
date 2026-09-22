@@ -6,6 +6,7 @@
 
 import { h, clear, toast } from "./ui.js";
 import { ACCENT_PRESETS, prefs, applyPrefs, loadPrefs } from "./prefs.js";
+import { initBanner } from "./banner.js";
 import { createOverviewView } from "./views/overview.js";
 import { createParseView } from "./views/parse.js";
 import { createCacheView } from "./views/cache.js";
@@ -184,6 +185,8 @@ function bindNav() {
 
 async function boot() {
   bindNav();
+  // 页头彩蛋文案在静态区、不依赖 bridge，第一时间挂上
+  initBanner();
 
   if (!bridge || typeof bridge.ready !== "function") {
     ctx.setConnection(false, "bridge 未就绪");

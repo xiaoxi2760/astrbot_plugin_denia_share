@@ -240,6 +240,8 @@ body {
   gap: 14px;
   padding: 18px 26px 14px;
   flex: 0 0 auto;
+  /* 页头彩蛋文案（.head-banner）按下方统计卡分界线绝对定位，这里是它的定位基准 */
+  position: relative;
 }
 
 .stage-title h1 { margin: 0; font-size: 21px; font-weight: 600; letter-spacing: 0.2px; }
@@ -962,6 +964,50 @@ textarea.input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--
   .rail-badge { position: absolute; top: 2px; right: 2px; }
   .stage-head { padding: 14px 16px 10px; }
   .stage-body { padding: 2px 14px 26px; }
+}
+
+/* ---------------- 页头彩蛋文案（.stage-head 静态区，banner.js 驱动轮换） ---------------- */
+
+/* 与页头整体协调：不设底/边框，文字用 --text-2 的低调色，
+   不做高饱和渐变与扫光 —— 它只是标题行空白处的一句安静彩蛋。 */
+.head-banner {
+  /* 水平中心对齐到下方统计卡「缓存占用 | 卡片渲染」的分界线：
+     stat-grid 是 4 等分，分界线在内容区 75% 处；.stage-head 与 .stage-body
+     左右内边距相同（26px），.view 上限 1160px 且左对齐，所以该点可精确算出。
+     绝对定位不占 flex 空间：标题与「刷新」按钮的布局完全不受影响。 */
+  position: absolute;
+  top: 50%;
+  left: calc(26px + min(100% - 52px, 1160px) * 0.75);
+  transform: translate(-50%, -50%);
+  max-width: 30%;
+  text-align: center;
+  /* 不能设 pointer-events:none：悬停暂停轮换靠 :hover 判定。
+     它没有点击行为、无 tabindex，不存在挡按钮或抢焦点。 */
+  user-select: none;
+  cursor: default;
+}
+.head-banner-line {
+  display: block;
+  font-size: 13.5px;
+  color: var(--text-2);
+  letter-spacing: 0.3px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: opacity 0.34s var(--ease), transform 0.34s var(--ease);
+}
+/* 换文案过渡：banner.js 加 .is-leaving（淡出上移），换完文字摘掉（淡入回位）。
+   过渡写在内层 span 上，与外层的定位 transform 互不干扰。
+   html[data-motion="0"] 由全局规则停掉过渡；JS 侧同时停轮换。 */
+.head-banner.is-leaving .head-banner-line { opacity: 0; transform: translateY(-6px); }
+
+@media (prefers-reduced-motion: reduce) {
+  .head-banner-line { transition: none; }
+}
+
+/* 窄屏直接隐藏：它纯属装饰，且此时统计卡已换行，75% 对齐假设不再成立 */
+@media (max-width: 900px) {
+  .head-banner { display: none; }
 }
 
 
