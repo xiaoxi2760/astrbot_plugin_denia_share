@@ -54,6 +54,12 @@
             <h1 id="view-title">总览</h1>
             <p id="view-sub">插件运行状态一览</p>
           </div>
+          <!-- 页头彩蛋文案：轮换逻辑在 banner.js，样式在 style.css 末尾。
+               放在 .stage-head 静态区 —— #stage-body 每次刷新都会被 clear() 重建，
+               放里面一点「刷新」就没了。纯展示：aria-hidden、无事件，不抢焦点。 -->
+          <div class="head-banner" id="head-banner" role="presentation" aria-hidden="true">
+            <span class="head-banner-line" id="banner-line"></span>
+          </div>
           <div class="stage-actions">
             <span class="pill" id="head-pill" hidden></span>
             <button class="btn" id="btn-reload" type="button">刷新</button>
