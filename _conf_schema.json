@@ -33,6 +33,54 @@
       }
     }
   },
+  "权限控制": {
+    "type": "object",
+    "description": "谁能触发解析：白名单 / 黑名单",
+    "items": {
+      "WHITELIST_ENABLE": {
+        "description": "启用白名单",
+        "type": "bool",
+        "default": false,
+        "invisible": true,
+        "hint": "开启后**只有**名单里的用户 / 群能触发解析，管理员始终豁免。名单全空 = 除管理员外谁都不能用"
+      },
+      "WHITELIST_USER": {
+        "description": "白名单用户",
+        "type": "string",
+        "default": "",
+        "invisible": true,
+        "hint": "逗号分隔的用户 ID。留空 = 不按用户放行（私聊也会因此被拒）"
+      },
+      "WHITELIST_GROUP": {
+        "description": "白名单群组",
+        "type": "string",
+        "default": "",
+        "invisible": true,
+        "hint": "逗号分隔的群号。私聊没有群号，不受这一项影响"
+      },
+      "BLACKLIST_ENABLE": {
+        "description": "启用黑名单",
+        "type": "bool",
+        "default": false,
+        "invisible": true,
+        "hint": "开启后名单里的用户 / 群不能触发解析，管理员仍豁免。与白名单同时开启时先看白名单、再看黑名单"
+      },
+      "BLACKLIST_USER": {
+        "description": "黑名单用户",
+        "type": "string",
+        "default": "",
+        "invisible": true,
+        "hint": "逗号分隔的用户 ID"
+      },
+      "BLACKLIST_GROUP": {
+        "description": "黑名单群组",
+        "type": "string",
+        "default": "",
+        "invisible": true,
+        "hint": "逗号分隔的群号。私聊没有群号，不受这一项影响"
+      }
+    }
+  },
   "B站设置": {
     "type": "object",
     "description": "B站 Cookie 与下载清晰度",

@@ -42,6 +42,7 @@ from .core.data import (
     ParseResult, ImageContent, VideoContent, AudioContent, Author, platform_of,
 )
 from .core.history import HistoryStore, ParseRecord
+from .core.permissions import is_allowed
 from .core.relay import register_file
 from .core.constants import (
     PLATFORM_DISPLAY_NAMES, PlatformEnum, is_custom_platform, platform_meta,
@@ -462,6 +463,36 @@ class DeniaSharePlugin(Star):
 
     # ==================== 平台处理器 ====================
 
+    def _access_denied(self, event: AstrMessageEvent) -> bool:
+        """白名单 / 黑名单判定：True 表示这次请求该被**静默**拦下。
+
+        管理员由 AstrBot 判定（``event.is_admin()``），与 ``/denia_status`` 等命令的
+        ADMIN 门一致，不单独配管理员 ID。判定顺序见 ``core/permissions.py``。
+
+        拦下时只写一条 debug 日志：黑名单群里不该因为有人发链接就刷出提示。
+
+        判定本身抛异常时**按放行处理**并留一条 warning —— 名单配错最多是「没拦住」，
+        而在这里静默拦下全部请求会让插件看起来彻底坏了（用户只会看到「零反应」）。
+        """
+        try:
+            allowed = is_allowed(
+                get_config(),
+                is_admin=event.is_admin(),
+                is_private=event.is_private_chat(),
+                sender_id=event.get_sender_id(),
+                group_id=event.get_group_id(),
+            )
+        except Exception:
+            logger.warning("[denia_share] 权限判定失败，本次按放行处理", exc_info=True)
+            return False
+        if not allowed:
+            logger.debug(
+                "[denia_share] 被权限名单拦下：user=%s group=%s",
+                event.get_sender_id(),
+                event.get_group_id(),
+            )
+        return not allowed
+
     async def _dispatch(self, event: AstrMessageEvent, name: str):
         if self._has_json_component(event):
             return
@@ -592,6 +623,8 @@ class DeniaSharePlugin(Star):
     @filter.command("pixiv")
     async def pixiv_search_command(self, event: AstrMessageEvent):
         """Pixiv 关键词搜索 /pixiv <关键词>"""
+        if self._access_denied(event):
+            return
         keyword = " ".join((event.message_str or "").split()[1:]).strip()
         if not keyword:
             yield event.plain_result("用法: /pixiv <关键词>\n结果强制过滤非全年龄内容")
@@ -661,6 +694,10 @@ class DeniaSharePlugin(Star):
     async def _process_url(
         self, event: AstrMessageEvent, parser: Any
     ) -> AsyncGenerator[MessageEventResult, None]:
+        # 白名单 / 黑名单的唯一收口点：内置平台处理器、自定义解析器、
+        # JSON 卡片三条路径最后都走这里（截图与 /pixiv 各自另有入口）。
+        if self._access_denied(event):
+            return
         url = event.message_str.strip()
         try:
             cache_key = self.result_cache_key(url)
@@ -1013,6 +1050,9 @@ class DeniaSharePlugin(Star):
         )
 
     async def _do_screenshot(self, event: AstrMessageEvent, url: str):
+        # /shot 与「匹配不到平台就截图」两个入口都汇到这里
+        if self._access_denied(event):
+            return
         if not is_probably_screenshotable(url):
             yield event.plain_result("这个地址不支持截图")
             return

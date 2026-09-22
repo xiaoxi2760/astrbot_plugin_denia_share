@@ -26,6 +26,7 @@ _HEX_COLOR_RE = re.compile(r"^#[0-9a-fA-F]{6}$")
 # 配置分组：展示顺序即此处的顺序，常用在前、折腾在后
 CONFIG_GROUPS: tuple[tuple[str, str], ...] = (
     ("解析设置", "日常最常用到的几项"),
+    ("权限控制", "谁能触发解析：白名单 / 黑名单"),
     ("B站设置", "B站 Cookie 与下载清晰度"),
     ("Steam 设置", "价格地区与史低数据源"),
     ("网页截图", "把任意网页截成图片发送"),
@@ -42,8 +43,8 @@ CONFIG_SECTIONS: tuple[dict[str, Any], ...] = (
     {
         "key": "basic",
         "label": "基础",
-        "description": "解析行为与发送策略，日常最常改",
-        "groups": ("解析设置",),
+        "description": "解析行为、发送策略与访问权限，日常最常改",
+        "groups": ("解析设置", "权限控制"),
     },
     {
         "key": "platform",
@@ -111,6 +112,68 @@ CONFIG_META: tuple[dict[str, Any], ...] = (
         "type": "bool",
         "default": False,
         "hint": "关闭则只写日志、不在群里刷报错。排查问题时可临时打开",
+    },
+    # ---------------- 权限控制 ---------------- #
+    # 名单是**逗号分隔的字符串**，不是列表：本插件的配置是扁平键值，
+    # _conf_schema.json 只支持 bool / int / select / string / text，
+    # DISABLED_PLATFORMS 已经是这个套路。判定顺序见 core/permissions.py。
+    {
+        "key": "WHITELIST_ENABLE",
+        "group": "权限控制",
+        "subgroup": "白名单",
+        "label": "启用白名单",
+        "type": "bool",
+        "default": False,
+        "hint": "开启后**只有**名单里的用户 / 群能触发解析，管理员始终豁免。名单全空 = 除管理员外谁都不能用",
+    },
+    {
+        "key": "WHITELIST_USER",
+        "group": "权限控制",
+        "subgroup": "白名单",
+        "label": "白名单用户",
+        "type": "string",
+        "default": "",
+        "placeholder": "123456,789012",
+        "hint": "逗号分隔的用户 ID。留空 = 不按用户放行（私聊也会因此被拒）",
+    },
+    {
+        "key": "WHITELIST_GROUP",
+        "group": "权限控制",
+        "subgroup": "白名单",
+        "label": "白名单群组",
+        "type": "string",
+        "default": "",
+        "placeholder": "987654321,123456789",
+        "hint": "逗号分隔的群号。私聊没有群号，不受这一项影响",
+    },
+    {
+        "key": "BLACKLIST_ENABLE",
+        "group": "权限控制",
+        "subgroup": "黑名单",
+        "label": "启用黑名单",
+        "type": "bool",
+        "default": False,
+        "hint": "开启后名单里的用户 / 群不能触发解析，管理员仍豁免。与白名单同时开启时先看白名单、再看黑名单",
+    },
+    {
+        "key": "BLACKLIST_USER",
+        "group": "权限控制",
+        "subgroup": "黑名单",
+        "label": "黑名单用户",
+        "type": "string",
+        "default": "",
+        "placeholder": "123456",
+        "hint": "逗号分隔的用户 ID",
+    },
+    {
+        "key": "BLACKLIST_GROUP",
+        "group": "权限控制",
+        "subgroup": "黑名单",
+        "label": "黑名单群组",
+        "type": "string",
+        "default": "",
+        "placeholder": "987654321",
+        "hint": "逗号分隔的群号。私聊没有群号，不受这一项影响",
     },
     # ---------------- B站设置 ---------------- #
     {
@@ -1008,6 +1071,34 @@ class ParserConfig:
     @property
     def DEBUG_LOG_ENABLED(self) -> bool:
         return bool(self._cfg_get("DEBUG_LOG_ENABLED", True))
+
+    # ---------------- 权限控制 ----------------
+    # 名单返回**原始字符串**（逗号分隔），解析交给 core/permissions.py ——
+    # 那里同时收中文逗号与顿号，且在两个开关都关时根本不解析。
+
+    @property
+    def WHITELIST_ENABLE(self) -> bool:
+        return bool(self._cfg_get("WHITELIST_ENABLE", False))
+
+    @property
+    def WHITELIST_USER(self) -> str:
+        return str(self._cfg_get("WHITELIST_USER", "") or "")
+
+    @property
+    def WHITELIST_GROUP(self) -> str:
+        return str(self._cfg_get("WHITELIST_GROUP", "") or "")
+
+    @property
+    def BLACKLIST_ENABLE(self) -> bool:
+        return bool(self._cfg_get("BLACKLIST_ENABLE", False))
+
+    @property
+    def BLACKLIST_USER(self) -> str:
+        return str(self._cfg_get("BLACKLIST_USER", "") or "")
+
+    @property
+    def BLACKLIST_GROUP(self) -> str:
+        return str(self._cfg_get("BLACKLIST_GROUP", "") or "")
 
 
 def init_config(astrbot_config: Any, cache_dir: Path, config_dir: Path) -> ParserConfig:
