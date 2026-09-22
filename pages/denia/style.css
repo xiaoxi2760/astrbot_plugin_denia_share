@@ -514,6 +514,147 @@ textarea.input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--
 }
 .secret-toggle:hover { color: var(--accent); border-color: var(--accent); }
 
+/* ---------------- 列表型配置（名单编辑器 / 平台勾选） ----------------
+   名单编辑器：默认紧凑单行（输入框+添加 / 自绘下拉面板 .list-drop），
+   条目多了自动展开成标签平铺（.tag-editor）。平台勾选是 .pick-grid。 */
+
+.list-editor { display: flex; flex-direction: column; gap: 8px; max-width: 460px; }
+.list-editor-row { display: flex; align-items: center; gap: 6px; }
+.list-editor-row .input { flex: 1; min-width: 0; width: auto; }
+.list-editor-row .btn { flex: 0 0 auto; }
+.list-editor-host .tag-count { display: inline-block; padding-top: 2px; }
+
+/* 名单编辑器的自绘下拉：触发器与 .input 同款外观，面板绝对定位在其下方，
+   每条目一行 + 行尾单条删除，底部计数与「清空」。
+   比原生 <select> 强在：删条目一步完成、面板不收起、删除中始终看得见剩余条目。 */
+.list-drop { position: relative; }
+.list-drop-trigger {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 11px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-2);
+  background: var(--panel-solid);
+  color: var(--text);
+  font-size: 12.5px;
+  font-family: inherit;
+  cursor: pointer;
+  transition: border-color var(--dur) var(--ease), box-shadow var(--dur) var(--ease);
+  outline: none;
+}
+.list-drop-trigger:focus-visible,
+.list-drop.is-open .list-drop-trigger {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+.list-drop-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: left;
+  font-family: var(--mono);
+}
+.list-drop-trigger .chev { color: var(--text-3); }
+.list-drop.is-open .list-drop-trigger .chev { transform: rotate(-135deg); } /* 展开：朝上 */
+.list-drop-panel {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  z-index: 20;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--panel-solid);
+  box-shadow: var(--shadow-2);
+  overflow: hidden;
+  animation: view-in 0.16s var(--ease);
+}
+.list-drop-rows { max-height: 172px; overflow-y: auto; padding: 4px; }
+.list-drop-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px 4px 9px;
+  border-radius: calc(var(--radius-sm) - 3px);
+}
+.list-drop-row:hover { background: var(--panel-2); }
+.list-drop-entry {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--mono);
+  font-size: 12px;
+}
+.list-drop-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 5px 8px;
+  border-top: 1px solid var(--border);
+}
+
+.tag-editor {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 9px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--panel-solid);
+}
+.tag-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 5px 2px 9px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 12px;
+  font-family: var(--mono);
+  max-width: 100%;
+}
+.tag-chip > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tag-x {
+  border: none;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font-size: 13px;
+  line-height: 1;
+  padding: 1px 3px;
+  border-radius: 50%;
+  opacity: 0.7;
+}
+.tag-x:hover { opacity: 1; background: var(--panel-2); }
+.tag-count { font-size: 11.5px; color: var(--text-3); align-self: center; }
+
+.pick-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(148px, 1fr)); gap: 8px; max-width: 640px; }
+.pick-chip {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--panel-solid);
+  font-size: 12.5px;
+  cursor: pointer;
+  transition: all var(--dur) var(--ease);
+  user-select: none;
+}
+.pick-chip:hover { border-color: var(--border-2); }
+.pick-chip.is-picked { border-color: var(--err); background: var(--err-soft); color: var(--err); }
+.pick-chip input { accent-color: var(--err); margin: 0; flex: 0 0 auto; }
+
 .savebar {
   position: sticky;
   bottom: 0;

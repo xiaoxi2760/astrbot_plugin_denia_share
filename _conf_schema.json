@@ -8,7 +8,7 @@
         "type": "string",
         "default": "",
         "invisible": true,
-        "hint": "逗号分隔，留空=全部启用。可用平台见本页下方列表，填错的名字会被忽略"
+        "hint": "勾选=禁用该平台，都不勾=全部启用。「总览」页的平台开关改的是同一份（那边点一下立即生效）"
       },
       "VIDEO_DURATION_MAXIMUM": {
         "description": "视频最大时长",
@@ -49,14 +49,14 @@
         "type": "string",
         "default": "",
         "invisible": true,
-        "hint": "逗号分隔的用户 ID。留空 = 不按用户放行（私聊也会因此被拒）"
+        "hint": "留空 = 不按用户放行（私聊也会因此被拒）。支持整串粘贴，逗号 / 空格都能自动拆开"
       },
       "WHITELIST_GROUP": {
         "description": "白名单群组",
         "type": "string",
         "default": "",
         "invisible": true,
-        "hint": "逗号分隔的群号。私聊没有群号，不受这一项影响"
+        "hint": "私聊没有群号，不受这一项影响。支持整串粘贴，逗号 / 空格都能自动拆开"
       },
       "BLACKLIST_ENABLE": {
         "description": "启用黑名单",
@@ -70,14 +70,14 @@
         "type": "string",
         "default": "",
         "invisible": true,
-        "hint": "逗号分隔的用户 ID"
+        "hint": "名单里的用户不能触发解析。支持整串粘贴，逗号 / 空格都能自动拆开"
       },
       "BLACKLIST_GROUP": {
         "description": "黑名单群组",
         "type": "string",
         "default": "",
         "invisible": true,
-        "hint": "逗号分隔的群号。私聊没有群号，不受这一项影响"
+        "hint": "私聊没有群号，不受这一项影响。支持整串粘贴，逗号 / 空格都能自动拆开"
       }
     }
   },
