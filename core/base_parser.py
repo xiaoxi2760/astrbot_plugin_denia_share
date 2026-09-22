@@ -152,7 +152,14 @@ class BaseParser:
             if callable(attr) and hasattr(attr, _KEY_PATTERNS):
                 key_patterns: KeyPatterns = getattr(attr, _KEY_PATTERNS)
                 for keyword, pattern in key_patterns:
-                    cls._handlers[keyword] = attr
+                    # **按 pattern 索引，不能按 keyword**。同一个 keyword 下允许注册
+                    # 多条 pattern（小红书 xiaohongshu.com 既有 explore/discovery 的
+                    # 带 id 链接，又有安全落地页的 originalUrl 链接）。按 keyword 索引
+                    # 时后遍历到的 handler 会覆盖先遍历到的，而 search_url 返回的是
+                    # 「先匹配上的那条 pattern」—— 两者不是同一个 handler 时就会出现
+                    # 「A 的 pattern 匹配上、却派发到 B」，B 里 group("...") 直接
+                    # IndexError: no such group。按 pattern 索引让匹配与派发一一对应。
+                    cls._handlers[pattern] = attr
                     cls._key_patterns.append((keyword, pattern))
 
         cls._key_patterns.sort(key=lambda x: -len(x[0]))
@@ -163,7 +170,12 @@ class BaseParser:
 
     @final
     async def parse(self, keyword: str, searched: Match[str]) -> ParseResult:
-        return await self._handlers[keyword](self, searched)
+        # 用**匹配上的那条 pattern** 定位 handler，而不是 keyword —— 同一个 keyword
+        # 可能对应多个 handler（见 __init_subclass__ 里的说明）。keyword 只用来报错。
+        handler = self._handlers.get(searched.re)
+        if handler is None:
+            raise SilentException(f"无法匹配 {keyword}")
+        return await handler(self, searched)
 
     @final
     async def parse_with_redirect(self, url: str, headers: dict[str, str] | None = None) -> ParseResult:

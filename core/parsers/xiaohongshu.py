@@ -67,13 +67,16 @@ class XiaoHongShuParser(BaseParser):
     async def _parse_safe_landing(self, searched: re.Match[str]):
         """安全落地页：真正的作品 id 藏在 ``originalUrl`` 参数里，而且是 URL-encoded 的。
 
-        这类链接的 path 只有 ``/explore``（没有 id），上面那条
-        ``(explore|discovery/item)/<id>`` **完全匹配不上** → 落到
-        「没有平台规则能匹配」→ 走截图兜底（默认关）→ 用户看不到任何反应。
+        这类链接的 path 只有 ``/explore``（没有 id），``(explore|discovery/item)/<id>``
+        **完全匹配不上** → 落到「没有平台规则能匹配」→ 走截图兜底（默认关）→
+        用户看不到任何反应。
 
-        恢复出真实 URL 后交给 ``_parse_common`` 的同一条链路（含它的
-        explore → discovery 兜底）。注意这条 pattern 注册在 ``_parse_common`` **之后**：
-        既带 id 又带 originalUrl 的链接应该按 path 里的 id 走，不该被这里改写。
+        恢复出真实 URL 后交给 ``_parse_common`` 的同一条链路（含它的 explore →
+        discovery 兜底）。
+
+        两条 pattern 的**优先级**由 ``_key_patterns`` 的顺序决定：``_parse_common``
+        排在前面（``__init_subclass__`` 按 ``dir()``，也就是方法名的字母序遍历），
+        所以既带 id 又带 originalUrl 的链接按 path 里的 id 走，不会被这里改写。
         """
         from urllib.parse import unquote
 
@@ -83,6 +86,11 @@ class XiaoHongShuParser(BaseParser):
             # 就能让解析器去请求任意外站 —— 这是 SSRF 的最小版本。
             raise ParseException("安全落地页里的 originalUrl 不是小红书域名，已拒绝")
         _, matched = self.search_url(recovered)
+        # 恢复出来的 URL 必须由**带 id 的那条 pattern** 匹配上：``_parse_common`` 一进来
+        # 就取 ``group("query", "xhs_id")``，拿别的 pattern 的 match 进去就是
+        # IndexError。originalUrl 里再套一个落地页（只有 /explore、没有 id）就会走到这里。
+        if "xhs_id" not in matched.re.groupindex:
+            raise ParseException("安全落地页里的 originalUrl 没带作品 id")
         return await self._parse_common(matched)
 
     @classmethod
