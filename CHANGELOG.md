@@ -1,5 +1,18 @@
 # 更新日志
 
+## [1.2.1] - 2026-09-26
+
+### 修复
+
+- Twitter / X 链接解析失败（网页报 HTTP 500）。原因是兜底链的最后一级
+  「Guest GraphQL」依赖的公开 Bearer 已被吊销，请求恒返回 401，而其异常
+  类型不是 `ParseException`，会穿透到网页层变成 500。**该级已整体移除**，
+  现在只保留 vxtwitter、fxtwitter 两级，全失败时给出可读的失败原因。
+- vxtwitter 取数被 Cloudflare 拦截（403 "Just a moment..."）。原因是请求带
+  了浏览器的 User-Agent，而 `api.vxtwitter.com` 的 Cloudflare 对浏览器签名
+  发起 JS 挑战、对程序化 UA 直接放行。现在 vxtwitter 单独使用一个非浏览器
+  UA，不再继承全局 User-Agent。
+
 ## [1.2.0] - 2026-09-22
 
 - 新增黑白名单机制（配置页「基础 → 权限控制」）
