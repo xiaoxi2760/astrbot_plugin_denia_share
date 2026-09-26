@@ -455,7 +455,11 @@ class StreamDownloader:
                 # _validate_content_length / _validate_downloaded_bytes，
                 # 只判 Content-Length 的话 VIDEO_SIZE_MAXIMUM_MB 在 m3u8 上完全失效。
                 received_bytes = 0
-                async with aiofiles.open(part, "wb") as f:
+                # **不用 `async with`**：见下面 finally 里的说明 —— 句柄的关闭必须
+                # 排在 unlink 之前，而 `async with` 的 __aexit__ 是 await 点，
+                # 它和 except 分支的先后关系不受保证。
+                f = await aiofiles.open(part, "wb")
+                try:
                     for seg_url in slices:
                         async with self.client.stream("GET", seg_url, headers=headers) as response:
                             response.raise_for_status()
@@ -473,6 +477,16 @@ class StreamDownloader:
                                     raise IgnoreException(
                                         f"媒体大小超过上限({self.max_size_mb}MB)"
                                     )
+                finally:
+                    # **必须在清理之前关掉句柄。** Windows 上文件被占用时 unlink
+                    # 抛 WinError 32，而 safe_unlink 会把它吞成一条日志 ——
+                    # 于是「已经清了」和「没清掉」在日志里长得一样，半截 .part
+                    # 静默留在缓存目录里（自检的 m3u8 取消用例就是这样间歇性失败）。
+                    # 用 finally 而不是放在 except 里：正常结束与异常路径都要关。
+                    try:
+                        await f.close()
+                    except Exception:  # noqa: BLE001 —— 关闭失败不该盖住原始异常
+                        logger.warning(f"关闭 m3u8 临时文件失败: {part}", exc_info=True)
 
             except BaseException as exc:
                 # 半截 .part 必须无条件删掉，所以这里**必须写 BaseException**：
@@ -481,6 +495,8 @@ class StreamDownloader:
                 # 一个都不匹配，取消时合并到一半的文件会一直躺在缓存目录里。
                 # 这是同一形状的第三处 —— 前两处是 _download_file_with_httpx 与
                 # _download_file_with_curl_cffi，它们早就用 BaseException 了。
+                #
+                # 到这一步时上面 finally 已经关掉句柄，unlink 才真的删得掉。
                 await safe_unlink(part)
                 if isinstance(exc, (DownloadException, IgnoreException)):
                     # 「分片数超限 / 体积超限」是**策略跳过**，不是下载失败。

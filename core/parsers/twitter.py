@@ -4,21 +4,59 @@
 
 """Twitter / X 解析器。
 
-三级取数，逐级兜底：
+两级取数，逐级兜底：
 
 1. **vxtwitter**（rika 原实现）—— 第三方镜像，零成本、字段最全。
 2. **fxtwitter** —— 同族镜像，vxtwitter 抽风时顶上。
-3. **Guest GraphQL**（娅娅版移植）—— 官方接口 + guest token，
-   不依赖任何第三方镜像，是前两级都失败时的最后防线。
+
+两级都失败时抛 ``ParseException``（可读原因），不再有第三级。
+
+关于第三级 Guest GraphQL 的删除（2026-09-26）
+-------------------------------------------
+本文件曾移植娅娅版的「官方接口 + guest token」作为最后防线。实测该级**恒定失败**，
+已于 2026-09-26 整体移除，原因有三：
+
+1. 它依赖的公开 ``BEARER`` 已被 Twitter 吊销 —— ``guest/activate.json`` 恒返回
+   ``401 {"errors":[{"message":"Invalid or expired token","code":89}]}``。
+   也就是说这一级**不是兜底，而是一个必然失败的请求**。
+2. ``aiohttp.ClientResponseError`` 不是 ``ParseException`` 子类。作为最后一环，
+   它的异常会穿透 ``_parse`` 的两个 ``except Exception``（那两处只兜前两级），
+   一路到 ``webui.parse_url`` 的 ``except Exception`` —— 用户看到的是 **HTTP 500**，
+   而不是「解析失败」的 422 与可读原因。
+3. 上游莉卡 v3.0.1 也只保留 vxtwitter 一条路。少一级「必然失败」反而更可靠。
+
+关于 vxtwitter 必须用独立 UA（2026-09-26）
+------------------------------------------
+``api.vxtwitter.com`` 挂在 Cloudflare 后面，其规则是：**伪装成真实浏览器的 UA 会被
+下发 JS 挑战页（403 "Just a moment..."），而老实声明自己是程序的 UA 直接放行。**
+
+2026-09-26 在服务器容器内实测（直连与走代理结果一致）：
+
+===========================  ==========
+UA                           状态码
+===========================  ==========
+（不带头）                    200
+``python-httpx/0.27.0``      200
+``curl/8.0``                 200
+``Wget/1.21.4``              200
+仓库全局 ``COMMON_HEADER``    403  ← 本插件原先踩的就是这个
+真实 Chrome 120 / Edge 120    403
+Safari 17 (macOS)            403
+空字符串                      403
+===========================  ==========
+
+所以这里给 vxtwitter **单独**一个非浏览器 UA，而**不改全局 ``COMMON_HEADER``** ——
+后者是抖音 / 小红书 / 微博等全平台共用的，改它会外溢到无关平台。
+
+对照：``api.fxtwitter.com`` 没有这条规则，任何非空 UA 都能过（只有**空** UA 会返回
+``401`` 并明确提示 "You must identify yourself with a User-Agent header"）。
 """
 
-import json
 import re
 from datetime import timezone
 from typing import Any, ClassVar
 from urllib.parse import urlsplit
 
-import aiohttp
 from astrbot.api import logger
 
 from ..base_parser import BaseParser, PlatformEnum, ParseException, handle
@@ -29,6 +67,10 @@ _TWIMG_HOST_PREFIX = {
     "pbs.twimg.com": "pbs",
     "video.twimg.com": "video",
 }
+
+# vxtwitter 专用 UA。刻意**带 httpx 自报名、不带浏览器签名** —— 见模块 docstring：
+# api.vxtwitter.com 的 Cloudflare 只挑战「像浏览器」的 UA，对程序化 UA 直接放行。
+VX_UA = "python-httpx/0.27.0"
 
 
 def proxy_media_url(url: str | None) -> str | None:
@@ -51,38 +93,6 @@ def proxy_media_url(url: str | None) -> str | None:
     query = f"?{parts.query}" if parts.query else ""
     return f"{base}/{prefix}{parts.path}{query}"
 
-# Twitter Web 端公开 bearer token（未登录 guest 身份用）
-BEARER = (
-    "AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOjj6tT7UeCsTnIU3U%3D"
-    "0owR4rQG2v0nEoq4TSAN0vNyI4iEfFPU1Rn7mSrh2aU1T7F5YTpGJ3"
-)
-GUEST_TOKEN_URL = "https://api.twitter.com/1.1/guest/activate.json"
-GRAPHQL_ENDPOINT = (
-    "https://twitter.com/i/api/graphql/0hWvDhmW8YQ-S_ib3azIrw/TweetResultByRestId"
-)
-
-GRAPHQL_FEATURES = {
-    "creator_subscriptions_tweet_preview_api_enabled": True,
-    "tweetypie_unmention_optimization_enabled": True,
-    "responsive_web_edit_tweet_api_enabled": True,
-    "graphql_is_translatable_rweb_tweet_is_translatable_enabled": True,
-    "view_counts_everywhere_api_enabled": True,
-    "longform_notetweets_consumption_enabled": True,
-    "responsive_web_twitter_article_tweet_consumption_enabled": True,
-    "tweet_awards_web_tipping_enabled": False,
-    "freedom_of_speech_not_reach_fetch_enabled": True,
-    "standardized_nudges_misinfo": True,
-    "tweet_with_visibility_results_prefer_gql_limited_actions_policy_enabled": True,
-    "rweb_video_timestamps_enabled": True,
-    "longform_notetweets_rich_text_read_enabled": True,
-    "longform_notetweets_inline_media_enabled": True,
-    "responsive_web_graphql_exclude_directive_enabled": True,
-    "verified_phone_label_enabled": False,
-    "responsive_web_media_download_video_enabled": False,
-    "responsive_web_graphql_skip_user_profile_image_extensions_enabled": False,
-    "responsive_web_graphql_timeline_navigation_enabled": True,
-}
-
 
 class TwitterParser(BaseParser):
     platform: ClassVar[Platform] = platform_of(PlatformEnum.TWITTER)
@@ -92,18 +102,25 @@ class TwitterParser(BaseParser):
     async def _parse(self, searched: re.Match[str]) -> ParseResult:
         url = f"https://{searched.group(0)}"
         tweet_id = searched.group("tweet_id")
+        failures: list[str] = []
 
+        # **注意 ``BaseException`` 里的 ``CancelledError`` 不在这里捕获**：
+        # 取消是控制流，吞掉它会让上层永远等不到结果。下面两个 except 只吃 Exception。
         try:
             return await self.parse_by_vxapi(url)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 —— 失败即降级，原因记下来
             logger.debug(f"[twitter] vxtwitter 失败: {e}")
+            failures.append(f"vxtwitter: {e}")
 
         try:
             return await self.parse_by_fxapi(url, tweet_id)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.debug(f"[twitter] fxtwitter 失败: {e}")
+            failures.append(f"fxtwitter: {e}")
 
-        return await self.parse_by_graphql(url, tweet_id)
+        # 这里是最后一级，异常必须以 ParseException 形式抛出：再往上就只有
+        # webui.parse_url 的裸 except Exception，那会变成 HTTP 500。
+        raise ParseException("Twitter 解析失败（" + "；".join(failures) + "）")
 
     # ------------------------------------------------------------------ #
     # 1) vxtwitter
@@ -111,7 +128,9 @@ class TwitterParser(BaseParser):
 
     async def parse_by_vxapi(self, url: str) -> ParseResult:
         api_url = url.replace("x.com", "api.vxtwitter.com").replace("twitter.com", "api.vxtwitter.com")
-        async with self.new_client(headers=self.headers) as client:
+        # 独立 UA：不能用全局 COMMON_HEADER，否则被 Cloudflare 挑战（见模块 docstring）
+        headers = {**self.headers, "User-Agent": VX_UA}
+        async with self.new_client(headers=headers) as client:
             response = await client.get(api_url)
             response.raise_for_status()
             data = response.json()
@@ -149,7 +168,11 @@ class TwitterParser(BaseParser):
 
     async def parse_by_fxapi(self, url: str, tweet_id: str) -> ParseResult:
         api_url = url.replace("x.com", "api.fxtwitter.com").replace("twitter.com", "api.fxtwitter.com")
-        async with self.new_client(headers=self.headers) as client:
+        # fxtwitter 要求非空 UA（空 UA → 401 并提示 "You must identify yourself
+        # with a User-Agent header"）。全局 COMMON_HEADER 不带这条限制，直接用即可；
+        # 这里显式兜住「headers 里没有 User-Agent」的极端情况。
+        headers = {**self.headers, "User-Agent": self.headers.get("User-Agent") or VX_UA}
+        async with self.new_client(headers=headers) as client:
             response = await client.get(api_url)
             if response.status_code >= 500:
                 raise ParseException(f"fxtwitter 服务异常: {response.status_code}")
@@ -192,138 +215,10 @@ class TwitterParser(BaseParser):
                         duration=duration,
                     )
                 )
-        return result
-
-    # ------------------------------------------------------------------ #
-    # 3) Guest GraphQL
-    # ------------------------------------------------------------------ #
-
-    async def parse_by_graphql(self, url: str, tweet_id: str) -> ParseResult:
-        # aiohttp 的代理是请求级参数；与 httpx 系解析器一样走全局 PROXY 配置
-        proxy = self.proxies
-        async with aiohttp.ClientSession() as session:
-            token = await self._guest_token(session, proxy=proxy)
-            headers = {
-                **self.headers,
-                "Authorization": f"Bearer {BEARER}",
-                "x-guest-token": token,
-                "x-twitter-active-user": "yes",
-                "x-twitter-client-language": "en",
-                "Referer": "https://twitter.com/",
-            }
-            params = {
-                "variables": json.dumps(
-                    {
-                        "tweetId": tweet_id,
-                        "withCommunity": False,
-                        "includePromotedContent": False,
-                        "withVoice": False,
-                    },
-                    separators=(",", ":"),
-                ),
-                "features": json.dumps(GRAPHQL_FEATURES, separators=(",", ":")),
-            }
-            async with session.get(
-                GRAPHQL_ENDPOINT, headers=headers, params=params,
-                proxy=proxy, timeout=aiohttp.ClientTimeout(total=20),
-            ) as response:
-                response.raise_for_status()
-                data = await response.json(content_type=None)
-
-        tweet = self._find_tweet(data, tweet_id)
-        if tweet is None:
-            raise ParseException("Twitter GraphQL 响应中未找到目标推文")
-
-        legacy = tweet.get("legacy") or {}
-        user_result = ((tweet.get("core") or {}).get("user_results") or {}).get("result") or {}
-        user_legacy = user_result.get("legacy") or {}
-
-        name = user_legacy.get("name") or ""
-        screen = user_legacy.get("screen_name") or ""
-        author = self.create_author(
-            f"{name}(@{screen})" if name and screen else (name or screen),
-            proxy_media_url(user_legacy.get("profile_image_url_https")),
-        )
-
-        result = self.result(
-            author=author, title=f"{author.name} 的推文" if author.name else "Twitter 推文",
-            text=legacy.get("full_text") or "",
-            timestamp=self._parse_created_at(legacy.get("created_at")),
-            url=url,
-        )
-
-        for media in (legacy.get("extended_entities") or {}).get("media") or []:
-            if not isinstance(media, dict):
-                continue
-            mtype = media.get("type")
-            if mtype == "photo":
-                img = media.get("media_url_https")
-                if img:
-                    result.contents.append(
-                        self.create_image(proxy_media_url(f"{img}?name=orig"))
-                    )
-            elif mtype in ("video", "animated_gif"):
-                video_url = self._best_variant(media)
-                if video_url:
-                    duration = ((media.get("video_info") or {}).get("duration_millis") or 0) / 1000 or None
-                    self._add_limit_warning(result, duration)
-                    result.contents.append(
-                        self.create_video(
-                            proxy_media_url(video_url), proxy_media_url(media.get("media_url_https")),
-                            duration=duration, is_gif=mtype == "animated_gif",
-                        )
-                    )
 
         if not result.contents and not result.text:
             raise ParseException("推文中没有可提取的内容")
         return result
-
-    async def _guest_token(self, session: aiohttp.ClientSession, proxy: str | None = None) -> str:
-        headers = {**self.headers, "Authorization": f"Bearer {BEARER}"}
-        async with session.post(
-            GUEST_TOKEN_URL, headers=headers, proxy=proxy,
-            timeout=aiohttp.ClientTimeout(total=15),
-        ) as response:
-            response.raise_for_status()
-            data = await response.json(content_type=None)
-        token = str(data.get("guest_token") or "").strip()
-        if not token:
-            raise ParseException("Twitter guest token 为空")
-        return token
-
-    @staticmethod
-    def _walk(obj: Any):
-        if isinstance(obj, dict):
-            yield obj
-            for value in obj.values():
-                yield from TwitterParser._walk(value)
-        elif isinstance(obj, list):
-            for value in obj:
-                yield from TwitterParser._walk(value)
-
-    @classmethod
-    def _find_tweet(cls, data: Any, tweet_id: str) -> dict | None:
-        for candidate in cls._walk(data):
-            legacy = candidate.get("legacy")
-            if not isinstance(legacy, dict):
-                continue
-            if str(candidate.get("rest_id") or legacy.get("id_str") or "") == str(tweet_id):
-                return candidate
-        return None
-
-    @staticmethod
-    def _best_variant(media: dict) -> str | None:
-        """在 video_info.variants 中挑选码率最高的 mp4。"""
-        variants = (media.get("video_info") or {}).get("variants") or []
-        best_url, best_rate = None, -1
-        for variant in variants:
-            url = variant.get("url") or ""
-            if ".mp4" not in url:
-                continue
-            rate = int(variant.get("bitrate") or 0)
-            if rate >= best_rate:
-                best_url, best_rate = url, rate
-        return best_url
 
     @staticmethod
     def _parse_created_at(value: Any) -> int | None:
