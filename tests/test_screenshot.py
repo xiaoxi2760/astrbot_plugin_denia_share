@@ -28,6 +28,7 @@ from astrbot_plugin_denia_share.core.config import ParserConfig  # noqa: E402
 from astrbot_plugin_denia_share.core.screenshot import (  # noqa: E402
     ScreenshotService,
     THUM_BASE,
+    describe_capture,
 )
 
 PAGE = "https://en.wikipedia.org/wiki/Internet_protocol_suite"
@@ -133,6 +134,43 @@ class ExtractTitle(unittest.TestCase):
         for raw in (b"\xff\xfe\x00", bytes(range(256)), b"<title>" + b"\xc3" * 50):
             with self.subTest(raw=raw[:8]):
                 self.assertIsInstance(ScreenshotService.extract_title(raw), str)
+
+
+class DescribeCapture(unittest.TestCase):
+    """整页截取的降级 / 触顶提醒（纯函数，只吃尺寸）。"""
+
+    def test_fullpage_hitting_cap_is_flagged(self):
+        notes = describe_capture(1216, 16000, full_page=True, backend="thum")
+        self.assertEqual(len(notes), 1)
+        self.assertIn("上限", notes[0])
+        self.assertIn("Cloudflare", notes[0], "触顶时得告诉用户还有别的路可走")
+
+    def test_fullpage_suspectly_short_is_flagged(self):
+        """维基 Python 那次抓失败退回 900 高 —— 这种情况必须提示，
+        否则用户只会以为「页面就这么短」。"""
+        for h in (900, 947, 1000):
+            with self.subTest(height=h):
+                notes = describe_capture(1200, h, full_page=True, backend="thum")
+                self.assertEqual(len(notes), 1)
+                self.assertIn("视窗", notes[0])
+
+    def test_healthy_fullpage_has_no_note(self):
+        self.assertEqual(describe_capture(1280, 11749, full_page=True, backend="thum"), [])
+        self.assertEqual(describe_capture(1280, 5009, full_page=True, backend="thum"), [])
+
+    def test_viewport_mode_never_flagged(self):
+        """只截视窗是用户的明确选择，不该被当成问题提醒。"""
+        for h in (900, 16000):
+            with self.subTest(height=h):
+                self.assertEqual(describe_capture(900, h, full_page=False, backend="thum"), [])
+
+    def test_cloudflare_backend_never_flagged(self):
+        """这两个限制是 thum 的，cloudflare 不受 16000 钳制。"""
+        for h in (900, 16000, 40000):
+            with self.subTest(height=h):
+                self.assertEqual(
+                    describe_capture(1280, h, full_page=True, backend="cloudflare"), []
+                )
 
 
 class CapturePlumbing(unittest.TestCase):

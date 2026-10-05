@@ -54,7 +54,11 @@ from .core.exception import (
     ParseException, IgnoreException, SilentException,
 )
 from .core.card_renderer import ShareCardRenderer
-from .core.screenshot import ScreenshotService, is_probably_screenshotable
+from .core.screenshot import (
+    ScreenshotService,
+    describe_capture,
+    is_probably_screenshotable,
+)
 from .core.parsers import (
     BilibiliParser, DouyinParser, KuaiShouParser, WeiBoParser,
     XiaoHongShuParser, TwitterParser, NGAParser, AcfunParser,
@@ -1069,22 +1073,23 @@ class DeniaSharePlugin(Star):
             )
             return
 
-        path = await self.screenshot.capture(
-            url, full_page=get_config().SCREENSHOT_FULL_PAGE
-        )
+        # 刻意**不套卡片模板**：整页长图塞进 16:9 的封面槽会被裁到只剩约 15%
+        # （等于废掉），开「封面不裁切」又会撑出一张两米高的卡片 —— 两种都
+        # 没法在聊天里看。截图就是单独发出去的原图，用文字把「这是什么」讲清楚。
+        full_page = get_config().SCREENSHOT_FULL_PAGE
+        path = await self.screenshot.capture(url, full_page=full_page)
         if path is None:
             detail = self.screenshot.last_error or "未知原因"
             yield event.plain_result(f"截图失败：{detail}\n{url}")
             return
 
-        # 刻意**不套卡片模板**：整页长图塞进 16:9 的封面槽会被裁到只剩约 15%
-        # （等于废掉），开「封面不裁切」又会撑出一张两米高的卡片 —— 两种都
-        # 没法在聊天里看。截图就是单独发出去的原图，用文字把「这是什么」讲清楚。
-        caption = await self._screenshot_caption(path, url)
+        caption = await self._screenshot_caption(path, url, full_page=full_page)
         await self._send_image(event, path)
         yield event.plain_result(caption)
 
-    async def _screenshot_caption(self, path: Path, url: str) -> str:
+    async def _screenshot_caption(
+        self, path: Path, url: str, *, full_page: bool
+    ) -> str:
         """给截图配一句能认出这张图的说明。
 
         只有 URL 的话，图是匿名的 —— 群里翻上去只能看到一张长图。所以尽量
@@ -1098,26 +1103,31 @@ class DeniaSharePlugin(Star):
         title = await self.screenshot.page_title(url)
         parts.append(f"网页截图：{title}" if title else "网页截图")
 
+        notes: list[str] = []
+        size_bytes = 0
         try:
             from PIL import Image as _Image
 
             with _Image.open(path) as im:
                 width, height = im.size
-            size_kb = max(1, path.stat().st_size // 1024)
-            parts.append(f"{width}×{height}，{size_kb} KB")
+            size_bytes = path.stat().st_size
+            parts.append(f"{width}×{height}，{max(1, size_bytes // 1024)} KB")
+            notes = describe_capture(
+                width, height, full_page=full_page, backend=self.screenshot.backend
+            )
         except Exception:  # noqa: BLE001 —— 读不出尺寸就不写，别为装饰抛异常
             pass
 
         parts.append(url)
-        caption = "\n".join(parts)
+        parts.extend(notes)
 
         # 超大图提醒一句：群里客户端会压缩/可能拒收，先给用户一个预期
-        try:
-            if path.stat().st_size > 5 * 1024 * 1024:
-                caption += "\n（整页长图较大，客户端可能压缩或发送失败；可在配置里关掉「截整页长图」）"
-        except OSError:
-            pass
-        return caption
+        if size_bytes > 5 * 1024 * 1024:
+            parts.append(
+                "（整页长图较大，客户端可能压缩或发送失败；"
+                "可在配置里关掉「截整页长图」）"
+            )
+        return "\n".join(parts)
 
     async def _send_image(self, event: AstrMessageEvent, path: Path):
         """主动发送图片，绕开事件回复管线，避免被附加「引用回复 / @」。"""
