@@ -7,13 +7,18 @@
 两个后端，由配置 `SCREENSHOT_BACKEND` 选择：
 
 - `thum`（默认）：image.thum.io，免 key、开箱即用。
-  实测连打 4/4 成功，输出 900×900 的视窗截图。
-  缺点：无法等待 JS、无法指定视窗尺寸、强反爬站点只能截到空白。
+  视窗截图实测稳定 4/4；整页靠 URL 里的 `/fullpage` 选项
+  （不写这个选项就只有 1280×1280 的方图，长页面上等于只看到顶部一小块）。
+  缺点：无法等待 JS、无法指定 deviceScaleFactor，强反爬站点只能截到空白。
 
 - `cloudflare`：Cloudflare Browser Rendering，需要 Account ID + API Token。
   功能强得多（视窗尺寸 / deviceScaleFactor / fullPage / waitUntil /
-  指定选择器 / 自定义 UA / Cookie），适合要截长图或 JS 重页面的场景。
+  指定选择器 / 自定义 UA / Cookie），适合要等 JS 重页面的场景。
   实现参考 rika_share 的 cloudflare_screenshot.py，本文件为其精简版。
+
+``SCREENSHOT_FULL_PAGE``（默认开）决定要不要整页。**截图是单独发出去的图片，
+不走卡片渲染器** —— 整页长图塞进 16:9 的封面槽会被裁到只剩一小条，
+开「封面不裁切」又会撑出一张两米高的卡片，两种都不可用。
 
 两者都直接把图片落到 cache_dir，返回 Path 供发送。
 """
@@ -109,7 +114,7 @@ class ScreenshotService:
         try:
             if self.backend == "cloudflare":
                 return await self._capture_cloudflare(url, full_page=full_page)
-            return await self._capture_thum(url)
+            return await self._capture_thum(url, full_page=full_page)
         except Exception as e:
             self.last_error = f"{type(e).__name__}: {str(e)[:160]}"
             logger.warning(f"[screenshot] 截图失败 {url}: {self.last_error}")
@@ -117,9 +122,27 @@ class ScreenshotService:
 
     # ────────────── thum.io ────────────── #
 
-    async def _capture_thum(self, url: str) -> Path | None:
-        # width 固定 900：thum.io 免费版只认这一档左右，再大不稳定
-        target = f"{THUM_BASE}/width/900/noanimate/{url}"
+    @staticmethod
+    def build_thum_url(url: str, *, full_page: bool = False) -> str:
+        """拼 thum.io 的取图地址（纯函数，方便单测）。
+
+        thum.io 的选项是拼在路径里的（``/get/<opt>/<opt>/…``）。**``fullpage``
+        必须显式写进路径**：不写就只有视窗，而它的视窗默认是 1280×1280 的方图 ——
+        长页面上等于只看到顶部一小块，整页内容全丢。实测一个维基长文：
+        视窗 1280×1280 / 619 KB，``fullpage`` 1280×16842 / 8.3 MB。
+
+        宽度按是否整页给不同档：整页 1280（900 宽的长图在手机上要缩到看不清字），
+        视窗仍用 900（thum.io 免费版在这一档最稳）。
+        """
+        width = 1280 if full_page else 900
+        options = ["width/%d" % width]
+        if full_page:
+            options.append("fullpage")
+        options.append("noanimate")
+        return f"{THUM_BASE}/{'/'.join(options)}/{url}"
+
+    async def _capture_thum(self, url: str, *, full_page: bool = False) -> Path | None:
+        target = self.build_thum_url(url, full_page=full_page)
         path = self.cache_dir / f"thum_{uuid.uuid4().hex[:12]}.png"
 
         async with httpx.AsyncClient(

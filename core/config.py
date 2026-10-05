@@ -251,6 +251,18 @@ CONFIG_META: tuple[dict[str, Any], ...] = (
         "hint": "thum=image.thum.io，900×900 视窗图开箱即用；cloudflare 可截长图/等待 JS，但必须有账号",
     },
     {
+        "key": "SCREENSHOT_FULL_PAGE",
+        "group": "网页截图",
+        "subgroup": "通用",
+        "label": "截整页长图",
+        "type": "bool",
+        "default": True,
+        "hint": "开启=截整页（长文章能看全），关闭=只截首屏视窗。实测差别很大：一个维基长文"
+                "关掉只有 1280×1280 的方图（只看到顶部一小块），开完整页是 1280×16842。"
+                "代价是长图可能有几十 MB、群里发出去客户端会压缩，所以默认开启但可关。"
+                "两个后端都支持整页（thum 走 /fullpage，cloudflare 走 fullPage）",
+    },
+    {
         "key": "SCREENSHOT_FALLBACK",
         "group": "网页截图",
         "subgroup": "通用",
@@ -925,6 +937,15 @@ class ParserConfig:
     def SCREENSHOT_FALLBACK(self) -> bool:
         """链接匹配不到任何平台时，是否自动截图（默认关，避免群里刷图）。"""
         return bool(self._cfg_get("SCREENSHOT_FALLBACK", False))
+
+    @property
+    def SCREENSHOT_FULL_PAGE(self) -> bool:
+        """是否截整页长图（默认开）。
+
+        默认开而不是默认关，是因为视窗截图在长页面上几乎不可用：thum 后端
+        实测关掉整页只给 1280×1280 的方图，一个维基长文只能看到顶部一小块。
+        """
+        return bool(self._cfg_get("SCREENSHOT_FULL_PAGE", True))
 
     @property
     def CF_ACCOUNT_ID(self) -> str:

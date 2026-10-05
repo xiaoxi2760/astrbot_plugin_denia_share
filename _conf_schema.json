@@ -163,6 +163,13 @@
           "cloudflare（需账号）"
         ]
       },
+      "SCREENSHOT_FULL_PAGE": {
+        "description": "截整页长图",
+        "type": "bool",
+        "default": true,
+        "invisible": true,
+        "hint": "开启=截整页（长文章能看全），关闭=只截首屏视窗。实测差别很大：一个维基长文关闭只有 1280×1280 的方图（只看到顶部一小块），开启整页是 1280×16842。代价是长图可能有几十 MB、群里发出去客户端会压缩，所以默认开启但可关。两个后端都支持整页（thum 走 /fullpage，cloudflare 走 fullPage）"
+      },
       "SCREENSHOT_FALLBACK": {
         "description": "匹配不到平台的链接自动截图",
         "type": "bool",
