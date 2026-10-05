@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import sys
 import tempfile
 import zipfile
@@ -26,10 +27,20 @@ FORBIDDEN = ("__pycache__", "tests/", "DEVELOPMENT.md", "package.py")
 
 
 def default_zip() -> Path:
-    candidates = sorted(PLUGIN_DIR.parent.glob("astrbot_plugin_denia_share_v*.zip"))
+    """工作区里版本号最高的包。
+
+    **必须按版本号比，不能按文件名排序** —— 字符串排序下 ``v1.3.0`` 排在
+    ``v1.2.5`` 之后，于是「验最新的包」会静默验到一个旧包，而且照样全绿。
+    """
+    candidates = list(PLUGIN_DIR.parent.glob("astrbot_plugin_denia_share_v*.zip"))
     if not candidates:
         raise SystemExit("工作区里没有找到 astrbot_plugin_denia_share_v*.zip")
-    return candidates[-1]
+
+    def version_of(path: Path) -> tuple[int, ...]:
+        digits = re.findall(r"\d+", path.stem.split("_v", 1)[-1])
+        return tuple(int(d) for d in digits) or (0,)
+
+    return max(candidates, key=version_of)
 
 
 def check(archive: Path) -> int:
