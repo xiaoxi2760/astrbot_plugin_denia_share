@@ -1069,7 +1069,9 @@ class DeniaSharePlugin(Star):
             )
             return
 
-        path = await self.screenshot.capture(url)
+        path = await self.screenshot.capture(
+            url, full_page=get_config().SCREENSHOT_FULL_PAGE
+        )
         if path is None:
             detail = self.screenshot.last_error or "未知原因"
             yield event.plain_result(f"截图失败：{detail}\n{url}")
