@@ -205,6 +205,20 @@ CONFIG_META: tuple[dict[str, Any], ...] = (
         "options": ["360P", "480P", "720P", "1080P", "1080P+", "4K", "8K"],
         "hint": "高画质需要对应账号权限；未登录时实际只能拿到 720P",
     },
+    {
+        "key": "BILI_CODEC",
+        "group": "B站设置",
+        "label": "B站视频编码偏好",
+        "type": "select",
+        "default": "H.264 优先",
+        "options": ["H.264 优先", "H.265 优先", "AV1 优先"],
+        "hint": (
+            "同一个视频 B站提供多种压缩格式，这里决定优先下哪一种。"
+            "H.264 任何客户端都能播；AV1 体积最小但老客户端（如电脑版 QQ）放出来会花屏；"
+            "H.265 介于两者之间。4K/8K 往往只有 H.265/AV1 可选，此时会自动退而求其次，"
+            "不会下载失败——所以切到 H.264 优先不会让 4K 视频下不下来，只会拿不到该档的 H.264 版本"
+        ),
+    },
     # ---------------- Steam 设置 ---------------- #
     {
         "key": "STEAM_REGION",
@@ -929,6 +943,19 @@ class ParserConfig:
     @property
     def BILI_QUALITY(self) -> str:
         return str(self._cfg_get("BILI_QUALITY", "1080P"))
+
+    @property
+    def BILI_CODEC(self) -> str:
+        """B站视频编码偏好。
+
+        读侧也要兜一层：配置文件可能被手工改过或从旧版本带过来一个
+        不在白名单里的值，此时静默回退默认，而不是把脏值透给解析器
+        （解析器只认这三个字面量，拿到别的就只有 codec 顺序错乱或报错）。
+        """
+        value = str(self._cfg_get("BILI_CODEC", "H.264 优先") or "").strip()
+        if value in ("H.264 优先", "H.265 优先", "AV1 优先"):
+            return value
+        return "H.264 优先"
 
     # ---------------- Steam ---------------- #
 

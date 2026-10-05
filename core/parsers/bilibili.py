@@ -35,6 +35,29 @@ class BilibiliParser(BaseParser):
     platform: ClassVar[Platform] = platform_of(PlatformEnum.BILIBILI)
 
     @staticmethod
+    def _codec_order(codecs_enum: type, preference: str) -> list:
+        """按配置项决定 ``detect_best_streams`` 的 codec 优先顺序。
+
+        为什么要这个开关：同一个视频 B站会同时提供多种压缩格式，而它们的
+        兼容性差距极大。AV1 体积最小，但老客户端（尤其电脑版 QQ）硬解不了，
+        发过去就是花屏；H.264 任何客户端都能播，代价是同画质下体积大一些。
+
+        1.2.x 把 AV1 排在第一位，那是为了省流量，无意间把「能下下来」和
+        「放得出来」混成了一件事。这里把顺序交还给用户。
+
+        注意这里只决定**同清晰度下**挑哪个编码，不影响清晰度本身：
+        4K/8K 常常只有 H.265/AV1，配置成 H.264 优先时只是拿不到该档的
+        H.264 版本，``detect_best_streams`` 会按列表顺序退到 H.265/AV1，
+        不会因此下载失败。
+        """
+        order = {
+            "H.264 优先": ("AVC", "HEV", "AV1"),
+            "H.265 优先": ("HEV", "AVC", "AV1"),
+            "AV1 优先": ("AV1", "AVC", "HEV"),
+        }.get(str(preference or "").strip(), ("AVC", "HEV", "AV1"))
+        return [getattr(codecs_enum, name) for name in order]
+
+    @staticmethod
     def _is_transient_api_error(error: Exception) -> bool:
         """判断 B站接口错误是否适合重试。
 
@@ -429,7 +452,7 @@ class BilibiliParser(BaseParser):
         detecter = VideoDownloadURLDataDetecter(download_url_data)
         streams = detecter.detect_best_streams(
             video_max_quality=target_quality,
-            codecs=[VideoCodecs.AV1, VideoCodecs.AVC, VideoCodecs.HEV],
+            codecs=self._codec_order(VideoCodecs, get_config().BILI_CODEC),
             no_dolby_video=True, no_hdr=True,
         )
 
