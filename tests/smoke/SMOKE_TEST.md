@@ -4,14 +4,17 @@
 **这不是单元测试**——单元测试验逻辑，冒烟测试验「今天这台机器、这个网络下、
 这个链接还能不能用」，两者都会坏，但坏的原因完全不同。
 
-## 怎么跑
+## 跑
 
 ```bash
 # 走本地代理（默认 127.0.0.1:7897）
 py -3 tests/smoke/run_smoke.py
 
-# 直连（Steam 之类走代理反而连不上的平台用这个）
+# 直连
 py -3 tests/smoke/run_smoke.py ""
+
+# 只跑一个平台，例如 steam
+py -3 tests/smoke/run_smoke.py "" steam
 ```
 
 结果分层输出：**第一层派发**（离线、确定性）、**第二层解析**（联网）。
@@ -39,9 +42,9 @@ py -3 tests/smoke/run_smoke.py ""
 **为什么不断言文案**：平台文案随时变，拿它当断言只会让测试变成随机失败，
 真正坏了的时候你反而会忽略红字。
 
-## 当前结果（2026-10-05，代理 127.0.0.1:7897）
+## 当前结果（2026-10-06，代理 127.0.0.1:7897）
 
-**34 条用例，其中 15 条有 URL 可跑。5 条通过。**
+**34 条用例，其中 15 条有 URL 可跑。8 条通过。**
 
 ### 通过
 
@@ -52,6 +55,9 @@ py -3 tests/smoke/run_smoke.py ""
 | GitHub | Issue | `.../issues/158868` | 图=1 |
 | Pixiv | 插画 | `pixiv.net/artworks/87070841` | 图=1 |
 | Pixiv | 作品 | `pixiv.net/artworks/115779535` | 图=1 |
+| Steam | 游戏商店页 | `store.steampowered.com/app/730/` | Counter-Strike 2 图=4 |
+| Steam | DLC | `store.steampowered.com/sub/400/` | Portal 图=4 |
+| Steam | 合集/包 | `store.steampowered.com/bundle/1145360/` | Hades 图=4 |
 
 ### 失败 —— 分三类，不要混为一谈
 
@@ -59,7 +65,7 @@ py -3 tests/smoke/run_smoke.py ""
 
 | 平台 | 现象 | 结论 |
 |---|---|---|
-| Steam ×3 | 派发 OK，解析时 `ConnectError` | 代理和**直连都**连不上 store.steampowered.com。本机网络问题 |
+| Steam ×3 | 派发 OK，解析时 `ConnectError` | **已定位并修复**（见下面「Steam 连不通的根因」）。修复后走代理 3/3 通过 |
 | B站 ×2 | `TypeError: object _Any can't be used in 'await'` | **测试环境限制**：`bilibili_api` 是桩，`Video` 类的方法不是真的 async。B站要等搬到自建解析器才能离线跑 |
 | 微博 ×3 | `ValidationError: Object missing required field 'data'` | 见下面「发现 3」——接口返回了错误 JSON |
 
@@ -71,6 +77,55 @@ py -3 tests/smoke/run_smoke.py ""
 | AcFun 番剧 `bangumi/aa5023295` | 派发失败 | 符合预期，插件没注册 bangumi pattern。见「发现 2」 |
 
 **C. 真问题（要改代码）** → 见下面「冒烟发现」
+
+---
+
+## Steam 连不通的根因（已修复）
+
+**症状**：三条 Steam 用例全部 `ConnectError: [SSL: UNEXPECTED_EOF_WHILE_READING]`。
+
+**根因**：`C:\Windows\System32\drivers\etc\hosts` 里有 15 行把 Steam 域名指向 `127.0.0.1`：
+
+```
+127.0.0.1 store.steampowered.com      ← 解析器唯一依赖的域名
+127.0.0.1 api.steampowered.com
+127.0.0.1 steamcommunity.com
+127.0.0.1 media.steampowered.com
+... 共 15 行
+```
+
+Steam 客户端（或去广告/加速工具）会往 hosts 写这些行来屏蔽商店图片和社区页、
+加速自己的 UI。结果 `store.steampowered.com` 解析到 `127.0.0.1`，443 端口直接连不通。
+
+**一个容易误判的点**：当时**代理也失败**，看着像线路问题。其实走 HTTP 代理时
+客户端把域名交给代理解析、本地 hosts 不该生效——真正的原因是 DNS 缓存里还留着
+被污染的解析结果。`ipconfig /flushdns` 之后代理路径也一起好了。
+
+**修复**：管理员 PowerShell 把那 15 行注释掉 + flushdns（备份在 `hosts.denia_bak`）：
+
+```powershell
+$hosts = "$env:SystemRoot\System32\drivers\etc\hosts"
+Copy-Item $hosts "$hosts.denia_bak" -Force
+$out = foreach ($l in [IO.File]::ReadAllLines($hosts)) {
+  if ($l -match '(?i)^\s*127\.0\.0\.1\s+\S*(steam|steampowered)') { "# [denia] 已停用: $l" }
+  else { $l }
+}
+[IO.File]::WriteAllLines($hosts, $out)
+ipconfig /flushdns | Out-Null
+```
+
+**修复后**：走代理 **3/3 通过**（CS2 / Portal DLC / Hades 合集），直连 2/3
+（DLC 那条直连仍不稳，走代理就正常）。
+
+**注意两点**：
+
+1. **Steam 客户端开着的话可能把行写回去。** 要长期保持得在 Steam 设置里关掉相关项。
+2. **这个只影响本机。** 插件跑在服务器 / Docker / VPS 上的话，那台机器 hosts
+   大概率是干净的，Steam 本来就正常——所以这条不该记成插件 bug。
+
+**顺带一条排查经验**：`cheapshark.com`（Steam 价格史数据源，解析器还依赖它）
+走同一条线路是通的，说明**只有 `store.steampowered.com` 这一个域名的线路有问题**。
+下次遇到「同组域名有的通有的不通」，先把每个域名单独探一遍，别整体归因为「网络不通」。
 
 ---
 

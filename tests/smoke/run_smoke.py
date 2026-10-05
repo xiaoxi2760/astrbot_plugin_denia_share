@@ -43,15 +43,29 @@ def dispatch_check(cases) -> list[tuple[Case, str | None]]:
 
 async def main() -> int:
     proxy = sys.argv[1] if len(sys.argv) > 1 else DEFAULT_PROXY
+    # 可选第二个参数：只跑某个平台，例如 run_smoke.py "" steam
+    only = sys.argv[2].strip().lower() if len(sys.argv) > 2 else ""
     proxy = proxy or None
+
+    all_cases = CASES
+    if only:
+        all_cases = [c for c in CASES if only in c.platform.lower()]
+        if not all_cases:
+            print(f"没有匹配 '{only}' 的用例；可用平台：")
+            for name in sorted({c.platform for c in CASES}):
+                print(f"  {name}")
+            return 2
+
     print(f"代理: {proxy or '直连'}")
-    print(f"用例: 共 {len(CASES)} 条，其中有 URL 可跑 {len(runnable())} 条")
+    if only:
+        print(f"过滤: 只跑含 '{only}' 的用例")
+    print(f"用例: 共 {len(all_cases)} 条，其中有 URL 可跑 {len([c for c in all_cases if c.url])} 条")
 
     # ---- 第一层：派发 ----
     print("\n" + "=" * 60)
     print("第一层：派发（离线，确定性）")
     print("=" * 60)
-    dispatch = dispatch_check(CASES)
+    dispatch = dispatch_check(all_cases)
     bad_dispatch = []
     for case, got in dispatch:
         if not case.url:
@@ -66,7 +80,7 @@ async def main() -> int:
     print("\n" + "=" * 60)
     print("第二层：解析（联网）")
     print("=" * 60)
-    results = await harness.run_all(runnable(), proxy, TIMEOUT)
+    results = await harness.run_all([c for c in all_cases if c.url], proxy, TIMEOUT)
 
     passed = [v for v in results if v.ok]
     by_stage: dict[str, list] = {}
@@ -90,7 +104,7 @@ async def main() -> int:
         for v in items:
             print(f"      {v.platform}/{v.kind}  {v.reason[:90]}")
 
-    missing = [c for c in CASES if not c.url]
+    missing = [c for c in all_cases if not c.url]
     print(f"\n  待补 URL: {len(missing)}")
     for c in missing:
         print(f"      {c.platform:<12} {c.kind:<12} {c.note}")
