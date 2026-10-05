@@ -326,18 +326,25 @@ class DeniaSharePlugin(Star):
 
         AstrBot < 4.24.2 没有 register_web_api，此时静默跳过——
         聊天命令与解析功能都不受影响，只是没有网页界面。
+
+        4.24.2 ~ 4.26.x 有 register_web_api 但没有 astrbot.api.web，
+        由 core/web_compat 自动回退到 quart，两条路径行为一致。
         """
         if not hasattr(self.context, "register_web_api"):
             logger.info("[denia_share] 当前 AstrBot 不支持插件页面，跳过 WebUI 注册")
             self._webui_ready = False
             return
         try:
+            from .core.web_compat import HAS_WEB_API
             from .core.webui import WebUIApi
 
             self._webui = WebUIApi(self)
             self._webui.register()
             self._webui_ready = True
-            logger.info("[denia_share] WebUI 接口已注册（插件页面 pages/denia）")
+            logger.info(
+                "[denia_share] WebUI 接口已注册（插件页面 pages/denia，响应后端=%s）",
+                "astrbot.api.web" if HAS_WEB_API else "quart 兼容层",
+            )
         except Exception:
             self._webui_ready = False
             logger.warning("[denia_share] WebUI 接口注册失败", exc_info=True)

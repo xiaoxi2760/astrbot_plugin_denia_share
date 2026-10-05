@@ -13,6 +13,10 @@
 安全约定：页面运行在受限 iframe 里，但后端仍按「不可信输入」处理——
 配置只接受白名单键、缓存文件只允许访问 ``cache_dir`` 内且能被记录引用的文件、
 链接长度与格式都做校验。
+
+版本兼容：``register_web_api`` 从 AstrBot 4.24.2 起可用，而 ``astrbot.api.web``
+要 4.27 才有。本模块不直接 import 后者，全部经 :mod:`.web_compat` 走，
+否则 4.24.2~4.26.x 上会出现「路由注册成功但每次调用都抛 ImportError」的白屏。
 """
 
 from __future__ import annotations
@@ -22,6 +26,7 @@ import base64
 import io
 import time
 import uuid
+from collections import OrderedDict
 from pathlib import Path
 from typing import Any, Callable, Iterable
 
@@ -38,6 +43,14 @@ from .exception import IgnoreException, ParseException
 from .media_utils import clear_cache_dir, cleanup_cache_dir, is_docker_environment
 from .relay import resolve_callback_base
 from .screenshot import is_probably_screenshotable
+from .web_compat import (
+    HAS_WEB_API,
+    error_response as _error,
+    file_response,
+    get_json_body,
+    json_response as _json_response,
+    query_arg,
+)
 
 
 def _astrbot_callback_base() -> str:
@@ -72,15 +85,35 @@ except ImportError:  # pragma: no cover
 
 
 def _json_response(data: Any, status_code: int = 200):
-    from astrbot.api.web import json_response
+    """成功响应（裸业务对象，不套信封）。
+
+    实现见 :mod:`.web_compat` —— 那里统一处理了 ``astrbot.api.web``（4.27+）
+    与 quart 两种宿主形态的差异。此处保留薄封装，是为了让 23 个调用点的
+    写法与历史一致、不必逐个改成 import 别名。
+    """
+    from .web_compat import json_response
 
     return json_response(data, status_code=status_code)
 
 
 def _error(message: str, status_code: int = 400):
-    from astrbot.api.web import error_response
+    """失败响应。信封形状由 :mod:`.web_compat` 保证两条路径一致。"""
+    from .web_compat import error_response
 
     return error_response(message, status_code=status_code)
+
+
+def _response_status(response: Any) -> Any:
+    """从返回值里取 HTTP 状态码，取不到就返回 "?"。
+
+    两种宿主形态的返回值形状不同：quart 是带 ``status`` 的 Response 对象，
+    而 ``astrbot.api.web`` 的响应对象字段名未公开、可能压根不叫 ``status``。
+    记日志用，宁可显示 "?" 也不能让取状态码本身抛异常——那会把一次成功的
+    接口调用变成 500。
+    """
+    if isinstance(response, tuple) and len(response) > 1:
+        return response[1]
+    return getattr(response, "status", None) or getattr(response, "status_code", None) or "?"
 
 
 def _dir_stats(path: Path) -> tuple[int, int]:
@@ -147,6 +180,60 @@ def _has_alpha(image: Any) -> bool:
         return False
 
 
+# ---------------- 预览图编码缓存 ----------------
+#
+# 缓存页每次 render() 都会 clear 容器重建整张列表，每一行重新请求
+# cache/thumbnail —— 也就是把同一批卡片图重新开一遍、缩一遍、base64 编一遍。
+# 按「刷新」按钮、切走再切回来都会重来一次，一页 20 条就是 20 次 Pillow 全量重编码。
+#
+# 按字节预算而不是条数淘汰：单张 900px 预览就有可能几百 KB，条数上限换算出来的
+# 内存占用太难看。存的是 base64 字符串（比二进制大约 1.37 倍），预算就按字符串长度算。
+_IMAGE_CACHE_BUDGET = 24 * 1024 * 1024
+_image_cache: "OrderedDict[tuple[str, int, int, int], str]" = OrderedDict()
+_image_cache_bytes = 0
+
+
+def _image_data_url_cached(path: Path, max_width: int = PREVIEW_MAX_WIDTH) -> str | None:
+    """带缓存的 :func:`_image_data_url`。
+
+    缓存键带上 mtime_ns 与文件大小：卡片被重新渲染（重新生成一张图）时这两个都会变，
+    因此不会把上一版的预览图配给新的卡片文件。stat 失败（文件刚好被清掉）就不走缓存。
+    """
+    global _image_cache_bytes
+
+    try:
+        stat = path.stat()
+    except OSError:
+        stat = None
+    key = (str(path), stat.st_mtime_ns, stat.st_size, max_width) if stat else None
+
+    if key is not None:
+        hit = _image_cache.get(key)
+        if hit is not None:
+            _image_cache.move_to_end(key)
+            return hit
+
+    value = _image_data_url(path, max_width)
+    # 只缓存成功的结果：失败（文件已清理、格式不认识）多半是暂时的，
+    # 缓存下来会让「文件后来补齐了」也永远拿不到图。
+    if key is None or value is None:
+        return value
+
+    _image_cache[key] = value
+    _image_cache_bytes += len(value)
+    while _image_cache_bytes > _IMAGE_CACHE_BUDGET and _image_cache:
+        _, evicted = _image_cache.popitem(last=False)
+        _image_cache_bytes -= len(evicted)
+    return value
+
+
+def clear_image_cache() -> None:
+    """清空预览图缓存（清理缓存/删除记录后调用，避免留着指向已删文件的条目）。"""
+    global _image_cache_bytes
+    _image_cache.clear()
+    _image_cache_bytes = 0
+
+
 def _safe_under(base: Path, candidate: Path) -> Path | None:
     """把 candidate 解析到 base 之内，越界返回 None（防目录穿越）。"""
     try:
@@ -194,7 +281,48 @@ class WebUIApi:
             ("/bili/logout", self.bili_logout, ("POST",), "清除B站 Cookie"),
         )
         for suffix, handler, methods, desc in routes:
-            context.register_web_api(f"/{PLUGIN_NAME}{suffix}", handler, list(methods), desc)
+            context.register_web_api(
+                f"/{PLUGIN_NAME}{suffix}",
+                self._with_timing(suffix, handler),
+                list(methods),
+                desc,
+            )
+
+    @staticmethod
+    def _with_timing(suffix: str, handler: Callable[..., Any]) -> Callable[..., Any]:
+        """给每个 handler 包一层耗时日志。
+
+        WebUI 的排障有个特点：用户报「点了没反应 / 一直是转圈」，能看到的只有
+        浏览器控制台，服务器这边没有对应记录。给全部 23 个路由统一记
+        「开始 / 完成（含状态码与耗时）/ 失败（含异常栈）」，用户截图里的时间点
+        就能和日志对上——否则只能靠猜。
+
+        失败路径必须重新抛出：吞掉异常会返回一个 200 空响应，页面上表现为
+        「按钮点了没反应」，比报错更难查。
+        """
+
+        async def timed(*args: Any, **kwargs: Any):
+            started = time.perf_counter()
+            try:
+                response = await handler(*args, **kwargs)
+            except Exception:
+                elapsed = int((time.perf_counter() - started) * 1000)
+                logger.error(
+                    "[denia_share] WebUI %s 失败 耗时=%dms", suffix, elapsed, exc_info=True
+                )
+                raise
+            elapsed = int((time.perf_counter() - started) * 1000)
+            logger.info(
+                "[denia_share] WebUI %s 状态=%s 耗时=%dms",
+                suffix,
+                _response_status(response),
+                elapsed,
+            )
+            return response
+
+        timed.__name__ = f"webui_{handler.__name__}"
+        timed.__doc__ = handler.__doc__
+        return timed
 
     # ==================== 总览 ==================== #
 
@@ -289,9 +417,7 @@ class WebUIApi:
         return _json_response(payload)
 
     async def save_config(self):
-        from astrbot.api.web import request
-
-        body = await request.json(default={}) or {}
+        body = await get_json_body()
         values = body.get("values") if isinstance(body, dict) else None
         if not isinstance(values, dict) or not values:
             return _error("没有需要保存的配置项")
@@ -348,9 +474,7 @@ class WebUIApi:
         )
 
     async def toggle_platform(self):
-        from astrbot.api.web import request
-
-        body = await request.json(default={}) or {}
+        body = await get_json_body()
         name = str(body.get("name") or "").strip().lower()
         enabled = bool(body.get("enabled"))
         if name not in PLATFORM_DISPLAY_NAMES:
@@ -450,9 +574,7 @@ class WebUIApi:
     # ==================== 手动解析 ==================== #
 
     async def parse_url(self):
-        from astrbot.api.web import request
-
-        body = await request.json(default={}) or {}
+        body = await get_json_body()
         # 与聊天链路对齐：口令 / 整段分享文本直接整段交给解析器匹配，不再要求
         # http(s) 开头。聊天侧 _process_url 就是把整条 message_str 传给
         # parser.search_url（各解析器自己的 pattern 负责从文本里摘链接），所以
@@ -503,9 +625,7 @@ class WebUIApi:
 
     async def render_cached(self):
         """用内存里缓存的解析结果，按指定外观重新渲染（不重新联网解析）。"""
-        from astrbot.api.web import request
-
-        body = await request.json(default={}) or {}
+        body = await get_json_body()
         cache_key = str(body.get("cache_key") or "").strip()
         if not cache_key:
             return _error("缺少 cache_key")
@@ -609,7 +729,7 @@ class WebUIApi:
         if not temporary:
             self.plugin._render_cache[cache_key] = path
 
-        data_url = await asyncio.to_thread(_image_data_url, path)
+        data_url = await asyncio.to_thread(_image_data_url_cached, path)
         if data_url is None:
             return None
         return {
@@ -697,9 +817,7 @@ class WebUIApi:
 
         供「外观」页实时预览：改一个参数立刻看到效果，无需真的去解析一条链接。
         """
-        from astrbot.api.web import request
-
-        body = await request.json(default={}) or {}
+        body = await get_json_body()
         overrides = body.get("preview")
         overrides = overrides if isinstance(overrides, dict) else {}
 
@@ -732,7 +850,7 @@ class WebUIApi:
         if path is None:
             return _error("示例卡片渲染失败，请检查字体配置", 500)
 
-        data_url = await asyncio.to_thread(_image_data_url, path, 720)
+        data_url = await asyncio.to_thread(_image_data_url_cached, path, 720)
         if data_url is None:
             return _error("预览图生成失败", 500)
         return _json_response(
@@ -794,9 +912,7 @@ class WebUIApi:
         return prefs
 
     async def save_appearance(self):
-        from astrbot.api.web import request
-
-        body = await request.json(default={}) or {}
+        body = await get_json_body()
         prefs = body.get("prefs") if isinstance(body, dict) else None
         if not isinstance(prefs, dict):
             return _error("缺少 prefs 对象")
@@ -824,9 +940,7 @@ class WebUIApi:
     # ==================== 网页截图 ==================== #
 
     async def screenshot(self):
-        from astrbot.api.web import request
-
-        body = await request.json(default={}) or {}
+        body = await get_json_body()
         url = str(body.get("url") or "").strip()
         if not url:
             return _error("请填写要截图的网址")
@@ -843,7 +957,7 @@ class WebUIApi:
         if path is None:
             return _error(f"截图失败：{service.last_error or '未知原因'}", 502)
 
-        data_url = await asyncio.to_thread(_image_data_url, path, 720)
+        data_url = await asyncio.to_thread(_image_data_url_cached, path, 720)
         return _json_response(
             {
                 "url": url,
@@ -857,15 +971,14 @@ class WebUIApi:
     # ==================== 解析记录 / 缓存 ==================== #
 
     async def list_cache(self):
-        from astrbot.api.web import request
+        keyword = query_arg("keyword").strip()
+        platform = query_arg("platform").strip().lower()
+        via = query_arg("via").strip().lower()
 
-        keyword = (request.query.get("keyword") or "").strip()
-        platform = (request.query.get("platform") or "").strip().lower()
-        via = (request.query.get("via") or "").strip().lower()
         def _query_int(name: str, default: int, upper: int) -> int:
             """query 参数转 int，非法值回退默认（不依赖框架 type=int 的失败语义）。"""
-            raw = request.query.get(name)
-            if raw is None or raw == "":
+            raw = query_arg(name)
+            if not raw:
                 return default
             try:
                 return max(0 if name == "offset" else 1, min(upper, int(raw)))
@@ -930,9 +1043,7 @@ class WebUIApi:
         )
 
     async def delete_cache(self):
-        from astrbot.api.web import request
-
-        body = await request.json(default={}) or {}
+        body = await get_json_body()
         raw_ids = body.get("ids")
         if isinstance(raw_ids, str):
             raw_ids = [raw_ids]
@@ -947,15 +1058,17 @@ class WebUIApi:
         removed_files = 0
         if purge:
             removed_files = await asyncio.to_thread(self._purge_files, ids)
+            if removed_files:
+                # 卡片文件没了，缓存里对应的 base64 也没用了（键里的
+                # mtime/size 变了自然不会命中，但条目会白占预算直到被淘汰）
+                clear_image_cache()
         removed = await asyncio.to_thread(store.delete, ids)
         return _json_response(
             {"removed": removed, "removed_files": removed_files, "ids": ids}
         )
 
     async def clear_cache(self):
-        from astrbot.api.web import request
-
-        body = await request.json(default={}) or {}
+        body = await get_json_body()
         scope = str(body.get("scope") or "all").strip().lower()
         if scope not in {"records", "files", "all"}:
             return _error("scope 只能是 records / files / all")
@@ -974,6 +1087,8 @@ class WebUIApi:
                 return _error(f"清空缓存文件失败：{str(exc)[:160]}", 500)
             self.plugin._result_cache.clear()
             self.plugin._render_cache.clear()
+            # 卡片文件被清空，缓存里的 base64 全部指向不存在的文件
+            clear_image_cache()
 
         files, size = await asyncio.to_thread(_dir_stats, self.plugin.cache_dir)
         result["cache"] = {"files": files, "size_bytes": size, "size_text": fmt_size_bytes(size)}
@@ -981,9 +1096,7 @@ class WebUIApi:
 
     async def cleanup_cache(self):
         """按 CACHE_TTL_HOURS 清理过期的缓存文件（不删除解析记录）。"""
-        from astrbot.api.web import request
-
-        body = await request.json(default={}) or {}
+        body = await get_json_body()
         ttl = body.get("ttl_hours")
         if ttl is None:
             ttl = get_config().CACHE_TTL_HOURS
@@ -1001,6 +1114,7 @@ class WebUIApi:
             # 与 clear_cache(scope=files) 保持一致，别只清一半。
             self.plugin._result_cache.clear()
             self.plugin._render_cache.clear()
+            clear_image_cache()
         files, size = await asyncio.to_thread(_dir_stats, self.plugin.cache_dir)
         return _json_response(
             {
@@ -1011,8 +1125,6 @@ class WebUIApi:
         )
 
     async def cache_thumbnail(self):
-        from astrbot.api.web import request
-
         record = await self._record_or_error()
         if not isinstance(record, dict):
             return record
@@ -1020,14 +1132,12 @@ class WebUIApi:
         path = self._record_card_path(record)
         if path is None:
             return _error("卡片文件已被清理", 404)
-        data_url = await asyncio.to_thread(_image_data_url, path, 900)
+        data_url = await asyncio.to_thread(_image_data_url_cached, path, 900)
         if data_url is None:
             return _error("缩略图生成失败", 500)
         return _json_response({"id": record["id"], "data_url": data_url})
 
     async def cache_download(self):
-        from astrbot.api.web import file_response
-
         record = await self._record_or_error()
         if not isinstance(record, dict):
             return record
@@ -1043,9 +1153,7 @@ class WebUIApi:
 
     async def _record_or_error(self):
         """按 id 取记录；出错时直接返回响应对象。"""
-        from astrbot.api.web import request
-
-        record_id = (request.query.get("id") or "").strip()
+        record_id = query_arg("id").strip()
         if not record_id:
             return _error("缺少记录 id")
 
@@ -1095,11 +1203,9 @@ class WebUIApi:
     # ==================== B站登录 ==================== #
 
     async def bili_status(self):
-        from astrbot.api.web import request
-
         plugin = self.plugin
         pconfig = get_config()
-        check = (request.query.get("check") or "").strip() in {"1", "true", "yes"}
+        check = query_arg("check").strip() in {"1", "true", "yes"}
         payload: dict[str, Any] = {
             "configured": bool(plugin._bili_cookie),
             "quality": pconfig.BILI_QUALITY,
@@ -1151,9 +1257,7 @@ class WebUIApi:
         )
 
     async def bili_qrcode_status(self):
-        from astrbot.api.web import request
-
-        task_id = (request.query.get("task_id") or "").strip()
+        task_id = query_arg("task_id").strip()
         if not task_id:
             return _error("缺少 task_id")
         state = self.plugin.bili_login_state(task_id)
