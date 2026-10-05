@@ -16,16 +16,76 @@ import types
 from typing import Any
 
 
-class _StubModule(types.ModuleType):
-    """属性按需生成的桩模块：``from x import 任意名字`` 都能过。"""
+class _AnyMeta(type):
+    """让占位类支持任意属性访问（``VideoCodecs.AVC``、``QrCodeLoginEvents.SCANNED``…）。"""
+
+    def __getattr__(cls, name: str) -> Any:
+        if name.startswith("__"):
+            raise AttributeError(name)
+        value = _AnyMeta(name, (), {})
+        setattr(cls, name, value)
+        return value
+
+    def __call__(cls, *args: Any, **kwargs: Any) -> Any:
+        return super().__call__()
+
+
+class _Any(metaclass=_AnyMeta):
+    """占位类的实例，同样支持任意属性/方法调用。"""
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        pass
 
     def __getattr__(self, name: str) -> Any:
         if name.startswith("__"):
             raise AttributeError(name)
-        placeholder = type(name, (), {"__init__": lambda self, *a, **k: None})
-        placeholder.__name__ = name
-        setattr(self, name, placeholder)
-        return placeholder
+        return _Any()
+
+    def __call__(self, *args: Any, **kwargs: Any) -> Any:
+        return _Any()
+
+    def __iter__(self):
+        return iter(())
+
+
+class _StubModule(types.ModuleType):
+    """桩模块。
+
+    多数属性给一个「万能占位类」—— 能当类用、能实例化、能取任意属性、能当
+    函数调。但**数据形状**必须给真的：解析器会把 ``bilibili_api.HEADERS``
+    直接 ``.copy()`` 当请求头用，给个类会直接 AttributeError。
+    """
+
+    #: 必须是真数据的名字 → 值
+    DATA: dict[str, Any] = {
+        "HEADERS": {},
+        "DEFAULT_HEADERS": {},
+    }
+
+    #: 必须带特定方法的名字
+    _RequestSettings = type(
+        "_RequestSettings",
+        (),
+        {
+            "set": lambda self, *a, **k: None,
+            "set_proxy": lambda self, *a, **k: None,
+            "get": lambda self, *a, **k: None,
+        },
+    )
+
+    SPECIAL: dict[str, Any] = {"request_settings": _RequestSettings}
+
+    def __getattr__(self, name: str) -> Any:
+        if name.startswith("__"):
+            raise AttributeError(name)
+        if name in type(self).DATA:
+            value = type(self).DATA[name]
+        elif name in type(self).SPECIAL:
+            value = type(self).SPECIAL[name]()
+        else:
+            value = _AnyMeta(name, (_Any,), {})
+        setattr(self, name, value)
+        return value
 
 
 def install_host_stubs() -> list[str]:

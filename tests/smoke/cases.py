@@ -1,0 +1,167 @@
+"""冒烟用例表：11 个解析器 × 3 种内容类型 = 33 条。
+
+**URL 怎么来的**，三种来源，``source`` 字段标清楚，别混为一谈：
+
+- ``api``   —— 通过本地代理打平台公开接口拿到的，当前确定存活
+- ``doc``   —— 来自平台官方/社区文档里的样例 URL，未必还活着
+- ``manual``—— 我拿不到、**需要你补**的；URL 留空，脚本会跳过
+
+判据（``expect_*``）只断言**结构**——有没有标题、有没有解析出媒体。不比对具体文本，
+因为平台文案随时变，拿它当断言只会让测试变成随机失败。
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+
+
+@dataclass(frozen=True)
+class Case:
+    id: str
+    platform: str          # 期望派发到的解析器
+    kind: str              # 内容类型（报告与文档里的人类可读名）
+    url: str
+    source: str = "api"    # api / doc / manual
+    expect_media: bool = True
+    expect_fields: tuple[str, ...] = ("title",)
+    note: str = ""
+    # 短链需要先重定向，走 parse_with_redirect
+    follow_redirect: bool = False
+    tags: tuple[str, ...] = field(default=())
+
+
+CASES: list[Case] = [
+    # ==================== B站 ====================
+    Case("bili-video-1", "bilibili", "普通视频",
+         "https://www.bilibili.com/video/BV1c3HL6qEyq", source="api",
+         note="热门接口取的第一个，短视频"),
+    Case("bili-video-2", "bilibili", "多P视频",
+         "https://www.bilibili.com/video/BV1LNHj68EMg", source="api",
+         note="热门接口取的，验证 p= 分P 与 av 兜底"),
+    Case("bili-dynamic", "bilibili", "动态图文",
+         "", source="manual",
+         note="需要你给一条 t.bilibili.com/<数字> 或 bilibili.com/opus/<数字>，"
+              "要图文型动态（纯视频动态不测这个）"),
+    Case("bili-read", "bilibili", "专栏文章",
+         "", source="manual",
+         note="需要你给一条 bilibili.com/read/cv<数字>"),
+
+    # ==================== 抖音 ====================
+    Case("dy-video", "douyin", "视频",
+         "", source="manual",
+         note="需要你给一条 douyin.com/video/<数字> 或 iesdouyin.com/share/video/<数字>"),
+    Case("dy-note", "douyin", "图文笔记",
+         "", source="manual",
+         note="需要你给一条 douyin.com/note/<数字>，**必须是图文帖**（解析出图片而非视频）"),
+    Case("dy-slides", "douyin", "图集",
+         "", source="manual",
+         note="需要你给一条 douyin.com/slides/<数字>"),
+
+    # ==================== 快手 ====================
+    Case("ks-video", "kuaishou", "视频",
+         "", source="manual",
+         note="需要你给一条 v.kuaishou.com/xxxxx 短链或 kuaishou.com/short-video/<id>"),
+    Case("ks-gallery", "kuaishou", "图集",
+         "", source="manual",
+         note="需要你给一条快手**图集**（不是视频）"),
+    Case("ks-chenzhong", "kuaishou", "快影/极速版域名",
+         "", source="manual",
+         note="需要你给一条 chenzhongtech.com/fw/xxxxx；没有的话这条可跳过"),
+
+    # ==================== 微博 ====================
+    # 注意：这里用 m.weibo.cn/detail/<wid> 形态。实测 m.weibo.cn/statuses/show?id=
+    # **匹配不到**（pattern 写的是 status，链接是 statuses），而 detail/status
+    # 两种都正常 —— 详见 SMOKE_TEST.md「冒烟发现」第 1 条。
+    Case("wb-single", "weibo", "单图微博",
+         "https://m.weibo.cn/detail/P9M8meR0O", source="doc"),
+    Case("wb-video", "weibo", "视频微博",
+         "https://m.weibo.cn/detail/5054181788092183", source="doc"),
+    Case("wb-multi", "weibo", "多图微博",
+         "https://m.weibo.cn/detail/4977266192171722", source="doc"),
+
+    # ==================== 小红书 ====================
+    Case("xhs-image", "xiaohongshu", "图文笔记",
+         "", source="manual",
+         note="需要你给一条 xiaohongshu.com/explore/<24位hex>，图文型"),
+    Case("xhs-video", "xiaohongshu", "视频笔记",
+         "", source="manual",
+         note="需要你给一条小红书**视频**笔记"),
+    Case("xhs-short", "xiaohongshu", "短链",
+         "", source="manual",
+         note="需要你给一条 xhslink.com/xxxx（分享出来的短链）",
+         follow_redirect=True),
+
+    # ==================== Twitter ====================
+    Case("tw-text", "twitter", "纯文本/单图",
+         "", source="manual",
+         note="需要你给一条 x.com/<user>/status/<数字>"),
+    Case("tw-video", "twitter", "视频推",
+         "", source="manual",
+         note="需要你给一条带视频的推文"),
+    Case("tw-multi", "twitter", "多图推",
+         "", source="manual",
+         note="需要你给一条带 2~4 张图的推文"),
+
+    # ==================== NGA ====================
+    Case("nga-1", "nga", "普通帖",
+         "", source="manual",
+         note="需要你给一条 nga.178.com/read.php?tid=<数字>"),
+    Case("nga-2", "nga", "含图帖",
+         "", source="manual",
+         note="需要你给一条**带图片附件**的 NGA 帖（验证 img.nga.178.com 取图）"),
+    Case("nga-3", "nga", "讨论串/长帖",
+         "", source="manual",
+         note="需要你给一条楼层多的长帖"),
+
+    # ==================== AcFun ====================
+    Case("ac-video", "acfun", "视频",
+         "https://www.acfun.cn/v/ac43445963", source="doc",
+         note="社区逆向文档里的样例"),
+    Case("ac-article", "acfun", "文章",
+         "https://www.acfun.cn/a/ac37416587", source="doc",
+         note="注意：插件只注册了 ac= / /ac 的 pattern，"
+              "**文章链接 a/ac 可能匹配不上**，这条是来验证的"),
+    Case("ac-bangumi", "acfun", "番剧",
+         "https://www.acfun.cn/bangumi/aa5023295", source="doc",
+         note="同上，bangumi 路径大概率不匹配；番剧受地区限制"),
+
+    # ==================== GitHub ====================
+    Case("gh-repo", "github", "仓库",
+         "https://github.com/python/cpython", source="api"),
+    Case("gh-release", "github", "Release",
+         "", source="manual",
+         note="需要你给一个带 release 的仓库链接，或我用 python/cpython/releases"),
+    Case("gh-issue", "github", "Issue",
+         "https://github.com/python/cpython/issues/158868", source="api"),
+
+    # ==================== Pixiv ====================
+    Case("px-1", "pixiv", "单张插画",
+         "https://www.pixiv.net/artworks/87070841", source="api",
+         note="ajax 接口无 Cookie 返回 200"),
+    Case("px-2", "pixiv", "作品（可能多页）",
+         "https://www.pixiv.net/artworks/115779535", source="api"),
+    Case("px-ugoira", "pixiv", "动图 ugoira",
+         "", source="manual",
+         note="需要你给一条 ugoira 动图作品的链接（artworks/<数字>，类型为 ugoira）"),
+
+    # ==================== Steam ====================
+    Case("steam-app", "steam", "游戏商店页",
+         "https://store.steampowered.com/app/730/CounterStrike_2/", source="doc",
+         note="CS2；API 探测时走代理报 SSL EOF，可能需直连"),
+    Case("steam-dlc", "steam", "DLC",
+         "https://store.steampowered.com/sub/400/Terraria/", source="doc"),
+    Case("steam-bundle", "steam", "合集/包",
+         "https://store.steampowered.com/bundle/1145360/", source="doc"),
+]
+
+
+def by_platform() -> dict[str, list[Case]]:
+    out: dict[str, list[Case]] = {}
+    for case in CASES:
+        out.setdefault(case.platform, []).append(case)
+    return out
+
+
+def runnable() -> list[Case]:
+    """有 URL 的用例（manual 且 URL 为空的会被跳过）。"""
+    return [c for c in CASES if c.url]
