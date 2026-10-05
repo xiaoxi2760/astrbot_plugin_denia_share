@@ -98,15 +98,16 @@ CASES: list[Case] = [
               "「必须有标题」当判据，见 expect_fields 的说明"),
 
     # ==================== Twitter ====================
-    Case("tw-text", "twitter", "纯文本/单图",
-         "", source="manual",
-         note="需要你给一条 x.com/<user>/status/<数字>"),
+    # 用户提供的真实链接。**必须走代理才能测到** —— vxtwitter 在国内直连会被
+    # TLS 重置，报 SSLV3_ALERT_HANDSHAKE_FAILURE；run_smoke.py 默认会设
+    # HTTP(S)_PROXY。这两条同时覆盖了「纯视频」与「视频 + GIF」两种取流结果。
     Case("tw-video", "twitter", "视频推",
-         "", source="manual",
-         note="需要你给一条带视频的推文"),
-    Case("tw-multi", "twitter", "多图推",
-         "", source="manual",
-         note="需要你给一条带 2~4 张图的推文"),
+         "https://x.com/gosari542/status/2106766026847522972", source="manual",
+         note="1 个视频，0 图"),
+    Case("tw-gif", "twitter", "视频 + GIF",
+         "https://x.com/Wolhaiiiksong/status/2107077287913087138", source="manual",
+         note="2 个视频其中 1 个是 GIF —— 专门验 is_gif 分支：GIF 不该被当视频作品"
+              "（ParseResult.video 会跳过它，卡片按图文处理）"),
 
     # ==================== NGA ====================
     Case("nga-1", "nga", "普通帖",
