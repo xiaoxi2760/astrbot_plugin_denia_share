@@ -122,10 +122,33 @@ class ImportContract(unittest.TestCase):
         self.assertIsInstance(web_compat.HAS_WEB_API, bool)
 
     def test_reports_backend(self):
-        self.assertIn(
-            web_compat._BACKEND,
-            {"astrbot.api.web", "quart", None},
-            "未知后端，import 判据可能已失效",
+        """断言**具体**后端，而不是"在三个出口里"。
+
+        原先写的是 ``assertIn(_BACKEND, {"astrbot.api.web", "quart", None})`` ——
+        这个集合就是代码自己 except 分支的三个出口，实际不可能失败，恒真。
+
+        判定宿主是否可用不能靠 ``importlib.util.find_spec``：测试里的 astrbot 是
+        ``types.ModuleType`` 造的桩，没有 ``__spec__``，find_spec 会抛
+        ValueError。直接看真实包能不能 import 才准。
+        """
+        import importlib
+        import importlib.util
+
+        def installed(name: str) -> bool:
+            if name in sys.modules:
+                spec = getattr(sys.modules[name], "__spec__", None)
+                return spec is not None  # 桩没有 __spec__，不算真装了
+            try:
+                return importlib.util.find_spec(name) is not None
+            except (ImportError, ValueError):
+                return False
+
+        module = importlib.reload(web_compat)
+        has_astrbot, has_quart = installed("astrbot"), installed("quart")
+        expected = "astrbot.api.web" if has_astrbot else ("quart" if has_quart else None)
+        self.assertEqual(
+            module._BACKEND, expected,
+            f"环境(astrbot={has_astrbot}, quart={has_quart})对应的后端不对",
         )
 
 

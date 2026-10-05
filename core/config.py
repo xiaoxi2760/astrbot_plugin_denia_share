@@ -257,9 +257,10 @@ CONFIG_META: tuple[dict[str, Any], ...] = (
         "label": "截整页长图",
         "type": "bool",
         "default": True,
-        "hint": "开启=截整页（长文章能看全），关闭=只截首屏视窗。实测差别很大：一个维基长文"
-                "关掉只有 1280×1280 的方图（只看到顶部一小块），开完整页是 1280×16842。"
-                "代价是长图可能有几十 MB、群里发出去客户端会压缩，所以默认开启但可关。"
+        "hint": "开启=截整页（长文章能看全），关闭=只截首屏视窗。实测差别很大：同一个维基长文"
+                "关掉只有 900×900 的方图（约 0.3 MB，只看到顶部一小块），开完整页约 4.4 MB、"
+                "高度按页面内容走（thum 上限 16000px，触顶时底部会缺）。"
+                "代价是长图可能几 MB、群里发出去客户端会压缩，所以默认开启但可关。"
                 "两个后端都支持整页（thum 走 /fullpage，cloudflare 走 fullPage）",
     },
     {
@@ -943,9 +944,30 @@ class ParserConfig:
         """是否截整页长图（默认开）。
 
         默认开而不是默认关，是因为视窗截图在长页面上几乎不可用：thum 后端
-        实测关掉整页只给 1280×1280 的方图，一个维基长文只能看到顶部一小块。
+        实测关掉整页只给 900×900 的方图，一个维基长文只能看到顶部一小块。
+
+        **不能直接 ``bool(...)``**，两个坑：
+
+        1. 空值。``bool('')`` 是 False，于是「键存在但值为空」会**静默关掉整页
+           截图**，现象恰好等于「这功能从来没接上过」——最难查的那种。空值一律
+           当作「没填」，回退默认。
+        2. 字符串。``bool('false')`` 是 **True**，手改配置写成 ``"false"``
+           反而会打开。字符串要走显式映射（与保存侧 ``_parse_bool`` 同一套
+           词表，避免读侧写侧对同一个值给出相反解释）。
         """
-        return bool(self._cfg_get("SCREENSHOT_FULL_PAGE", True))
+        value = self._cfg_get("SCREENSHOT_FULL_PAGE", True)
+        if value is None:
+            return True
+        if isinstance(value, str):
+            text = value.strip().lower()
+            if not text:
+                return True
+            if text in {"true", "1", "yes", "on"}:
+                return True
+            if text in {"false", "0", "no", "off"}:
+                return False
+            return True  # 无法识别的字符串回退默认，不猜
+        return bool(value)
 
     @property
     def CF_ACCOUNT_ID(self) -> str:

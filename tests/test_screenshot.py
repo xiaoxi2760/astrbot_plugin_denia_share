@@ -83,13 +83,68 @@ class FullPageConfig(unittest.TestCase):
         self.assertIs(cfg.SCREENSHOT_FULL_PAGE, False)
 
     def test_dirty_value_falls_back_to_default(self):
-        for value in ("", "  ", None, 1, "yes", ["true"]):
+        """键存在但值是空的，**必须回退默认 True**，不能静默变 False。
+
+        这条原先只断言 ``isinstance(..., bool)`` —— 任何 bool 都能过，等于没测。
+        而实现当时是 ``bool(self._cfg_get(..., True))``：``bool('')`` 是 False，
+        默认值根本不参与，于是空串会悄悄把整页截图关掉，现象恰好等于
+        「这个功能从来没接上过」。断言必须打到具体值。
+        """
+        for value in ("", "   ", None):
             with self.subTest(value=value):
                 cfg = ParserConfig(
-                    {"网页截图": {"SCREENSHOT_FULL_PAGE": value}}, PLUGIN_DIR, PLUGIN_DIR
+                    {"网页截图": {"SCREENSHOT_FULL_PAGE": value}},
+                    PLUGIN_DIR,
+                    PLUGIN_DIR,
                 )
-                # bool() 会把 1/"yes" 当真值，这里只保证不会炸、且非空真值仍为真
-                self.assertIsInstance(cfg.SCREENSHOT_FULL_PAGE, bool)
+                self.assertIs(
+                    cfg.SCREENSHOT_FULL_PAGE,
+                    True,
+                    f"{value!r} 应回退到默认开启，实际是 {cfg.SCREENSHOT_FULL_PAGE!r}",
+                )
+
+    def test_string_false_does_not_mean_true(self):
+        """``bool('false')`` 是 True —— 手改配置写成字符串会反向打开开关。"""
+        for text in ("false", "False", "FALSE", "off", "no", "0"):
+            with self.subTest(text=text):
+                cfg = ParserConfig(
+                    {"网页截图": {"SCREENSHOT_FULL_PAGE": text}},
+                    PLUGIN_DIR,
+                    PLUGIN_DIR,
+                )
+                self.assertIs(
+                    cfg.SCREENSHOT_FULL_PAGE,
+                    False,
+                    f"{text!r} 应解析为关闭，实际 {cfg.SCREENSHOT_FULL_PAGE!r}",
+                )
+
+    def test_string_true_means_true(self):
+        for text in ("true", "True", "on", "yes", "1"):
+            with self.subTest(text=text):
+                cfg = ParserConfig(
+                    {"网页截图": {"SCREENSHOT_FULL_PAGE": text}},
+                    PLUGIN_DIR,
+                    PLUGIN_DIR,
+                )
+                self.assertIs(cfg.SCREENSHOT_FULL_PAGE, True)
+
+    def test_real_bool_and_int_are_respected(self):
+        for stored, expected in ((True, True), (False, False), (1, True), (0, False)):
+            with self.subTest(stored=stored):
+                cfg = ParserConfig(
+                    {"网页截图": {"SCREENSHOT_FULL_PAGE": stored}},
+                    PLUGIN_DIR,
+                    PLUGIN_DIR,
+                )
+                self.assertIs(cfg.SCREENSHOT_FULL_PAGE, expected)
+
+    def test_unrecognised_string_falls_back_to_default_not_a_guess(self):
+        cfg = ParserConfig(
+            {"网页截图": {"SCREENSHOT_FULL_PAGE": "乱填"}},
+            PLUGIN_DIR,
+            PLUGIN_DIR,
+        )
+        self.assertIs(cfg.SCREENSHOT_FULL_PAGE, True)
 
 
 class ExtractTitle(unittest.TestCase):
@@ -140,7 +195,7 @@ class DescribeCapture(unittest.TestCase):
     """整页截取的降级 / 触顶提醒（纯函数，只吃尺寸）。"""
 
     def test_fullpage_hitting_cap_is_flagged(self):
-        notes = describe_capture(1216, 16000, full_page=True, backend="thum")
+        notes = describe_capture(16000, full_page=True, backend="thum")
         self.assertEqual(len(notes), 1)
         self.assertIn("上限", notes[0])
         self.assertIn("Cloudflare", notes[0], "触顶时得告诉用户还有别的路可走")
@@ -150,26 +205,26 @@ class DescribeCapture(unittest.TestCase):
         否则用户只会以为「页面就这么短」。"""
         for h in (900, 947, 1000):
             with self.subTest(height=h):
-                notes = describe_capture(1200, h, full_page=True, backend="thum")
+                notes = describe_capture(h, full_page=True, backend="thum")
                 self.assertEqual(len(notes), 1)
                 self.assertIn("视窗", notes[0])
 
     def test_healthy_fullpage_has_no_note(self):
-        self.assertEqual(describe_capture(1280, 11749, full_page=True, backend="thum"), [])
-        self.assertEqual(describe_capture(1280, 5009, full_page=True, backend="thum"), [])
+        self.assertEqual(describe_capture(11749, full_page=True, backend="thum"), [])
+        self.assertEqual(describe_capture(5009, full_page=True, backend="thum"), [])
 
     def test_viewport_mode_never_flagged(self):
         """只截视窗是用户的明确选择，不该被当成问题提醒。"""
         for h in (900, 16000):
             with self.subTest(height=h):
-                self.assertEqual(describe_capture(900, h, full_page=False, backend="thum"), [])
+                self.assertEqual(describe_capture(h, full_page=False, backend="thum"), [])
 
     def test_cloudflare_backend_never_flagged(self):
         """这两个限制是 thum 的，cloudflare 不受 16000 钳制。"""
         for h in (900, 16000, 40000):
             with self.subTest(height=h):
                 self.assertEqual(
-                    describe_capture(1280, h, full_page=True, backend="cloudflare"), []
+                    describe_capture(h, full_page=True, backend="cloudflare"), []
                 )
 
 

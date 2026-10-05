@@ -74,8 +74,11 @@ CASES: list[Case] = [
 
     # ==================== 微博 ====================
     # 注意：这里用 m.weibo.cn/detail/<wid> 形态。实测 m.weibo.cn/statuses/show?id=
-    # **匹配不到**（pattern 写的是 status，链接是 statuses），而 detail/status
-    # 两种都正常 —— 详见 SMOKE_TEST.md「冒烟发现」第 1 条。
+    # 原先匹配不到（pattern 写的是 status，链接是 statuses），那是 1.3.0
+    # 已修的 bug（见 core/parsers/weibo.py 与 SMOKE_TEST.md「发现 1」）。
+    # 「形态能不能匹配」由 tests/test_weibo_forms.py 离线守着（不需要网络），
+    # 这里只管「真解析能不能出东西」——而它需要 Cookie / 过风控，本机大概率失败，
+    # 失败时的可读提示本身就是被测的一部分。
     Case("wb-single", "weibo", "单图微博",
          "https://m.weibo.cn/detail/P9M8meR0O", source="doc"),
     Case("wb-video", "weibo", "视频微博",
