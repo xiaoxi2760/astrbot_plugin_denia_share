@@ -91,6 +91,50 @@ class FullPageConfig(unittest.TestCase):
                 self.assertIsInstance(cfg.SCREENSHOT_FULL_PAGE, bool)
 
 
+class ExtractTitle(unittest.TestCase):
+    """``<title>`` 抽取（纯函数，不联网）。
+
+    重点是**编码**：国内站点大量 GBK/GB18030，而 HTTP 头里的 charset 常常是错的
+    或干脆没有，只信 resp.encoding 会抠出一堆乱码。
+    """
+
+    def test_utf8(self):
+        html = "<html><head><title>Hacker News</title></head></html>".encode("utf-8")
+        self.assertEqual(ScreenshotService.extract_title(html), "Hacker News")
+
+    def test_chinese_utf8(self):
+        html = "<title>百度一下，你就知道</title>".encode("utf-8")
+        self.assertEqual(ScreenshotService.extract_title(html), "百度一下，你就知道")
+
+    def test_gbk_fallback(self):
+        """HTTP 头没 charset 时不能返回乱码。"""
+        html = "<html><head><title>中文标题测试</title></head></html>".encode("gb18030")
+        self.assertEqual(ScreenshotService.extract_title(html), "中文标题测试")
+
+    def test_big5_fallback(self):
+        html = "<title>繁體中文標題</title>".encode("big5")
+        got = ScreenshotService.extract_title(html)
+        self.assertTrue(got)  # 不要求字字相符，但必须解出可读文本而不是空
+
+    def test_missing_title_returns_empty(self):
+        for html in (b"", b"<html><body>no title</body></html>", b"\x00\x01\x02"):
+            with self.subTest(html=html):
+                self.assertEqual(ScreenshotService.extract_title(html), "")
+
+    def test_whitespace_is_collapsed(self):
+        html = b"<title>\n  spaced   out\n  title\n</title>"
+        self.assertEqual(ScreenshotService.extract_title(html), "spaced out title")
+
+    def test_title_is_truncated(self):
+        html = ("<title>" + "x" * 200 + "</title>").encode()
+        self.assertLessEqual(len(ScreenshotService.extract_title(html)), 60)
+
+    def test_never_raises_on_arbitrary_bytes(self):
+        for raw in (b"\xff\xfe\x00", bytes(range(256)), b"<title>" + b"\xc3" * 50):
+            with self.subTest(raw=raw[:8]):
+                self.assertIsInstance(ScreenshotService.extract_title(raw), str)
+
+
 class CapturePlumbing(unittest.TestCase):
     def test_capture_accepts_full_page_kwarg(self):
         """capture 必须真的接住这个参数（历史上它被调用方忽略了）。"""

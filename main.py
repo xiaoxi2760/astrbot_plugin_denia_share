@@ -1077,8 +1077,47 @@ class DeniaSharePlugin(Star):
             yield event.plain_result(f"截图失败：{detail}\n{url}")
             return
 
+        # 刻意**不套卡片模板**：整页长图塞进 16:9 的封面槽会被裁到只剩约 15%
+        # （等于废掉），开「封面不裁切」又会撑出一张两米高的卡片 —— 两种都
+        # 没法在聊天里看。截图就是单独发出去的原图，用文字把「这是什么」讲清楚。
+        caption = await self._screenshot_caption(path, url)
         await self._send_image(event, path)
-        yield event.plain_result(f"截图完成 {url}")
+        yield event.plain_result(caption)
+
+    async def _screenshot_caption(self, path: Path, url: str) -> str:
+        """给截图配一句能认出这张图的说明。
+
+        只有 URL 的话，图是匿名的 —— 群里翻上去只能看到一张长图。所以尽量
+        补上页面标题、尺寸、体积，让人一眼知道是什么、为什么这么大。
+
+        标题是尽力而为的装饰（见 :meth:`ScreenshotService.page_title`），
+        拿不到就少一行，不影响其他信息。
+        """
+        parts: list[str] = []
+
+        title = await self.screenshot.page_title(url)
+        parts.append(f"网页截图：{title}" if title else "网页截图")
+
+        try:
+            from PIL import Image as _Image
+
+            with _Image.open(path) as im:
+                width, height = im.size
+            size_kb = max(1, path.stat().st_size // 1024)
+            parts.append(f"{width}×{height}，{size_kb} KB")
+        except Exception:  # noqa: BLE001 —— 读不出尺寸就不写，别为装饰抛异常
+            pass
+
+        parts.append(url)
+        caption = "\n".join(parts)
+
+        # 超大图提醒一句：群里客户端会压缩/可能拒收，先给用户一个预期
+        try:
+            if path.stat().st_size > 5 * 1024 * 1024:
+                caption += "\n（整页长图较大，客户端可能压缩或发送失败；可在配置里关掉「截整页长图」）"
+        except OSError:
+            pass
+        return caption
 
     async def _send_image(self, event: AstrMessageEvent, path: Path):
         """主动发送图片，绕开事件回复管线，避免被附加「引用回复 / @」。"""

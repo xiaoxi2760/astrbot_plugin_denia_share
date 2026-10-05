@@ -25,6 +25,7 @@
 
 from __future__ import annotations
 
+import re
 import uuid
 from pathlib import Path
 from typing import Any, Final
@@ -32,6 +33,8 @@ from urllib.parse import urlparse
 
 import httpx
 from astrbot.api import logger
+
+from .constants import COMMON_HEADER
 
 THUM_BASE: Final = "https://image.thum.io/get"
 CF_API_BASE: Final = "https://api.cloudflare.com/client/v4"
@@ -224,6 +227,52 @@ class ScreenshotService:
             message = message.replace(token, "***REDACTED***")
         message = message[:300]
         return f"Cloudflare API 错误 (HTTP {status}): {message}"
+
+    @staticmethod
+    def extract_title(raw: bytes) -> str:
+        """从 HTML 字节里抠 ``<title>``（纯函数，方便单测）。"""
+        # 国内站点大量 GBK/GB18030，而 HTTP 头里的 charset 常常是错的或干脆没有，
+        # 所以不能只信 resp.encoding：按 utf-8 → gb18030 → big5 → latin-1 依次试。
+        # latin-1 永不抛异常，作为最后的兜底。
+        html = None
+        for encoding in ("utf-8", "gb18030", "big5", "latin-1"):
+            try:
+                html = raw.decode(encoding)
+                break
+            except (UnicodeDecodeError, LookupError):
+                continue
+        if html is None:
+            return ""
+        match = re.search(r"<title[^>]*>(.*?)</title>", html, re.IGNORECASE | re.DOTALL)
+        if not match:
+            return ""
+        return re.sub(r"\s+", " ", match.group(1)).strip()[:60]
+
+    # ---------- 文字说明用的页面标题（尽力而为，失败一律静默） ----------
+
+    async def page_title(self, url: str, *, timeout: float = 8.0) -> str:
+        """抓页面 ``<title>`` 用来给截图配一句说明。
+
+        **纯装饰性，失败必须完全静默**——拿不到标题只是少一行字，绝不能让整个
+        截图流程失败或变慢。所以这里和 :meth:`capture` 完全解耦：各自独立的
+        客户端、独立超时、异常一律吞掉。
+
+        已知的偏差：截图是 thum / Cloudflare 那边渲染的，本函数是我们自己
+        请求的，两者可能落在不同 CDN 节点或不同 geo；JS 渲染型页面的
+        ``<title>`` 也可能与实际画面不一致。**所以只当参考，不当事实。**
+        """
+        try:
+            async with httpx.AsyncClient(
+                proxy=self.proxy, timeout=timeout, follow_redirects=True,
+                verify=self.verify_ssl,
+                headers={"User-Agent": COMMON_HEADER["User-Agent"]},
+            ) as client:
+                resp = await client.get(url)
+                if resp.status_code >= 400:
+                    return ""
+                return self.extract_title(resp.content[:64 * 1024])
+        except Exception:  # noqa: BLE001 —— 装饰性信息，拿不到就算了
+            return ""
 
 
 def is_probably_screenshotable(url: str) -> bool:
