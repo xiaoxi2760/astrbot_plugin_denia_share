@@ -43,12 +43,14 @@ from .exception import IgnoreException, ParseException
 from .media_utils import clear_cache_dir, cleanup_cache_dir, is_docker_environment
 from .relay import resolve_callback_base
 from .screenshot import is_probably_screenshotable
+# 注意：``json_response`` / ``error_response`` **故意不在这里别名导入** ——
+# 本文件下方已经定义了同名薄封装 ``_json_response`` / ``_error``（它们才是
+# 所有调用点实际用的东西）。先前的 ``error_response as _error`` 会被同名函数
+# 定义完全遮蔽，纯属误导性死代码，已删。
 from .web_compat import (
     HAS_WEB_API,
-    error_response as _error,
     file_response,
     get_json_body,
-    json_response as _json_response,
     query_arg,
 )
 

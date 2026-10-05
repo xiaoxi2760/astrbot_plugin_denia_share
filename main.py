@@ -1113,7 +1113,7 @@ class DeniaSharePlugin(Star):
             size_bytes = path.stat().st_size
             parts.append(f"{width}×{height}，{max(1, size_bytes // 1024)} KB")
             notes = describe_capture(
-                width, height, full_page=full_page, backend=self.screenshot.backend
+                height, full_page=full_page, backend=self.screenshot.backend
             )
         except Exception:  # noqa: BLE001 —— 读不出尺寸就不写，别为装饰抛异常
             pass

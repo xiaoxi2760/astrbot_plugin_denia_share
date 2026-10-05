@@ -7,9 +7,10 @@
 两个后端，由配置 `SCREENSHOT_BACKEND` 选择：
 
 - `thum`（默认）：image.thum.io，免 key、开箱即用。
-  视窗截图实测稳定 4/4；整页靠 URL 里的 `/fullpage` 选项
-  （不写这个选项就只有 1280×1280 的方图，长页面上等于只看到顶部一小块）。
-  缺点：无法等待 JS、无法指定 deviceScaleFactor，强反爬站点只能截到空白。
+  视窗是 900×900 的方图；整页靠 URL 里的 `/fullpage` 选项
+  （不写这个选项就只剩顶部一小块，长页面等于没截全）。
+  缺点：无法等待 JS、无法指定 deviceScaleFactor，整页高度上限 16000px，
+  强反爬站点只能截到空白。
 
 - `cloudflare`：Cloudflare Browser Rendering，需要 Account ID + API Token。
   功能强得多（视窗尺寸 / deviceScaleFactor / fullPage / waitUntil /
@@ -66,9 +67,11 @@ def _to_cf_keys(value: Any) -> Any:
 
 
 # thum.io 整页的高度上限。实测：请求 ``width/1280/fullpage`` 时，维基
-# 「Internet protocol suite」返回 1216×16000（**宽度也从 1280 被缩到 1216**），
-# 而没触顶的页面（维基 Biology）保持 1280×11749。说明是按总像素量钳的，
-# 触顶时宽高一起被裁。
+# 「Internet protocol suite」返回 1216×**16000**，高度精确停在 16000。
+#
+# 归因更正过一次：曾以为触顶会把宽度从 1280 一起裁到 1216（"按总像素量钳"），
+# 其实不对 —— **未触顶**的维基 Biology 整页也是 1216 宽，只是 11162 高。
+# 1216 是 wikipedia.org 这个站点自己的返回宽度，与上限无关。上限按高度硬钳。
 THUM_FULLPAGE_MAX_H: Final = 16000
 
 # 请求整页时，返回高度低于这个值就当成「可能降级了」。
@@ -79,11 +82,14 @@ THUM_FULLPAGE_SUSPECT_H: Final = 1100
 
 
 def describe_capture(
-    width: int, height: int, *, full_page: bool, backend: str
+    height: int, *, full_page: bool, backend: str
 ) -> list[str]:
-    """根据成图尺寸判断这次截取有没有问题，返回要附在说明里的提醒。
+    """根据成图高度判断这次截取有没有问题，返回要附在说明里的提醒。
 
-    纯函数（不吃文件、不联网），单测直接喂尺寸即可。
+    纯函数（不吃文件、不联网），单测直接喂高度即可。
+
+    **只收高度不收宽度**：实测下来返回宽度是站点自己的（wikipedia 返 1216、
+    GitHub 返 1280），与截取成功与否无关，拿它当判据只会误报。
     """
     if not full_page or backend != "thum":
         return []
@@ -166,12 +172,15 @@ class ScreenshotService:
         """拼 thum.io 的取图地址（纯函数，方便单测）。
 
         thum.io 的选项是拼在路径里的（``/get/<opt>/<opt>/…``）。**``fullpage``
-        必须显式写进路径**：不写就只有视窗，而它的视窗默认是 1280×1280 的方图 ——
-        长页面上等于只看到顶部一小块，整页内容全丢。实测一个维基长文：
-        视窗 1280×1280 / 619 KB，``fullpage`` 1280×16842 / 8.3 MB。
+        必须显式写进路径**：不写就只有视窗，而视窗是 900×900 的方图 —— 长页面上
+        只能看到顶部一小块，整页内容全丢。实测同一个维基长文：
+        视窗 900×900 / 约 0.3 MB，``fullpage`` 1216×16000（触顶） / 约 4.4 MB。
 
         宽度按是否整页给不同档：整页 1280（900 宽的长图在手机上要缩到看不清字），
         视窗仍用 900（thum.io 免费版在这一档最稳）。
+
+        写成 ``uri=uri.replace("x.com", host)`` 这类时要小心替换次数 —— 参见
+        ``parsers/twitter.py`` 的 ``to_api_url``，那里就踩过二次替换的坑。
         """
         width = 1280 if full_page else 900
         options = ["width/%d" % width]
