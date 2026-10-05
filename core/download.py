@@ -6,13 +6,19 @@ from uuid import uuid4
 from pathlib import Path
 from functools import partial
 from contextlib import contextmanager
-from urllib.parse import urljoin
 
 import httpx
 import aiofiles
 from astrbot.api import logger
 
-from .media_utils import merge_av, safe_unlink, generate_file_name
+from .media_utils import (
+    MAX_M3U8_PLAYLIST_DEPTH,
+    merge_av,
+    parse_m3u8_playlist,
+    remux_to_mp4,
+    safe_unlink,
+    generate_file_name,
+)
 from .media_verify import HEAD_PROBE_BYTES, classify_media_response, sniff_image_ext
 from .constants import COMMON_HEADER, DOWNLOAD_TIMEOUT
 from .exception import IgnoreException, DownloadException
@@ -428,17 +434,28 @@ class StreamDownloader:
         # 避免「文件还没落盘但槽已释放」。
         async with self._media_slots:
             try:
-                # 1. 获取并解析 m3u8 分片列表
-                response = await self.client.get(m3u8_url, headers=headers)
-                response.raise_for_status()
-                slices_text = response.text
-
+                # 1. 解析清单。可能是主播放列表（里面每行是**子清单**而不是分片），
+                #    所以要跟着最高变体再解析一层，深度封顶防死循环。
+                playlist_url = m3u8_url
+                seen_playlists: set[str] = set()
+                init_seg_url: str | None = None
                 slices: list[str] = []
-                for line in slices_text.splitlines():
-                    line = line.strip()
-                    if not line or line.startswith("#"):
+                for _ in range(MAX_M3U8_PLAYLIST_DEPTH):
+                    seen_playlists.add(playlist_url)
+                    response = await self.client.get(playlist_url, headers=headers)
+                    response.raise_for_status()
+                    init, segments, variants = parse_m3u8_playlist(
+                        response.text, playlist_url
+                    )
+                    if variants and not segments:
+                        # 主播放列表：换到清晰度最高的变体，下一轮继续解析
+                        if variants[0] in seen_playlists:
+                            raise DownloadException("m3u8 子清单指向自身，无法解析")
+                        playlist_url = variants[0]
                         continue
-                    slices.append(urljoin(m3u8_url, line))
+                    slices = segments
+                    init_seg_url = init
+                    break
 
                 if not slices:
                     raise DownloadException("m3u8 分片列表为空")
@@ -455,28 +472,39 @@ class StreamDownloader:
                 # _validate_content_length / _validate_downloaded_bytes，
                 # 只判 Content-Length 的话 VIDEO_SIZE_MAXIMUM_MB 在 m3u8 上完全失效。
                 received_bytes = 0
+
+                async def _write_stream(target, url: str) -> int:
+                    """把一个 URL 的字节流写进 target，返回累计字节数。"""
+                    written = 0
+                    async with self.client.stream("GET", url, headers=headers) as resp:
+                        resp.raise_for_status()
+                        async for chunk in resp.aiter_bytes(chunk_size=1024 * 1024):
+                            if not chunk:
+                                continue
+                            await target.write(chunk)
+                            written += len(chunk)
+                    return written
+
                 # **不用 `async with`**：见下面 finally 里的说明 —— 句柄的关闭必须
                 # 排在 unlink 之前，而 `async with` 的 __aexit__ 是 await 点，
                 # 它和 except 分支的先后关系不受保证。
                 f = await aiofiles.open(part, "wb")
                 try:
+                    # init segment（fMP4 的 moov 头）必须排在所有分片之前，
+                    # 缺了它整段流是播放器读不出索引的空壳。
+                    if init_seg_url:
+                        received_bytes += await _write_stream(f, init_seg_url)
                     for seg_url in slices:
-                        async with self.client.stream("GET", seg_url, headers=headers) as response:
-                            response.raise_for_status()
-                            async for chunk in response.aiter_bytes(chunk_size=1024 * 1024):
-                                if not chunk:
-                                    continue
-                                await f.write(chunk)
-                                received_bytes += len(chunk)
-                                if self._max_bytes and received_bytes > self._max_bytes:
-                                    mb = received_bytes / 1024 / 1024
-                                    logger.warning(
-                                        f"m3u8 视频下载到 {mb:.1f}MB 超过上限 "
-                                        f"{self.max_size_mb}MB，中断: {m3u8_url}"
-                                    )
-                                    raise IgnoreException(
-                                        f"媒体大小超过上限({self.max_size_mb}MB)"
-                                    )
+                        received_bytes += await _write_stream(f, seg_url)
+                        if self._max_bytes and received_bytes > self._max_bytes:
+                            mb = received_bytes / 1024 / 1024
+                            logger.warning(
+                                f"m3u8 视频下载到 {mb:.1f}MB 超过上限 "
+                                f"{self.max_size_mb}MB，中断: {m3u8_url}"
+                            )
+                            raise IgnoreException(
+                                f"媒体大小超过上限({self.max_size_mb}MB)"
+                            )
                 finally:
                     # **必须在清理之前关掉句柄。** Windows 上文件被占用时 unlink
                     # 抛 WinError 32，而 safe_unlink 会把它吞成一条日志 ——
@@ -516,6 +544,14 @@ class StreamDownloader:
                     logger.warning(f"m3u8 视频下载异常 | url: {m3u8_url}", exc_info=True)
                 raise DownloadException("m3u8 视频下载失败")
 
+            # 3. 提交。分片拼出来的只是**字节流**，扩展名叫 .mp4 不会让它变成
+            #    MP4：宽松的播放器能猜着播，严格的（尤其电脑版 QQ）会直接拒绝，
+            #    于是「下载成功」却发不出能看的视频。交给 ffmpeg 零转码重封装
+            #    （-c copy -movflags +faststart），没装 ffmpeg 就用裸拼接兜底。
+            remuxed = part.with_suffix(".remux.mp4")
+            if await remux_to_mp4(part, remuxed):
+                await safe_unlink(part)
+                part = remuxed
             os.replace(part, video_path)
         return video_path
 

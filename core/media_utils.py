@@ -5,11 +5,12 @@
 """
 
 import os
+import re
 import asyncio
 import hashlib
 import time
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import urljoin, urlparse
 
 from astrbot.api import logger
 
@@ -272,6 +273,116 @@ async def merge_av(
         raise
     await asyncio.gather(safe_unlink(v_path), safe_unlink(a_path))
     logger.info(f"Merged {output_path.name}, {fmt_size(output_path)}")
+
+
+# ==================== m3u8 ====================
+
+# 正常情况下清单最多两层（主列表 → 媒体列表）。给递归解析留三层余量，
+# 同时防住「子清单指回自己」造成的死循环。
+MAX_M3U8_PLAYLIST_DEPTH = 3
+
+_M3U8_URI_RE = re.compile(r'URI=(?:"([^"]+)"|([^,\s]+))', re.IGNORECASE)
+_M3U8_RESOLUTION_RE = re.compile(r"RESOLUTION=(\d+)x(\d+)", re.IGNORECASE)
+_M3U8_BANDWIDTH_RE = re.compile(r"(?:AVERAGE-)?BANDWIDTH=(\d+)", re.IGNORECASE)
+
+
+def parse_m3u8_playlist(
+    text: str, base_url: str
+) -> tuple[str | None, list[str], list[str]]:
+    """解析一份 m3u8 清单。
+
+    Returns:
+        ``(init segment URL, 分片 URL 列表, 子清单 URL 列表)``，三者都可能为空。
+
+    三种清单形态都要认得：
+
+    - **媒体列表**：非 ``#`` 开头的行就是分片；
+    - **主列表**：``#EXT-X-STREAM-INF`` 后面跟的那一行是**子清单地址**，
+      不是分片——当成分片下载会得到一堆「把播放列表当视频内容」的垃圾文件；
+    - **fMP4**：``#EXT-X-MAP`` 给出 init segment（moov 头），它必须拼在所有
+      分片之前，缺了它整段流是没有 moov 的空壳，播放器只能卡住。
+    """
+    init_seg: str | None = None
+    segments: list[str] = []
+    variants: list[tuple[int, int, str]] = []
+    pending_stream_inf: str | None = None
+
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line:
+            continue
+        if line.startswith("#"):
+            upper = line.upper()
+            if upper.startswith("#EXT-X-MAP"):
+                match = _M3U8_URI_RE.search(line)
+                if match:
+                    init_seg = urljoin(base_url, match.group(1) or match.group(2))
+            elif upper.startswith("#EXT-X-STREAM-INF"):
+                pending_stream_inf = line
+            continue
+
+        if pending_stream_inf is not None:
+            # 主列表：这一行是子清单地址，按 分辨率 → 带宽 取最高的
+            resolution = _M3U8_RESOLUTION_RE.search(pending_stream_inf)
+            bandwidth = _M3U8_BANDWIDTH_RE.search(pending_stream_inf)
+            pixels = (
+                int(resolution.group(1)) * int(resolution.group(2))
+                if resolution
+                else 0
+            )
+            variants.append(
+                (
+                    pixels,
+                    int(bandwidth.group(1)) if bandwidth else 0,
+                    urljoin(base_url, line),
+                )
+            )
+            pending_stream_inf = None
+            continue
+
+        segments.append(urljoin(base_url, line))
+
+    ordered_variants = [url for _, _, url in sorted(variants, reverse=True)]
+    return init_seg, segments, ordered_variants
+
+
+async def remux_to_mp4(src: Path, dst: Path) -> bool:
+    """把 m3u8 分片直接拼出来的 TS/fMP4 重新封装成规范 MP4（**零转码**）。
+
+    为什么要做：m3u8 分片按顺序拼起来得到的只是个**字节流**，扩展名写成 ``.mp4``
+    并不会让它变成 MP4。播放器只能靠猜——宽松的还能播，严格的（尤其电脑版 QQ）
+    会直接拒绝，于是「下载成功」却发不出能看的视频。
+
+    ``-c copy`` 只重写容器不重新编码，代价接近于零；``+faststart`` 把 moov 挪到
+    文件头，边下边播才能立刻起播。
+
+    失败一律返回 ``False`` 而不抛：调用方拿裸拼接的结果兜底即可，
+    总比整个下载判定失败强。没装 ffmpeg 属于常态，不能因此把视频判死。
+    """
+    logger.info(f"重封装 m3u8 产物: {src.name} -> {dst.name}")
+    try:
+        await exec_ffmpeg_cmd(
+            [
+                "ffmpeg", "-y", "-i", str(src),
+                "-c", "copy",
+                "-movflags", "+faststart",
+                str(dst),
+            ]
+        )
+        return True
+    except MediaProcessException:
+        # 没装 ffmpeg：换环境重试也一样，直接放弃重封装
+        logger.debug("未安装 ffmpeg，跳过 m3u8 重封装，使用裸拼接结果")
+        await safe_unlink(dst)
+        return False
+    except RuntimeError as exc:
+        logger.warning(f"m3u8 重封装失败，改用裸拼接结果: {exc}")
+        await safe_unlink(dst)
+        return False
+    except BaseException:
+        # 取消/退出：把残缺输出清掉再原样抛，取消语义不能被吞
+        await safe_unlink(dst)
+        raise
 
 
 async def encode_video_to_h264(video_path: Path) -> Path:
