@@ -65,6 +65,42 @@ def _to_cf_keys(value: Any) -> Any:
     return value
 
 
+# thum.io 整页的高度上限。实测：请求 ``width/1280/fullpage`` 时，维基
+# 「Internet protocol suite」返回 1216×16000（**宽度也从 1280 被缩到 1216**），
+# 而没触顶的页面（维基 Biology）保持 1280×11749。说明是按总像素量钳的，
+# 触顶时宽高一起被裁。
+THUM_FULLPAGE_MAX_H: Final = 16000
+
+# 请求整页时，返回高度低于这个值就当成「可能降级了」。
+#
+# 分不清是「页面本来就短」还是「抓失败退回视窗」——thum 的视窗默认就是 900 高，
+# 两种情况在成图上完全一样。所以这里**只能提示、不能断言失败**，措辞得留余地。
+THUM_FULLPAGE_SUSPECT_H: Final = 1100
+
+
+def describe_capture(
+    width: int, height: int, *, full_page: bool, backend: str
+) -> list[str]:
+    """根据成图尺寸判断这次截取有没有问题，返回要附在说明里的提醒。
+
+    纯函数（不吃文件、不联网），单测直接喂尺寸即可。
+    """
+    if not full_page or backend != "thum":
+        return []
+    if height >= THUM_FULLPAGE_MAX_H:
+        return [
+            f"已达 thum 整页上限 {THUM_FULLPAGE_MAX_H}px，页面底部可能未截全；"
+            "需要完整长图请在配置里改用 Cloudflare 后端"
+        ]
+    if height < THUM_FULLPAGE_SUSPECT_H:
+        return [
+            "本次高度接近视窗尺寸：页面本身可能较短，"
+            "但若内容明显不全，说明整页截取失败"
+            "（thum 对依赖 JS 或强反爬的页面会降级退回视窗）"
+        ]
+    return []
+
+
 class ScreenshotService:
     """按配置选择后端，把网页截成图片保存到本地。"""
 

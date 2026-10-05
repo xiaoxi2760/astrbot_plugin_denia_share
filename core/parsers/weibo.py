@@ -116,7 +116,15 @@ class WeiBoParser(BaseParser):
         fid = str(searched.group("fid"))
         return await self.parse_fid(fid)
 
-    @handle("m.weibo.cn", r"weibo\.cn/(?:status|detail|\d+)/(?P<wid>[0-9a-zA-Z]+)")
+    # ``status/show?id=`` 与 ``statuses/show?id=`` 是微博 App「分享 → 复制链接」的
+    # 默认形态，用户粘进群里多半是这个，所以**单独一条 pattern 放在前面**。
+    #
+    # 为什么必须放前面：下面那条通用 pattern 里的 ``(?:status|detail|\d+)`` 匹配不到
+    # ``statuses``（少个 es），而 ``status/show?id=X`` 又会被它当成
+    # ``detail/<id>`` 形态、把 ``show`` 当成 wid 抓走 —— 于是请求 id=show 的微博，
+    # 拿到的是一条不存在的作品，报错还完全指不到真因。
+    @handle("m.weibo.cn", r"weibo\.cn/(?:status|detail|\d+)/(?P<wid>(?!show\b)[0-9a-zA-Z]+)")
+    @handle("m.weibo.cn", r"weibo\.cn/status(?:es)?/show\?id=(?P<wid>[0-9a-zA-Z]+)")
     @handle("weibo.com", r"weibo\.com/\d+/(?P<wid>[0-9a-zA-Z]+)")
     async def _parse_m_weibo_cn(self, searched: re.Match[str]):
         wid = str(searched.group("wid"))
@@ -241,7 +249,25 @@ class WeiBoParser(BaseParser):
     def _decode_status(self, content: bytes, requested_id: str):
         from ..models.weibo.common import decoder as weibo_decoder
 
-        data = weibo_decoder.decode(content).data
+        # msgspec 的 ValidationError / DecodeError 是一类**解码失败**，而接口返回
+        # 错误 JSON（风控、访客系统、未登录）时字段就是缺的。不接住的话
+        # 「Object missing required field `data`」会一路穿到用户面前 ——
+        # 既不说是风控，也不说该配 Cookie，更没说该等一下。
+        #
+        # 注意只在**解码**这一层接：下面 _assert_status_matches_requested 抛的
+        # ParseException 是「接口返回了别的作品」，那是另一回事、消息更有用，
+        # 不能被这句笼统的提示吞掉。
+        try:
+            data = weibo_decoder.decode(content).data
+        except Exception as exc:  # noqa: BLE001 —— msgspec 的异常类型随版本变
+            # 异常类型名只进日志，不进给用户的消息：ValidationError / DecodeError
+            # 这类词对用户零信息量，反而会盖掉真正有用的那句「配 Cookie 会好很多」。
+            logger.warning(
+                f"[denia_share] 微博接口解码失败: {type(exc).__name__}: {exc}"
+            )
+            raise ParseException(
+                "微博接口返回了非预期数据（可能被风控或要求登录，配了 Cookie 会好很多）"
+            ) from exc
         self._assert_status_matches_requested(data, requested_id)
         return data
 
