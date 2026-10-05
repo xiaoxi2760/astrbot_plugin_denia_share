@@ -23,7 +23,7 @@ class Case:
     url: str
     source: str = "api"    # api / doc / manual
     expect_media: bool = True
-    expect_fields: tuple[str, ...] = ("title",)
+    expect_fields: tuple[str, ...] = ()
     note: str = ""
     # 短链需要先重定向，走 parse_with_redirect
     follow_redirect: bool = False
@@ -91,9 +91,11 @@ CASES: list[Case] = [
          "", source="manual",
          note="需要你给一条小红书**视频**笔记"),
     Case("xhs-short", "xiaohongshu", "短链",
-         "", source="manual",
-         note="需要你给一条 xhslink.com/xxxx（分享出来的短链）",
-         follow_redirect=True),
+         "https://xhslink.cn/o/7FZArxKYqOv", source="manual",
+         follow_redirect=True,
+         note="用户提供的真实短链（App 分享形态），走 parse_with_redirect 测重定向分支。"
+              "这条是**图文帖且标题为空**（正文直接从内容开始）—— 所以不能用"
+              "「必须有标题」当判据，见 expect_fields 的说明"),
 
     # ==================== Twitter ====================
     Case("tw-text", "twitter", "纯文本/单图",

@@ -202,6 +202,20 @@ async def run_case(case, parsers: dict[str, object], timeout: float) -> Verdict:
                 v.stage = "结构"
                 v.reason = f"缺字段 {attr}"
                 return v
+
+        # 判据是「**解析出了内容**」，不是「必须有标题」。
+        #
+        # 标题**不是**必备字段：实测一条真实小红书图文帖
+        # （xhslink.cn/o/7FZArxKYqOv，图文、正文直接以内容开头）title 就是空的，
+        # 而正文、作者、3 张图全都正常。把「必须有 title」当默认判据，
+        # 会让这类完全正常的图文帖一律报失败 —— 假失败比假通过更糟，
+        # 因为它会让人去改本来没坏的地方。
+        has_text = bool((result.text or "").strip())
+        has_any = bool(v.title or has_text or any(v.counts.values()))
+        if not has_any:
+            v.stage = "结构"
+            v.reason = "标题/正文/媒体全空 —— 等于什么都没解析出来"
+            return v
         if case.expect_media and not any(v.counts.values()):
             v.stage = "结构"
             v.reason = "没有解析出任何图片/视频/音频"
