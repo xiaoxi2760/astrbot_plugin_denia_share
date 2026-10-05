@@ -28,6 +28,10 @@ class Case:
     # 短链需要先重定向，走 parse_with_redirect
     follow_redirect: bool = False
     tags: tuple[str, ...] = field(default=())
+    # **预期就是报错**。用于「该拒绝的要给出可读理由」这类用例 ——
+    # 默认判据是「必须解析成功」，所以负向用例必须显式声明，否则会把
+    # 正确的拒绝当成失败（或者反过来，把静默成功当成通过）。
+    expect_error: str | None = None
 
 
 CASES: list[Case] = [
@@ -126,13 +130,21 @@ CASES: list[Case] = [
          note="同上，bangumi 路径大概率不匹配；番剧受地区限制"),
 
     # ==================== GitHub ====================
+    # **只有「仓库」一种内容类型。** 实测：/issues/1、/releases/tag/1.2.0、
+    # /blob/main/README.md 全部只捕获 owner/repo，产出与仓库根完全相同的结果
+    # —— 子路径被彻底忽略。所以下面两条测的是**边界行为**而非别的内容类型：
+    # 该拒绝的要给出可读理由，而不是静默解析成仓库。
     Case("gh-repo", "github", "仓库",
-         "https://github.com/python/cpython", source="api"),
-    Case("gh-release", "github", "Release",
-         "", source="manual",
-         note="需要你给一个带 release 的仓库链接，或我用 python/cpython/releases"),
-    Case("gh-issue", "github", "Issue",
-         "https://github.com/python/cpython/issues/158868", source="api"),
+         "https://github.com/xiaoxi2760/astrbot_plugin_denia_share", source="api",
+         note="用插件自己的仓库，顺带验 .git 后缀与用户信息"),
+    Case("gh-notrepo", "github", "非仓库路径应被拒",
+         "https://github.com/features/copilot", source="api",
+         expect_error="不是仓库地址",
+         note="github.com 下有一堆非仓库路径（features/orgs/apps…），"
+              "要给出可读拒绝而不是硬解析"),
+    Case("gh-404", "github", "不存在的仓库应被拒",
+         "https://github.com/xiaoxi2760/definitely_not_exist_zzz9", source="api",
+         expect_error="仓库不存在"),
 
     # ==================== Pixiv ====================
     Case("px-1", "pixiv", "单张插画",

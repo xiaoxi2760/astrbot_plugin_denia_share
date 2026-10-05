@@ -42,17 +42,23 @@ py -3 tests/smoke/run_smoke.py "" steam
 **为什么不断言文案**：平台文案随时变，拿它当断言只会让测试变成随机失败，
 真正坏了的时候你反而会忽略红字。
 
+**负向用例**用 `expect_error="<理由片段>"` 声明：这条**应该**抛 ParseException 且
+理由里含该片段。默认判据是「必须解析成功」，所以负向用例必须显式声明，否则会把
+正确的拒绝当成失败。**反过来也守住了**——声明了 expect_error 却真的解析成功，
+同样判失败：「非仓库路径被静默解析成仓库」这种行为，光靠「没抛异常」是抓不到的。
+
 ## 当前结果（2026-10-06，代理 127.0.0.1:7897）
 
-**34 条用例，其中 15 条有 URL 可跑。8 条通过。**
+**34 条用例，其中 16 条有 URL 可跑。9 条通过。**
 
 ### 通过
 
 | 平台 | 内容类型 | URL | 结果 |
 |---|---|---|---|
 | AcFun | 视频 | `acfun.cn/v/ac43445963` | 视频=1 |
-| GitHub | 仓库 | `github.com/python/cpython` | 图=1 |
-| GitHub | Issue | `.../issues/158868` | 图=1 |
+| GitHub | 仓库 | `github.com/xiaoxi2760/astrbot_plugin_denia_share` | 图=1 |
+| GitHub | 非仓库路径应被拒 | `github.com/features/copilot` | 预期报错 ✓ |
+| GitHub | 不存在的仓库应被拒 | `xiaoxi2760/definitely_not_exist_zzz9` | 预期报错 ✓ |
 | Pixiv | 插画 | `pixiv.net/artworks/87070841` | 图=1 |
 | Pixiv | 作品 | `pixiv.net/artworks/115779535` | 图=1 |
 | Steam | 游戏商店页 | `store.steampowered.com/app/730/` | Counter-Strike 2 图=4 |
@@ -185,7 +191,45 @@ field 'data'` 会直接穿透到用户面前。用户看到这句既不知道是
 同文件里已经有 `raise ParseException(f"被风控拦截({code})…")` 这类可读文案的先例，
 照着写即可。
 
-### 4. B站离线测不了，本身就是个信号 🟡
+### 4. GitHub 其实只有「仓库」一种内容类型 🟡
+
+**实测**（同一个仓库，四种 URL）：
+
+```
+github.com/xiaoxi2760/astrbot_plugin_denia_share
+github.com/xiaoxi2760/astrbot_plugin_denia_share/issues/1
+github.com/xiaoxi2760/astrbot_plugin_denia_share/releases/tag/1.2.0
+github.com/xiaoxi2760/astrbot_plugin_denia_share/blob/main/README.md
+    → 四条产出完全相同：标题=仓库名，正文=仓库描述
+```
+
+原因在 `core/parsers/github.py:58`：
+
+```python
+@handle("github.com", r"github\.com/(?P<owner>[\w.\-]+)/(?P<repo>[\w.\-]+)")
+```
+
+只捕获 owner/repo，**后面路径是什么完全不看**；而且只调
+`/repos/{owner}/{repo}` 这一个接口（`github.py:70`），从来没请求过 releases 或 issues。
+
+**所以我把原来那两条用例（Issue / Release）撤了——它们是假阳性**：
+`gh-issue` 当时"通过"了，但测的其实是仓库解析，等于什么都没测到。
+换成了两条真实存在的边界行为：
+
+| 用例 | 期望 |
+|---|---|
+| `github.com/features/copilot` | `ParseException: 不是仓库地址: features/copilot` |
+| 不存在的仓库 | `ParseException: 仓库不存在: owner/repo` |
+
+github.com 下有大量非仓库路径（`features` / `orgs` / `apps` / `marketplace`…），
+解析器已经用一个黑名单挡住了（`github.py:63-66`），这两条就是守住那个黑名单的。
+
+**要不要补 Issue / Release 解析？** 取决于你想不想让用户在群里发
+`.../releases/tag/1.2.0` 时看到的是**版本说明**而不是仓库卡片。目前的行为不算错
+（解析器明确只认仓库），但用户很可能期望看到 release 内容——这是个产品决策，
+不是 bug，我没擅自改。
+
+### 5. B站离线测不了，本身就是个信号 🟡
 
 B站解析器重度依赖 `bilibili_api`（`Video` 的 async 方法、扫码登录、类型常量），
 桩一装就报 `can't be used in 'await'`。这不是测试框架的问题——
@@ -194,7 +238,7 @@ B站解析器重度依赖 `bilibili_api`（`Video` 的 async 方法、扫码登�
 
 ---
 
-## 待补 URL（19 条，需要你提供）
+## 待补 URL（18 条，需要你提供）
 
 我拿不到的都是需要登录态 / 无公开列表接口的平台。下面按平台列，**每条都是它需要验证的代码分支**。
 
@@ -227,19 +271,19 @@ B站解析器重度依赖 `bilibili_api`（`Video` 的 async 方法、扫码登�
 - [ ] **含图帖** ← 验证 `img.nga.178.com` 取图
 - [ ] 长帖/讨论串
 
-### GitHub（1）
-- [ ] Release：任意带 release 的仓库，如 `github.com/python/cpython/releases`
-
 ### Pixiv（1）
 - [ ] ugoira 动图（`artworks/<数字>` 但类型是动图）
 
-### 微博（3，用于验证「发现 1」的修复）
-- [ ] 一条真实的 `m.weibo.cn/statuses/show?id=` 链接
-- [ ] 一条配了 Cookie 后的 `m.weibo.cn/detail/<wid>`（验证访客机制 vs Cookie）
+### 额外：微博（3，不计入上面 18 条）
+
+这 3 条不是补覆盖，是**专门验「发现 1」的修复**：
+- [ ] 一条真实的 `m.weibo.cn/statuses/show?id=` —— 修完 pattern 后应该能派发并解析
+- [ ] 一条配了 Cookie 后的 `m.weibo.cn/detail/<wid>` —— 用来判断「报错是天书」那句
+  到底是「没 Cookie 必然这样」还是「有 Cookie 也这样」，进而决定该不该无条件包一层提示
 - [ ] 视频微博 `video.weibo.com/show?fid=...`
 
 **拿到之后**：填进 `tests/smoke/cases.py` 对应的 `url=""`，`source` 改成 `manual`，
-跑一次 `run_smoke.py` 即可。我也可以把 URL 直接发给你，你复制就行。
+跑一次 `run_smoke.py` 即可。你也可以直接把链接贴给我，我填。
 
 ---
 

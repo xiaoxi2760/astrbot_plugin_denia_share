@@ -179,6 +179,13 @@ async def run_case(case, parsers: dict[str, object], timeout: float) -> Verdict:
         v.keyword = keyword
 
         # ---- 3. 结构 ----
+        # 负向用例：声明了 expect_error 却真的解析成功，**同样是失败**。
+        # 「非仓库路径被静默解析成仓库」这种行为单靠「没抛异常」是抓不到的。
+        if case.expect_error:
+            v.stage = "结构"
+            v.reason = f"声明应报错（{case.expect_error}），却解析成功了：{v.title!r}"
+            return v
+
         # 媒体计数走 ParseResult 的 img/video/audio_contents 属性，
         # 不是 fields —— contents 混装三种类型，要按类型分。
         v.title = (result.title or "").strip()
@@ -206,11 +213,18 @@ async def run_case(case, parsers: dict[str, object], timeout: float) -> Verdict:
 
     except SilentException as exc:
         v.stage, v.reason = "派发", f"无法匹配: {exc}"
+    except ParseException as exc:
+        message = str(exc)
+        if case.expect_error and case.expect_error in message:
+            # 负向用例达成预期：给出了可读理由
+            v.ok = True
+            v.stage = "预期报错"
+            v.reason = message[:90]
+        else:
+            v.stage, v.reason = "解析", f"ParseException: {message[:120]}"
     except IgnoreException as exc:
         # 策略跳过：解析器主动放弃（如大会员/付费/地区限制），不是 bug
         v.stage, v.reason = "策略跳过", str(exc)
-    except ParseException as exc:
-        v.stage, v.reason = "解析", f"ParseException: {exc}"
     except DownloadException as exc:
         v.stage, v.reason = "下载", f"DownloadException: {exc}"
     except asyncio.TimeoutError:
