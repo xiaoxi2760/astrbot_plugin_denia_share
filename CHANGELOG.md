@@ -21,6 +21,22 @@
 
 ### 修复
 
+- **Twitter / X 解析完全失效 —— 两级取数都打在不存在的域名上。** 原先拼镜像地址用的是
+  `url.replace("x.com", host).replace("twitter.com", host)`，而第一段产出的
+  `api.fxtwitter.com` **本身就含 `twitter.com`**（`f-x` + `twitter.com`），第二段于是
+  对着它再替换一次，拼出 `api.fxapi.fxtwitter.com`。vxtwitter / fxtwitter 两级同时失效，
+  症状是 `SSLV3_ALERT_HANDSHAKE_FAILURE` 或空的 `ConnectError` —— 全都指向"网络问题"，
+  排查时先怀疑国内 TLS 重置、再怀疑代理、最后才拼出 URL 一眼看穿。
+  现改为显式拆 host 再重组（`to_api_url`），替换只发生一次。
+- **微博 `m.weibo.cn/statuses/show?id=` 匹配不到** —— 这正是微博 App「分享 → 复制链接」
+  的默认形态。症状特别隐蔽：派发失败就静默跳过，插件不响应也不报错，看着像没开。
+  顺带修了一个更隐蔽的：`status/show?id=X` 原先被通用 pattern 误当成 `detail/<id>`、
+  把 `show` 当成作品 id 抓走，去请求一条叫 show 的微博。
+- **微博接口返回错误 JSON 时，报错信息对用户是天书。** msgspec 的
+  `ValidationError: Object missing required field 'data'` 原本一路穿给用户，既不说是风控
+  也不说该配 Cookie。现包成可读中文；异常类型名只进日志不进消息（对用户零信息量，
+  还会盖掉有用那句）。解码失败与「接口返回了别的作品」分开处理，后者的消息更有用，
+  不被笼统提示吞掉。
 - **B站默认优先下 AV1，发到电脑版 QQ 会花屏。** 1.2.x 把 codec 顺序写死成
   `[AV1, AVC, HEV]`，即同清晰度下挑了兼容性最差的那个 —— AV1 体积最小但老客户端
   硬解不了。1.3.0 默认改为 H.264 优先，并把这个选择交还给用户。

@@ -55,7 +55,7 @@ Safari 17 (macOS)            403
 import re
 from datetime import timezone
 from typing import Any, ClassVar
-from urllib.parse import urlsplit
+from urllib.parse import urlsplit, urlunsplit
 
 from astrbot.api import logger
 
@@ -71,6 +71,20 @@ _TWIMG_HOST_PREFIX = {
 # vxtwitter 专用 UA。刻意**带 httpx 自报名、不带浏览器签名** —— 见模块 docstring：
 # api.vxtwitter.com 的 Cloudflare 只挑战「像浏览器」的 UA，对程序化 UA 直接放行。
 VX_UA = "python-httpx/0.27.0"
+
+
+def to_api_url(url: str, host: str) -> str:
+    """把 ``x.com`` / ``twitter.com`` 换成镜像 API 域名，保留 path 与 query。
+
+    **不要用 ``url.replace("x.com", host).replace("twitter.com", host)``。**
+    第一段产出的 ``api.fxtwitter.com`` 本身就含 ``twitter.com``（``f-x`` + ``twitter.com``），
+    第二段会对着它再替换一次，拼出 ``api.fxapi.fxtwitter.com`` 这种不存在的域名。
+    两级兜底因此同时失效，而报错是 ``SSLV3_ALERT_HANDSHAKE_FAILURE`` 或空的
+    ``ConnectError`` —— 全都指向"网络问题"，排查方向会被彻底带偏。
+    这里显式拆 host，替换只发生一次。
+    """
+    parts = urlsplit(url)
+    return urlunsplit(("https", host, parts.path, parts.query, ""))
 
 
 def proxy_media_url(url: str | None) -> str | None:
@@ -127,7 +141,7 @@ class TwitterParser(BaseParser):
     # ------------------------------------------------------------------ #
 
     async def parse_by_vxapi(self, url: str) -> ParseResult:
-        api_url = url.replace("x.com", "api.vxtwitter.com").replace("twitter.com", "api.vxtwitter.com")
+        api_url = to_api_url(url, "api.vxtwitter.com")
         # 独立 UA：不能用全局 COMMON_HEADER，否则被 Cloudflare 挑战（见模块 docstring）
         headers = {**self.headers, "User-Agent": VX_UA}
         async with self.new_client(headers=headers) as client:
@@ -167,7 +181,7 @@ class TwitterParser(BaseParser):
     # ------------------------------------------------------------------ #
 
     async def parse_by_fxapi(self, url: str, tweet_id: str) -> ParseResult:
-        api_url = url.replace("x.com", "api.fxtwitter.com").replace("twitter.com", "api.fxtwitter.com")
+        api_url = to_api_url(url, "api.fxtwitter.com")
         # fxtwitter 要求非空 UA（空 UA → 401 并提示 "You must identify yourself
         # with a User-Agent header"）。全局 COMMON_HEADER 不带这条限制，直接用即可；
         # 这里显式兜住「headers 里没有 User-Agent」的极端情况。
