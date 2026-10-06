@@ -1,0 +1,199 @@
+{
+ "_meta": {
+  "sample": "BV1wHh16yE8F",
+  "endpoint": "view",
+  "captured_at": "2026-10-06T11:48:26+08:00",
+  "http_status": 200,
+  "error": null,
+  "request": {
+   "method": "GET",
+   "url": "https://api.bilibili.test/x/web-interface/view?bvid=REDACTED",
+   "params": {
+    "bvid": "BV1wHh16yE8F"
+   },
+   "wbi_signed": false
+  }
+ },
+ "code": 0,
+ "message": "OK",
+ "ttl": 1,
+ "data": {
+  "bvid": "BV1wHh16yE8F",
+  "aid": 117330151545529,
+  "videos": 5,
+  "tid": 184,
+  "tid_v2": 2004,
+  "tname": "",
+  "tname_v2": "",
+  "copyright": 3,
+  "pic": "http://img0.bilibili.test/bfs/archive/32d5a524ebe256b314880f928e7696c05aec834f.jpg",
+  "title": "诡探，30集全！",
+  "pubdate": 1790316570,
+  "ctime": 1790316570,
+  "desc": "",
+  "desc_v2": null,
+  "state": 0,
+  "duration": 56640,
+  "rights": {
+   "bp": 0,
+   "elec": 0,
+   "download": 1,
+   "movie": 0,
+   "pay": 0,
+   "hd5": 0,
+   "no_reprint": 0,
+   "autoplay": 1,
+   "ugc_pay": 0,
+   "is_cooperation": 0,
+   "ugc_pay_preview": 0,
+   "no_background": 0,
+   "clean_mode": 0,
+   "is_stein_gate": 0,
+   "is_360": 0,
+   "no_share": 0,
+   "arc_pay": 0,
+   "free_watch": 0
+  },
+  "owner": {
+   "mid": 3632310903638752,
+   "name": "何必执着呢123",
+   "face": "https://img1.bilibili.test/bfs/face/431b75b3a08f8852fe68d272ee24e44b9f471747.jpg"
+  },
+  "stat": {
+   "aid": 117330151545529,
+   "view": 114336,
+   "danmaku": 288,
+   "reply": 90,
+   "favorite": 3912,
+   "coin": 336,
+   "share": 170,
+   "now_rank": 0,
+   "his_rank": 0,
+   "like": 1458,
+   "dislike": 0,
+   "evaluation": "",
+   "vt": 0
+  },
+  "argue_info": {
+   "argue_msg": "",
+   "argue_type": 0,
+   "argue_link": ""
+  },
+  "dynamic": "",
+  "cid": 42184345005,
+  "dimension": {
+   "width": 1280,
+   "height": 720,
+   "rotate": 0
+  },
+  "premiere": null,
+  "teenage_mode": 1,
+  "is_chargeable_season": false,
+  "is_story": false,
+  "is_upower_exclusive": false,
+  "is_upower_play": false,
+  "is_upower_preview": false,
+  "enable_vt": 0,
+  "vt_display": "",
+  "is_upower_exclusive_with_qa": false,
+  "is_hua_sheng": false,
+  "no_cache": false,
+  "pages": [
+   {
+    "cid": 42184345005,
+    "page": 1,
+    "from": "vupload",
+    "part": "1-6",
+    "duration": 11236,
+    "vid": "",
+    "weblink": "",
+    "dimension": {
+     "width": 1280,
+     "height": 720,
+     "rotate": 0
+    },
+    "first_frame": "http://img0.bilibili.test/bfs/storyff/_000029ewc0me7rfwh27qgeqcycmk6qb_firsti.jpg",
+    "ctime": 1790316570
+   },
+   {
+    "cid": 42184477488,
+    "page": 2,
+    "from": "vupload",
+    "part": "7-12",
+    "duration": 11244,
+    "vid": "",
+    "weblink": "",
+    "dimension": {
+     "width": 1280,
+     "height": 720,
+     "rotate": 0
+    },
+    "first_frame": "http://img2.bilibili.test/bfs/storyff/_00002cokipnxx3tss2vvzgrrpd5jmbb_firsti.jpg",
+    "ctime": 1790316570
+   },
+   {
+    "cid": 42184609509,
+    "page": 3,
+    "from": "vupload",
+    "part": "13-18",
+    "duration": 11380,
+    "vid": "",
+    "weblink": "",
+    "dimension": {
+     "width": 1280,
+     "height": 720,
+     "rotate": 0
+    },
+    "first_frame": "http://img0.bilibili.test/bfs/storyff/_0000093pbxrioj9ry2jbn2t1oojf85b_firsti.jpg",
+    "ctime": 1790316570
+   },
+   {
+    "cid": 42184868185,
+    "page": 4,
+    "from": "vupload",
+    "part": "19-24",
+    "duration": 11413,
+    "vid": "",
+    "weblink": "",
+    "dimension": {
+     "width": 1280,
+     "height": 720,
+     "rotate": 0
+    },
+    "first_frame": "http://img1.bilibili.test/bfs/storyff/_000027n53lcxzxvxm264jbcxsf7aahb_firsti.jpg",
+    "ctime": 1790316570
+   },
+   {
+    "cid": 42185066279,
+    "page": 5,
+    "from": "vupload",
+    "part": "25-30",
+    "duration": 11367,
+    "vid": "",
+    "weblink": "",
+    "dimension": {
+     "width": 1280,
+     "height": 720,
+     "rotate": 0
+    },
+    "first_frame": "http://img0.bilibili.test/bfs/storyff/_00003i1ae2piq62g02riykc3i6mf47b_firsti.jpg",
+    "ctime": 1790316570,
+    "asr_language": "cmn"
+   }
+  ],
+  "subtitle": {
+   "allow_submit": false,
+   "list": []
+  },
+  "is_season_display": false,
+  "user_garb": {
+   "url_image_ani_cut": ""
+  },
+  "honor_reply": {},
+  "like_icon": "",
+  "need_jump_bv": false,
+  "disable_show_up_info": false,
+  "is_story_play": 0,
+  "is_view_self": false
+ }
+}

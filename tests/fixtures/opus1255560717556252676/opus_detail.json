@@ -1,0 +1,253 @@
+{
+ "_meta": {
+  "sample": "opus1255560717556252676",
+  "endpoint": "polymer/dynamic/v1/detail",
+  "captured_at": "2026-10-06T11:51:36+08:00",
+  "http_status": 200,
+  "error": null,
+  "request": {
+   "method": "GET",
+   "url": "https://api.bilibili.test/x/polymer/web-dynamic/v1/detail?id=REDACTED",
+   "params": {
+    "id": "1255560717556252676"
+   },
+   "wbi_signed": false
+  }
+ },
+ "code": 0,
+ "message": "0",
+ "ttl": 1,
+ "data": {
+  "item": {
+   "basic": {
+    "comment_id_str": "411332718",
+    "comment_type": 11,
+    "like_icon": {
+     "action_url": "",
+     "end_url": "",
+     "id": 0,
+     "start_url": ""
+    },
+    "rid_str": "411332718"
+   },
+   "id_str": "1255560717556252676",
+   "modules": {
+    "module_author": {
+     "avatar": {
+      "container_size": {
+       "height": 1.35,
+       "width": 1.35
+      },
+      "fallback_layers": {
+       "is_critical_group": true,
+       "layers": [
+        {
+         "general_spec": {
+          "pos_spec": {
+           "axis_x": 0.675,
+           "axis_y": 0.675,
+           "coordinate_pos": 2
+          },
+          "render_spec": {
+           "opacity": 1
+          },
+          "size_spec": {
+           "height": 1,
+           "width": 1
+          }
+         },
+         "layer_config": {
+          "is_critical": true,
+          "tags": {
+           "AVATAR_LAYER": {},
+           "GENERAL_CFG": {
+            "config_type": 1,
+            "general_config": {
+             "web_css_style": {
+              "borderRadius": "50%"
+             }
+            }
+           }
+          }
+         },
+         "resource": {
+          "res_image": {
+           "image_src": {
+            "placeholder": 6,
+            "remote": {
+             "bfs_style": "widget-layer-avatar",
+             "url": "https://img0.bilibili.test/bfs/face/a71b4dd6647ddf0c813bcf74e062edab9224cb0e.jpg"
+            },
+            "src_type": 1
+           }
+          },
+          "res_type": 3
+         },
+         "visible": true
+        },
+        {
+         "general_spec": {
+          "pos_spec": {
+           "axis_x": 0.8000000000000002,
+           "axis_y": 0.8000000000000002,
+           "coordinate_pos": 1
+          },
+          "render_spec": {
+           "opacity": 1
+          },
+          "size_spec": {
+           "height": 0.41666666666666663,
+           "width": 0.41666666666666663
+          }
+         },
+         "layer_config": {
+          "tags": {
+           "GENERAL_CFG": {
+            "config_type": 1,
+            "general_config": {
+             "web_css_style": {
+              "background-color": "rgb(255,255,255)",
+              "border": "2px solid rgba(255,255,255,1)",
+              "borderRadius": "50%",
+              "boxSizing": "border-box"
+             }
+            }
+           },
+           "ICON_LAYER": {}
+          }
+         },
+         "resource": {
+          "res_image": {
+           "image_src": {
+            "local": 4,
+            "src_type": 2
+           }
+          },
+          "res_type": 3
+         },
+         "visible": true
+        }
+       ]
+      },
+      "mid": "37974444"
+     },
+     "face": "https://img0.bilibili.test/bfs/face/a71b4dd6647ddf0c813bcf74e062edab9224cb0e.jpg",
+     "face_nft": false,
+     "following": null,
+     "jump_url": "//https://host-space-bilibili-com.test/37974444/dynamic",
+     "label": "",
+     "mid": 37974444,
+     "name": "黑马程序员",
+     "official_verify": {
+      "desc": "",
+      "type": 1
+     },
+     "pendant": {
+      "expire": 0,
+      "image": "",
+      "image_enhance": "",
+      "image_enhance_frame": "",
+      "n_pid": 0,
+      "name": "",
+      "pid": 0
+     },
+     "pub_action": "",
+     "pub_location_text": "",
+     "pub_time": "2026年10月05日 11:36",
+     "pub_ts": 1791171410,
+     "type": "AUTHOR_TYPE_NORMAL",
+     "vip": {
+      "avatar_subscript": 1,
+      "avatar_subscript_url": "",
+      "due_date": 1845475200000,
+      "label": {
+       "bg_color": "#FB7299",
+       "bg_style": 1,
+       "border_color": "",
+       "img_label_uri_hans": "",
+       "img_label_uri_hans_static": "http://img0.bilibili.test/bfs/vip/10df1f7f4af1292f773489e36554a05177785143.png",
+       "img_label_uri_hant": "",
+       "img_label_uri_hant_static": "https://img0.bilibili.test/bfs/activity-plat/static/20220614/e369244d0b14644f5e1a06431e22a4d5/uckjAv3Npy.png",
+       "label_theme": "annual_vip",
+       "path": "http://img0.bilibili.test/bfs/vip/label_annual.png",
+       "text": "年度大会员",
+       "text_color": "#FFFFFF",
+       "use_img_label": true
+      },
+      "nickname_color": "#FB7299",
+      "status": 1,
+      "theme_type": 0,
+      "type": 2
+     }
+    },
+    "module_dynamic": {
+     "additional": {
+      "goods": {
+       "head_icon": "",
+       "head_text": "UP主的推荐",
+       "items": [
+        {
+         "brief": "",
+         "cover": "https://img0.bilibili.test/bfs/mall/mall/9c/24/ee3ce790ca762fdd2a191d5161bc63cd.png",
+         "id": 12388319,
+         "jump_desc": "去看看",
+         "jump_url": "https://host-mall-bilibili-com.test/neul-next/detailuniversal/detail.html?page=REDACTED&itemsId=REDACTED&loadingShow=REDACTED&noTitleBar=REDACTED&track_id=REDACTED&from=REDACTED&msource=REDACTED",
+         "name": "免费咨询10大热门就业线上/线下试学课+1对1职业规划",
+         "price": ""
+        }
+       ],
+       "jump_url": ""
+      },
+      "type": "ADDITIONAL_TYPE_GOODS"
+     },
+     "desc": null,
+     "major": {
+      "draw": {
+       "id": 411332718,
+       "items": [
+        {
+         "height": 240,
+         "size": 54.9951171875,
+         "src": "http://img0.bilibili.test/bfs/new_dyn/1d2f739ae49b05e80681269731bac42037974444.gif",
+         "tags": [],
+         "width": 240
+        }
+       ]
+      },
+      "type": "MAJOR_TYPE_DRAW"
+     },
+     "topic": {
+      "id": 6872,
+      "jump_url": "https://host-m-bilibili-com.test/topic-detail?topic_id=REDACTED&topic_name=REDACTED",
+      "name": "程序员"
+     }
+    },
+    "module_more": {
+     "three_point_items": [
+      {
+       "label": "举报",
+       "type": "THREE_POINT_REPORT"
+      }
+     ]
+    },
+    "module_stat": {
+     "comment": {
+      "count": 1,
+      "forbidden": false
+     },
+     "forward": {
+      "count": 0,
+      "forbidden": false
+     },
+     "like": {
+      "count": 151,
+      "forbidden": false,
+      "status": false
+     }
+    }
+   },
+   "type": "DYNAMIC_TYPE_DRAW",
+   "visible": true
+  }
+ }
+}

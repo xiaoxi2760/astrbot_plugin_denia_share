@@ -1,0 +1,390 @@
+{
+ "_meta": {
+  "sample": "BV1fnHL68EPT",
+  "endpoint": "playurl/fnval16",
+  "captured_at": "2026-10-06T11:48:13+08:00",
+  "http_status": 200,
+  "error": null,
+  "request": {
+   "method": "GET",
+   "url": "https://api.bilibili.test/x/player/wbi/playurl?bvid=REDACTED&cid=REDACTED&fnval=REDACTED&fnver=REDACTED&fourk=REDACTED&high_quality=REDACTED&otype=REDACTED&platform=REDACTED&qn=REDACTED&wts=REDACTED&w_rid=REDACTED",
+   "params": {
+    "bvid": "BV1fnHL68EPT",
+    "cid": "42455072935",
+    "fnval": "16",
+    "fnver": "0",
+    "fourk": "1",
+    "high_quality": "1",
+    "otype": "json",
+    "platform": "pc",
+    "qn": "120",
+    "wts": "1791258492",
+    "w_rid": "11c98def8e19eb01e2f2beffab134bc9"
+   },
+   "wbi_signed": true
+  }
+ },
+ "code": 0,
+ "message": "OK",
+ "ttl": 1,
+ "data": {
+  "from": "local",
+  "result": "suee",
+  "message": "",
+  "quality": 64,
+  "format": "flv720",
+  "timelength": 6720199,
+  "accept_format": "flv_p60,flv,flv720,flv480,mp4",
+  "accept_description": [
+   "高清 1080P60",
+   "高清 1080P",
+   "高清 720P",
+   "清晰 480P",
+   "流畅 360P"
+  ],
+  "accept_quality": [
+   116,
+   80,
+   64,
+   32,
+   16
+  ],
+  "video_codecid": 7,
+  "seek_param": "start",
+  "seek_type": "offset",
+  "dash": {
+   "duration": 6721,
+   "minBufferTime": 1.5,
+   "min_buffer_time": 1.5,
+   "video": [
+    {
+     "id": 32,
+     "baseUrl": "https://cdn1.bilivideo.test:8082/v1/resource/upgcxcode/35/29/42455072935/42455072935-1-30032.m4s?agrr=REDACTED&build=REDACTED&buvid=REDACTED&bvc=REDACTED&bw=REDACTED&deadline=REDACTED&dl=REDACTED&e=REDACTED&f=REDACTED&gen=REDACTED&lrs=REDACTED&mcdnid=REDACTED&mid=REDACTED&nbs=REDACTED&nettype=REDACTED&og=REDACTED&oi=REDACTED&orderid=REDACTED&os=REDACTED&platform=REDACTED&prs=REDACTED&qn_dyeid=REDACTED&sign=REDACTED&traceid=REDACTED&uipk=REDACTED&uparams=REDACTED&upsig=REDACTED",
+     "base_url": "https://cdn2.bilivideo.test:8082/v1/resource/upgcxcode/35/29/42455072935/42455072935-1-30032.m4s?agrr=REDACTED&build=REDACTED&buvid=REDACTED&bvc=REDACTED&bw=REDACTED&deadline=REDACTED&dl=REDACTED&e=REDACTED&f=REDACTED&gen=REDACTED&lrs=REDACTED&mcdnid=REDACTED&mid=REDACTED&nbs=REDACTED&nettype=REDACTED&og=REDACTED&oi=REDACTED&orderid=REDACTED&os=REDACTED&platform=REDACTED&prs=REDACTED&qn_dyeid=REDACTED&sign=REDACTED&traceid=REDACTED&uipk=REDACTED&uparams=REDACTED&upsig=REDACTED",
+     "backupUrl": [
+      "https://host-b-baaa4h67d1y5abm4cgw1bs90ek6ss-edge-mountaintoys-cn.test:4483/upgcxcode/35/29/42455072935/42455072935-1-30032.m4s?e=REDACTED&oi=REDACTED&trid=REDACTED&deadline=REDACTED&uipk=REDACTED&platform=REDACTED&mid=REDACTED&nbs=REDACTED&gen=REDACTED&os=REDACTED&og=REDACTED&upsig=REDACTED&uparams=REDACTED&mcdnid=REDACTED&bvc=REDACTED&nettype=REDACTED&bw=REDACTED&lrs=REDACTED&prs=REDACTED&qn_dyeid=REDACTED&agrr=REDACTED&buvid=REDACTED&build=REDACTED&dl=REDACTED&f=REDACTED&orderid=REDACTED",
+      "https://cdn3.bilivideo.test/upgcxcode/35/29/42455072935/42455072935-1-30032.m4s?e=REDACTED&platform=REDACTED&mid=REDACTED&deadline=REDACTED&oi=REDACTED&trid=REDACTED&uipk=REDACTED&nbs=REDACTED&gen=REDACTED&os=REDACTED&og=REDACTED&upsig=REDACTED&uparams=REDACTED&bvc=REDACTED&nettype=REDACTED&bw=REDACTED&lrs=REDACTED&f=REDACTED&qn_dyeid=REDACTED&agrr=REDACTED&buvid=REDACTED&build=REDACTED&dl=REDACTED&orderid=REDACTED"
+     ],
+     "backup_url": [
+      "https://host-b-baaa4h67d1y5abm4cgw1bs90ek6ss-edge-mountaintoys-cn.test:4483/upgcxcode/35/29/42455072935/42455072935-1-30032.m4s?e=REDACTED&oi=REDACTED&trid=REDACTED&deadline=REDACTED&uipk=REDACTED&platform=REDACTED&mid=REDACTED&nbs=REDACTED&gen=REDACTED&os=REDACTED&og=REDACTED&upsig=REDACTED&uparams=REDACTED&mcdnid=REDACTED&bvc=REDACTED&nettype=REDACTED&bw=REDACTED&lrs=REDACTED&prs=REDACTED&qn_dyeid=REDACTED&agrr=REDACTED&buvid=REDACTED&build=REDACTED&dl=REDACTED&f=REDACTED&orderid=REDACTED",
+      "https://cdn4.bilivideo.test/upgcxcode/35/29/42455072935/42455072935-1-30032.m4s?e=REDACTED&platform=REDACTED&mid=REDACTED&deadline=REDACTED&oi=REDACTED&trid=REDACTED&uipk=REDACTED&nbs=REDACTED&gen=REDACTED&os=REDACTED&og=REDACTED&upsig=REDACTED&uparams=REDACTED&bvc=REDACTED&nettype=REDACTED&bw=REDACTED&lrs=REDACTED&f=REDACTED&qn_dyeid=REDACTED&agrr=REDACTED&buvid=REDACTED&build=REDACTED&dl=REDACTED&orderid=REDACTED"
+     ],
+     "bandwidth": 510278,
+     "mimeType": "video/mp4",
+     "mime_type": "video/mp4",
+     "codecs": "avc1.640033",
+     "width": 852,
+     "height": 480,
+     "frameRate": "30.000",
+     "frame_rate": "30.000",
+     "sar": "640:639",
+     "startWithSap": 1,
+     "start_with_sap": 1,
+     "SegmentBase": {
+      "Initialization": "0-937",
+      "indexRange": "938-17117"
+     },
+     "segment_base": {
+      "initialization": "0-937",
+      "index_range": "938-17117"
+     },
+     "codecid": 7
+    },
+    {
+     "id": 32,
+     "baseUrl": "https://cdn5.bilivideo.test:8082/v1/resource/upgcxcode/35/29/42455072935/42455072935-1-30033.m4s?agrr=REDACTED&build=REDACTED&buvid=REDACTED&bvc=REDACTED&bw=REDACTED&deadline=REDACTED&dl=REDACTED&e=REDACTED&f=REDACTED&gen=REDACTED&lrs=REDACTED&mcdnid=REDACTED&mid=REDACTED&nbs=REDACTED&nettype=REDACTED&og=REDACTED&oi=REDACTED&orderid=REDACTED&os=REDACTED&platform=REDACTED&prs=REDACTED&qn_dyeid=REDACTED&sign=REDACTED&traceid=REDACTED&uipk=REDACTED&uparams=REDACTED&upsig=REDACTED",
+     "base_url": "https://cdn6.bilivideo.test:8082/v1/resource/upgcxcode/35/29/42455072935/42455072935-1-30033.m4s?agrr=REDACTED&build=REDACTED&buvid=REDACTED&bvc=REDACTED&bw=REDACTED&deadline=REDACTED&dl=REDACTED&e=REDACTED&f=REDACTED&gen=REDACTED&lrs=REDACTED&mcdnid=REDACTED&mid=REDACTED&nbs=REDACTED&nettype=REDACTED&og=REDACTED&oi=REDACTED&orderid=REDACTED&os=REDACTED&platform=REDACTED&prs=REDACTED&qn_dyeid=REDACTED&sign=REDACTED&traceid=REDACTED&uipk=REDACTED&uparams=REDACTED&upsig=REDACTED",
+     "backupUrl": [
+      "https://host-29e749o-edge-mountaintoys-cn.test:4483/upgcxcode/35/29/42455072935/42455072935-1-30033.m4s?e=REDACTED&deadline=REDACTED&uipk=REDACTED&nbs=REDACTED&platform=REDACTED&os=REDACTED&trid=REDACTED&oi=REDACTED&gen=REDACTED&og=REDACTED&mid=REDACTED&upsig=REDACTED&uparams=REDACTED&mcdnid=REDACTED&bvc=REDACTED&nettype=REDACTED&bw=REDACTED&lrs=REDACTED&prs=REDACTED&qn_dyeid=REDACTED&agrr=REDACTED&buvid=REDACTED&build=REDACTED&dl=REDACTED&f=REDACTED&orderid=REDACTED",
+      "https://cdn7.bilivideo.test/upgcxcode/35/29/42455072935/42455072935-1-30033.m4s?e=REDACTED&deadline=REDACTED&uipk=REDACTED&nbs=REDACTED&oi=REDACTED&mid=REDACTED&gen=REDACTED&os=REDACTED&og=REDACTED&platform=REDACTED&trid=REDACTED&upsig=REDACTED&uparams=REDACTED&bvc=REDACTED&nettype=REDACTED&bw=REDACTED&lrs=REDACTED&dl=REDACTED&f=REDACTED&qn_dyeid=REDACTED&agrr=REDACTED&buvid=REDACTED&build=REDACTED&orderid=REDACTED"
+     ],
+     "backup_url": [
+      "https://host-29e749o-edge-mountaintoys-cn.test:4483/upgcxcode/35/29/42455072935/42455072935-1-30033.m4s?e=REDACTED&deadline=REDACTED&uipk=REDACTED&nbs=REDACTED&platform=REDACTED&os=REDACTED&trid=REDACTED&oi=REDACTED&gen=REDACTED&og=REDACTED&mid=REDACTED&upsig=REDACTED&uparams=REDACTED&mcdnid=REDACTED&bvc=REDACTED&nettype=REDACTED&bw=REDACTED&lrs=REDACTED&prs=REDACTED&qn_dyeid=REDACTED&agrr=REDACTED&buvid=REDACTED&build=REDACTED&dl=REDACTED&f=REDACTED&orderid=REDACTED",
+      "https://cdn8.bilivideo.test/upgcxcode/35/29/42455072935/42455072935-1-30033.m4s?e=REDACTED&deadline=REDACTED&uipk=REDACTED&nbs=REDACTED&oi=REDACTED&mid=REDACTED&gen=REDACTED&os=REDACTED&og=REDACTED&platform=REDACTED&trid=REDACTED&upsig=REDACTED&uparams=REDACTED&bvc=REDACTED&nettype=REDACTED&bw=REDACTED&lrs=REDACTED&dl=REDACTED&f=REDACTED&qn_dyeid=REDACTED&agrr=REDACTED&buvid=REDACTED&build=REDACTED&orderid=REDACTED"
+     ],
+     "bandwidth": 406822,
+     "mimeType": "video/mp4",
+     "mime_type": "video/mp4",
+     "codecs": "hvc1.1.6.L120.90",
+     "width": 852,
+     "height": 480,
+     "frameRate": "30.000",
+     "frame_rate": "30.000",
+     "sar": "640:639",
+     "startWithSap": 1,
+     "start_with_sap": 1,
+     "SegmentBase": {
+      "Initialization": "0-1103",
+      "indexRange": "1104-17283"
+     },
+     "segment_base": {
+      "initialization": "0-1103",
+      "index_range": "1104-17283"
+     },
+     "codecid": 12
+    },
+    {
+     "id": 16,
+     "baseUrl": "https://cdn9.bilivideo.test:8082/v1/resource/upgcxcode/35/29/42455072935/42455072935-1-30011.m4s?agrr=REDACTED&build=REDACTED&buvid=REDACTED&bvc=REDACTED&bw=REDACTED&deadline=REDACTED&dl=REDACTED&e=REDACTED&f=REDACTED&gen=REDACTED&lrs=REDACTED&mcdnid=REDACTED&mid=REDACTED&nbs=REDACTED&nettype=REDACTED&og=REDACTED&oi=REDACTED&orderid=REDACTED&os=REDACTED&platform=REDACTED&prs=REDACTED&qn_dyeid=REDACTED&sign=REDACTED&traceid=REDACTED&uipk=REDACTED&uparams=REDACTED&upsig=REDACTED",
+     "base_url": "https://cdn10.bilivideo.test:8082/v1/resource/upgcxcode/35/29/42455072935/42455072935-1-30011.m4s?agrr=REDACTED&build=REDACTED&buvid=REDACTED&bvc=REDACTED&bw=REDACTED&deadline=REDACTED&dl=REDACTED&e=REDACTED&f=REDACTED&gen=REDACTED&lrs=REDACTED&mcdnid=REDACTED&mid=REDACTED&nbs=REDACTED&nettype=REDACTED&og=REDACTED&oi=REDACTED&orderid=REDACTED&os=REDACTED&platform=REDACTED&prs=REDACTED&qn_dyeid=REDACTED&sign=REDACTED&traceid=REDACTED&uipk=REDACTED&uparams=REDACTED&upsig=REDACTED",
+     "backupUrl": [
+      "https://host-h2i438c-edge-mountaintoys-cn.test:4483/upgcxcode/35/29/42455072935/42455072935-1-30011.m4s?e=REDACTED&nbs=REDACTED&oi=REDACTED&trid=REDACTED&mid=REDACTED&gen=REDACTED&os=REDACTED&og=REDACTED&platform=REDACTED&deadline=REDACTED&uipk=REDACTED&upsig=REDACTED&uparams=REDACTED&mcdnid=REDACTED&bvc=REDACTED&nettype=REDACTED&bw=REDACTED&lrs=REDACTED&prs=REDACTED&dl=REDACTED&f=REDACTED&qn_dyeid=REDACTED&agrr=REDACTED&buvid=REDACTED&build=REDACTED&orderid=REDACTED",
+      "https://cdn11.bilivideo.test/upgcxcode/35/29/42455072935/42455072935-1-30011.m4s?e=REDACTED&mid=REDACTED&uipk=REDACTED&oi=REDACTED&platform=REDACTED&trid=REDACTED&deadline=REDACTED&nbs=REDACTED&gen=REDACTED&os=REDACTED&og=REDACTED&upsig=REDACTED&uparams=REDACTED&bvc=REDACTED&nettype=REDACTED&bw=REDACTED&lrs=REDACTED&qn_dyeid=REDACTED&agrr=REDACTED&buvid=REDACTED&build=REDACTED&dl=REDACTED&f=REDACTED&orderid=REDACTED"
+     ],
+     "backup_url": [
+      "https://host-h2i438c-edge-mountaintoys-cn.test:4483/upgcxcode/35/29/42455072935/42455072935-1-30011.m4s?e=REDACTED&nbs=REDACTED&oi=REDACTED&trid=REDACTED&mid=REDACTED&gen=REDACTED&os=REDACTED&og=REDACTED&platform=REDACTED&deadline=REDACTED&uipk=REDACTED&upsig=REDACTED&uparams=REDACTED&mcdnid=REDACTED&bvc=REDACTED&nettype=REDACTED&bw=REDACTED&lrs=REDACTED&prs=REDACTED&dl=REDACTED&f=REDACTED&qn_dyeid=REDACTED&agrr=REDACTED&buvid=REDACTED&build=REDACTED&orderid=REDACTED",
+      "https://cdn12.bilivideo.test/upgcxcode/35/29/42455072935/42455072935-1-30011.m4s?e=REDACTED&mid=REDACTED&uipk=REDACTED&oi=REDACTED&platform=REDACTED&trid=REDACTED&deadline=REDACTED&nbs=REDACTED&gen=REDACTED&os=REDACTED&og=REDACTED&upsig=REDACTED&uparams=REDACTED&bvc=REDACTED&nettype=REDACTED&bw=REDACTED&lrs=REDACTED&qn_dyeid=REDACTED&agrr=REDACTED&buvid=REDACTED&build=REDACTED&dl=REDACTED&f=REDACTED&orderid=REDACTED"
+     ],
+     "bandwidth": 284176,
+     "mimeType": "video/mp4",
+     "mime_type": "video/mp4",
+     "codecs": "hvc1.1.6.L120.90",
+     "width": 640,
+     "height": 360,
+     "frameRate": "30.000",
+     "frame_rate": "30.000",
+     "sar": "1:1",
+     "startWithSap": 1,
+     "start_with_sap": 1,
+     "SegmentBase": {
+      "Initialization": "0-1099",
+      "indexRange": "1100-17279"
+     },
+     "segment_base": {
+      "initialization": "0-1099",
+      "index_range": "1100-17279"
+     },
+     "codecid": 12
+    },
+    {
+     "id": 16,
+     "baseUrl": "https://cdn13.bilivideo.test:8082/v1/resource/upgcxcode/35/29/42455072935/42455072935-1-30016.m4s?agrr=REDACTED&build=REDACTED&buvid=REDACTED&bvc=REDACTED&bw=REDACTED&deadline=REDACTED&dl=REDACTED&e=REDACTED&f=REDACTED&gen=REDACTED&lrs=REDACTED&mcdnid=REDACTED&mid=REDACTED&nbs=REDACTED&nettype=REDACTED&og=REDACTED&oi=REDACTED&orderid=REDACTED&os=REDACTED&platform=REDACTED&prs=REDACTED&qn_dyeid=REDACTED&sign=REDACTED&traceid=REDACTED&uipk=REDACTED&uparams=REDACTED&upsig=REDACTED",
+     "base_url": "https://cdn14.bilivideo.test:8082/v1/resource/upgcxcode/35/29/42455072935/42455072935-1-30016.m4s?agrr=REDACTED&build=REDACTED&buvid=REDACTED&bvc=REDACTED&bw=REDACTED&deadline=REDACTED&dl=REDACTED&e=REDACTED&f=REDACTED&gen=REDACTED&lrs=REDACTED&mcdnid=REDACTED&mid=REDACTED&nbs=REDACTED&nettype=REDACTED&og=REDACTED&oi=REDACTED&orderid=REDACTED&os=REDACTED&platform=REDACTED&prs=REDACTED&qn_dyeid=REDACTED&sign=REDACTED&traceid=REDACTED&uipk=REDACTED&uparams=REDACTED&upsig=REDACTED",
+     "backupUrl": [
+      "https://host-809ak83l-edge-mountaintoys-cn.test:4483/upgcxcode/35/29/42455072935/42455072935-1-30016.m4s?e=REDACTED&uipk=REDACTED&nbs=REDACTED&platform=REDACTED&trid=REDACTED&mid=REDACTED&og=REDACTED&oi=REDACTED&deadline=REDACTED&gen=REDACTED&os=REDACTED&upsig=REDACTED&uparams=REDACTED&mcdnid=REDACTED&bvc=REDACTED&nettype=REDACTED&bw=REDACTED&lrs=REDACTED&prs=REDACTED&qn_dyeid=REDACTED&agrr=REDACTED&buvid=REDACTED&build=REDACTED&dl=REDACTED&f=REDACTED&orderid=REDACTED",
+      "https://cdn15.bilivideo.test/upgcxcode/35/29/42455072935/42455072935-1-30016.m4s?e=REDACTED&oi=REDACTED&trid=REDACTED&uipk=REDACTED&nbs=REDACTED&platform=REDACTED&mid=REDACTED&deadline=REDACTED&gen=REDACTED&os=REDACTED&og=REDACTED&upsig=REDACTED&uparams=REDACTED&bvc=REDACTED&nettype=REDACTED&bw=REDACTED&lrs=REDACTED&qn_dyeid=REDACTED&agrr=REDACTED&buvid=REDACTED&build=REDACTED&dl=REDACTED&f=REDACTED&orderid=REDACTED"
+     ],
+     "backup_url": [
+      "https://host-809ak83l-edge-mountaintoys-cn.test:4483/upgcxcode/35/29/42455072935/42455072935-1-30016.m4s?e=REDACTED&uipk=REDACTED&nbs=REDACTED&platform=REDACTED&trid=REDACTED&mid=REDACTED&og=REDACTED&oi=REDACTED&deadline=REDACTED&gen=REDACTED&os=REDACTED&upsig=REDACTED&uparams=REDACTED&mcdnid=REDACTED&bvc=REDACTED&nettype=REDACTED&bw=REDACTED&lrs=REDACTED&prs=REDACTED&qn_dyeid=REDACTED&agrr=REDACTED&buvid=REDACTED&build=REDACTED&dl=REDACTED&f=REDACTED&orderid=REDACTED",
+      "https://cdn16.bilivideo.test/upgcxcode/35/29/42455072935/42455072935-1-30016.m4s?e=REDACTED&oi=REDACTED&trid=REDACTED&uipk=REDACTED&nbs=REDACTED&platform=REDACTED&mid=REDACTED&deadline=REDACTED&gen=REDACTED&os=REDACTED&og=REDACTED&upsig=REDACTED&uparams=REDACTED&bvc=REDACTED&nettype=REDACTED&bw=REDACTED&lrs=REDACTED&qn_dyeid=REDACTED&agrr=REDACTED&buvid=REDACTED&build=REDACTED&dl=REDACTED&f=REDACTED&orderid=REDACTED"
+     ],
+     "bandwidth": 343793,
+     "mimeType": "video/mp4",
+     "mime_type": "video/mp4",
+     "codecs": "avc1.640033",
+     "width": 640,
+     "height": 360,
+     "frameRate": "30.000",
+     "frame_rate": "30.000",
+     "sar": "1:1",
+     "startWithSap": 1,
+     "start_with_sap": 1,
+     "SegmentBase": {
+      "Initialization": "0-933",
+      "indexRange": "934-17113"
+     },
+     "segment_base": {
+      "initialization": "0-933",
+      "index_range": "934-17113"
+     },
+     "codecid": 7
+    }
+   ],
+   "audio": [
+    {
+     "id": 30232,
+     "baseUrl": "https://cdn17.bilivideo.test:8082/v1/resource/upgcxcode/35/29/42455072935/42455072935-1-30232.m4s?agrr=REDACTED&build=REDACTED&buvid=REDACTED&bvc=REDACTED&bw=REDACTED&deadline=REDACTED&dl=REDACTED&e=REDACTED&f=REDACTED&gen=REDACTED&lrs=REDACTED&mcdnid=REDACTED&mid=REDACTED&nbs=REDACTED&nettype=REDACTED&og=REDACTED&oi=REDACTED&orderid=REDACTED&os=REDACTED&platform=REDACTED&prs=REDACTED&qn_dyeid=REDACTED&sign=REDACTED&traceid=REDACTED&uipk=REDACTED&uparams=REDACTED&upsig=REDACTED",
+     "base_url": "https://cdn18.bilivideo.test:8082/v1/resource/upgcxcode/35/29/42455072935/42455072935-1-30232.m4s?agrr=REDACTED&build=REDACTED&buvid=REDACTED&bvc=REDACTED&bw=REDACTED&deadline=REDACTED&dl=REDACTED&e=REDACTED&f=REDACTED&gen=REDACTED&lrs=REDACTED&mcdnid=REDACTED&mid=REDACTED&nbs=REDACTED&nettype=REDACTED&og=REDACTED&oi=REDACTED&orderid=REDACTED&os=REDACTED&platform=REDACTED&prs=REDACTED&qn_dyeid=REDACTED&sign=REDACTED&traceid=REDACTED&uipk=REDACTED&uparams=REDACTED&upsig=REDACTED",
+     "backupUrl": [
+      "https://host-b-baaa44bq4z85fbm6d2wwavz6y9s6f-edge-mountaintoys-cn.test:4483/upgcxcode/35/29/42455072935/42455072935-1-30232.m4s?e=REDACTED&deadline=REDACTED&nbs=REDACTED&os=REDACTED&og=REDACTED&trid=REDACTED&mid=REDACTED&uipk=REDACTED&gen=REDACTED&oi=REDACTED&platform=REDACTED&upsig=REDACTED&uparams=REDACTED&mcdnid=REDACTED&bvc=REDACTED&nettype=REDACTED&bw=REDACTED&lrs=REDACTED&prs=REDACTED&dl=REDACTED&f=REDACTED&qn_dyeid=REDACTED&agrr=REDACTED&buvid=REDACTED&build=REDACTED&orderid=REDACTED",
+      "https://cdn19.bilivideo.test/upgcxcode/35/29/42455072935/42455072935-1-30232.m4s?e=REDACTED&trid=REDACTED&mid=REDACTED&nbs=REDACTED&os=REDACTED&og=REDACTED&oi=REDACTED&deadline=REDACTED&uipk=REDACTED&gen=REDACTED&platform=REDACTED&upsig=REDACTED&uparams=REDACTED&bvc=REDACTED&nettype=REDACTED&bw=REDACTED&lrs=REDACTED&qn_dyeid=REDACTED&agrr=REDACTED&buvid=REDACTED&build=REDACTED&dl=REDACTED&f=REDACTED&orderid=REDACTED"
+     ],
+     "backup_url": [
+      "https://host-b-baaa44bq4z85fbm6d2wwavz6y9s6f-edge-mountaintoys-cn.test:4483/upgcxcode/35/29/42455072935/42455072935-1-30232.m4s?e=REDACTED&deadline=REDACTED&nbs=REDACTED&os=REDACTED&og=REDACTED&trid=REDACTED&mid=REDACTED&uipk=REDACTED&gen=REDACTED&oi=REDACTED&platform=REDACTED&upsig=REDACTED&uparams=REDACTED&mcdnid=REDACTED&bvc=REDACTED&nettype=REDACTED&bw=REDACTED&lrs=REDACTED&prs=REDACTED&dl=REDACTED&f=REDACTED&qn_dyeid=REDACTED&agrr=REDACTED&buvid=REDACTED&build=REDACTED&orderid=REDACTED",
+      "https://cdn20.bilivideo.test/upgcxcode/35/29/42455072935/42455072935-1-30232.m4s?e=REDACTED&trid=REDACTED&mid=REDACTED&nbs=REDACTED&os=REDACTED&og=REDACTED&oi=REDACTED&deadline=REDACTED&uipk=REDACTED&gen=REDACTED&platform=REDACTED&upsig=REDACTED&uparams=REDACTED&bvc=REDACTED&nettype=REDACTED&bw=REDACTED&lrs=REDACTED&qn_dyeid=REDACTED&agrr=REDACTED&buvid=REDACTED&build=REDACTED&dl=REDACTED&f=REDACTED&orderid=REDACTED"
+     ],
+     "bandwidth": 101498,
+     "mimeType": "audio/mp4",
+     "mime_type": "audio/mp4",
+     "codecs": "mp4a.40.2",
+     "width": 0,
+     "height": 0,
+     "frameRate": "",
+     "frame_rate": "",
+     "sar": "",
+     "startWithSap": 0,
+     "start_with_sap": 0,
+     "SegmentBase": {
+      "Initialization": "0-836",
+      "indexRange": "837-16956"
+     },
+     "segment_base": {
+      "initialization": "0-836",
+      "index_range": "837-16956"
+     },
+     "codecid": 0
+    },
+    {
+     "id": 30280,
+     "baseUrl": "https://cdn21.bilivideo.test:8082/v1/resource/upgcxcode/35/29/42455072935/42455072935-1-30280.m4s?agrr=REDACTED&build=REDACTED&buvid=REDACTED&bvc=REDACTED&bw=REDACTED&deadline=REDACTED&dl=REDACTED&e=REDACTED&f=REDACTED&gen=REDACTED&lrs=REDACTED&mcdnid=REDACTED&mid=REDACTED&nbs=REDACTED&nettype=REDACTED&og=REDACTED&oi=REDACTED&orderid=REDACTED&os=REDACTED&platform=REDACTED&prs=REDACTED&qn_dyeid=REDACTED&sign=REDACTED&traceid=REDACTED&uipk=REDACTED&uparams=REDACTED&upsig=REDACTED",
+     "base_url": "https://cdn22.bilivideo.test:8082/v1/resource/upgcxcode/35/29/42455072935/42455072935-1-30280.m4s?agrr=REDACTED&build=REDACTED&buvid=REDACTED&bvc=REDACTED&bw=REDACTED&deadline=REDACTED&dl=REDACTED&e=REDACTED&f=REDACTED&gen=REDACTED&lrs=REDACTED&mcdnid=REDACTED&mid=REDACTED&nbs=REDACTED&nettype=REDACTED&og=REDACTED&oi=REDACTED&orderid=REDACTED&os=REDACTED&platform=REDACTED&prs=REDACTED&qn_dyeid=REDACTED&sign=REDACTED&traceid=REDACTED&uipk=REDACTED&uparams=REDACTED&upsig=REDACTED",
+     "backupUrl": [
+      "https://host-99e339o-edge-mountaintoys-cn.test:4483/upgcxcode/35/29/42455072935/42455072935-1-30280.m4s?e=REDACTED&og=REDACTED&platform=REDACTED&trid=REDACTED&uipk=REDACTED&oi=REDACTED&mid=REDACTED&deadline=REDACTED&nbs=REDACTED&gen=REDACTED&os=REDACTED&upsig=REDACTED&uparams=REDACTED&mcdnid=REDACTED&bvc=REDACTED&nettype=REDACTED&bw=REDACTED&lrs=REDACTED&prs=REDACTED&qn_dyeid=REDACTED&agrr=REDACTED&buvid=REDACTED&build=REDACTED&dl=REDACTED&f=REDACTED&orderid=REDACTED",
+      "https://cdn23.bilivideo.test/upgcxcode/35/29/42455072935/42455072935-1-30280.m4s?e=REDACTED&oi=REDACTED&trid=REDACTED&deadline=REDACTED&os=REDACTED&og=REDACTED&uipk=REDACTED&nbs=REDACTED&platform=REDACTED&mid=REDACTED&gen=REDACTED&upsig=REDACTED&uparams=REDACTED&bvc=REDACTED&nettype=REDACTED&bw=REDACTED&lrs=REDACTED&qn_dyeid=REDACTED&agrr=REDACTED&buvid=REDACTED&build=REDACTED&dl=REDACTED&f=REDACTED&orderid=REDACTED"
+     ],
+     "backup_url": [
+      "https://host-99e339o-edge-mountaintoys-cn.test:4483/upgcxcode/35/29/42455072935/42455072935-1-30280.m4s?e=REDACTED&og=REDACTED&platform=REDACTED&trid=REDACTED&uipk=REDACTED&oi=REDACTED&mid=REDACTED&deadline=REDACTED&nbs=REDACTED&gen=REDACTED&os=REDACTED&upsig=REDACTED&uparams=REDACTED&mcdnid=REDACTED&bvc=REDACTED&nettype=REDACTED&bw=REDACTED&lrs=REDACTED&prs=REDACTED&qn_dyeid=REDACTED&agrr=REDACTED&buvid=REDACTED&build=REDACTED&dl=REDACTED&f=REDACTED&orderid=REDACTED",
+      "https://cdn24.bilivideo.test/upgcxcode/35/29/42455072935/42455072935-1-30280.m4s?e=REDACTED&oi=REDACTED&trid=REDACTED&deadline=REDACTED&os=REDACTED&og=REDACTED&uipk=REDACTED&nbs=REDACTED&platform=REDACTED&mid=REDACTED&gen=REDACTED&upsig=REDACTED&uparams=REDACTED&bvc=REDACTED&nettype=REDACTED&bw=REDACTED&lrs=REDACTED&qn_dyeid=REDACTED&agrr=REDACTED&buvid=REDACTED&build=REDACTED&dl=REDACTED&f=REDACTED&orderid=REDACTED"
+     ],
+     "bandwidth": 176752,
+     "mimeType": "audio/mp4",
+     "mime_type": "audio/mp4",
+     "codecs": "mp4a.40.2",
+     "width": 0,
+     "height": 0,
+     "frameRate": "",
+     "frame_rate": "",
+     "sar": "",
+     "startWithSap": 0,
+     "start_with_sap": 0,
+     "SegmentBase": {
+      "Initialization": "0-836",
+      "indexRange": "837-16956"
+     },
+     "segment_base": {
+      "initialization": "0-836",
+      "index_range": "837-16956"
+     },
+     "codecid": 0
+    },
+    {
+     "id": 30216,
+     "baseUrl": "https://cdn25.bilivideo.test:8082/v1/resource/upgcxcode/35/29/42455072935/42455072935-1-30216.m4s?agrr=REDACTED&build=REDACTED&buvid=REDACTED&bvc=REDACTED&bw=REDACTED&deadline=REDACTED&dl=REDACTED&e=REDACTED&f=REDACTED&gen=REDACTED&lrs=REDACTED&mcdnid=REDACTED&mid=REDACTED&nbs=REDACTED&nettype=REDACTED&og=REDACTED&oi=REDACTED&orderid=REDACTED&os=REDACTED&platform=REDACTED&prs=REDACTED&qn_dyeid=REDACTED&sign=REDACTED&traceid=REDACTED&uipk=REDACTED&uparams=REDACTED&upsig=REDACTED",
+     "base_url": "https://cdn26.bilivideo.test:8082/v1/resource/upgcxcode/35/29/42455072935/42455072935-1-30216.m4s?agrr=REDACTED&build=REDACTED&buvid=REDACTED&bvc=REDACTED&bw=REDACTED&deadline=REDACTED&dl=REDACTED&e=REDACTED&f=REDACTED&gen=REDACTED&lrs=REDACTED&mcdnid=REDACTED&mid=REDACTED&nbs=REDACTED&nettype=REDACTED&og=REDACTED&oi=REDACTED&orderid=REDACTED&os=REDACTED&platform=REDACTED&prs=REDACTED&qn_dyeid=REDACTED&sign=REDACTED&traceid=REDACTED&uipk=REDACTED&uparams=REDACTED&upsig=REDACTED",
+     "backupUrl": [
+      "https://host-pbf309o-edge-mountaintoys-cn.test:4483/upgcxcode/35/29/42455072935/42455072935-1-30216.m4s?e=REDACTED&deadline=REDACTED&nbs=REDACTED&oi=REDACTED&gen=REDACTED&mid=REDACTED&uipk=REDACTED&platform=REDACTED&trid=REDACTED&os=REDACTED&og=REDACTED&upsig=REDACTED&uparams=REDACTED&mcdnid=REDACTED&bvc=REDACTED&nettype=REDACTED&bw=REDACTED&lrs=REDACTED&prs=REDACTED&agrr=REDACTED&buvid=REDACTED&build=REDACTED&dl=REDACTED&f=REDACTED&qn_dyeid=REDACTED&orderid=REDACTED",
+      "https://cdn27.bilivideo.test/upgcxcode/35/29/42455072935/42455072935-1-30216.m4s?e=REDACTED&nbs=REDACTED&trid=REDACTED&deadline=REDACTED&os=REDACTED&og=REDACTED&uipk=REDACTED&oi=REDACTED&platform=REDACTED&mid=REDACTED&gen=REDACTED&upsig=REDACTED&uparams=REDACTED&bvc=REDACTED&nettype=REDACTED&bw=REDACTED&lrs=REDACTED&buvid=REDACTED&build=REDACTED&dl=REDACTED&f=REDACTED&qn_dyeid=REDACTED&agrr=REDACTED&orderid=REDACTED"
+     ],
+     "backup_url": [
+      "https://host-pbf309o-edge-mountaintoys-cn.test:4483/upgcxcode/35/29/42455072935/42455072935-1-30216.m4s?e=REDACTED&deadline=REDACTED&nbs=REDACTED&oi=REDACTED&gen=REDACTED&mid=REDACTED&uipk=REDACTED&platform=REDACTED&trid=REDACTED&os=REDACTED&og=REDACTED&upsig=REDACTED&uparams=REDACTED&mcdnid=REDACTED&bvc=REDACTED&nettype=REDACTED&bw=REDACTED&lrs=REDACTED&prs=REDACTED&agrr=REDACTED&buvid=REDACTED&build=REDACTED&dl=REDACTED&f=REDACTED&qn_dyeid=REDACTED&orderid=REDACTED",
+      "https://cdn28.bilivideo.test/upgcxcode/35/29/42455072935/42455072935-1-30216.m4s?e=REDACTED&nbs=REDACTED&trid=REDACTED&deadline=REDACTED&os=REDACTED&og=REDACTED&uipk=REDACTED&oi=REDACTED&platform=REDACTED&mid=REDACTED&gen=REDACTED&upsig=REDACTED&uparams=REDACTED&bvc=REDACTED&nettype=REDACTED&bw=REDACTED&lrs=REDACTED&buvid=REDACTED&build=REDACTED&dl=REDACTED&f=REDACTED&qn_dyeid=REDACTED&agrr=REDACTED&orderid=REDACTED"
+     ],
+     "bandwidth": 65552,
+     "mimeType": "audio/mp4",
+     "mime_type": "audio/mp4",
+     "codecs": "mp4a.40.2",
+     "width": 0,
+     "height": 0,
+     "frameRate": "",
+     "frame_rate": "",
+     "sar": "",
+     "startWithSap": 0,
+     "start_with_sap": 0,
+     "SegmentBase": {
+      "Initialization": "0-836",
+      "indexRange": "837-16956"
+     },
+     "segment_base": {
+      "initialization": "0-836",
+      "index_range": "837-16956"
+     },
+     "codecid": 0
+    }
+   ],
+   "dolby": {
+    "type": 0,
+    "audio": null
+   },
+   "flac": null
+  },
+  "support_formats": [
+   {
+    "quality": 116,
+    "format": "flv_p60",
+    "new_description": "1080P 60帧",
+    "display_desc": "1080P",
+    "superscript": "60帧",
+    "codecs": [
+     "avc1.640033",
+     "hvc1.1.6.L150.90"
+    ],
+    "can_watch_qn_reason": 0,
+    "limit_watch_reason": 0,
+    "report": {}
+   },
+   {
+    "quality": 80,
+    "format": "flv",
+    "new_description": "1080P 高清",
+    "display_desc": "1080P",
+    "superscript": "",
+    "codecs": [
+     "avc1.640033",
+     "hvc1.1.6.L150.90"
+    ],
+    "can_watch_qn_reason": 0,
+    "limit_watch_reason": 0,
+    "report": {}
+   },
+   {
+    "quality": 64,
+    "format": "flv720",
+    "new_description": "720P 准高清",
+    "display_desc": "720P",
+    "superscript": "",
+    "codecs": [
+     "avc1.640033",
+     "hvc1.1.6.L120.90"
+    ],
+    "can_watch_qn_reason": 0,
+    "limit_watch_reason": 0,
+    "report": {}
+   },
+   {
+    "quality": 32,
+    "format": "flv480",
+    "new_description": "480P 标清",
+    "display_desc": "480P",
+    "superscript": "",
+    "codecs": [
+     "avc1.640033",
+     "hvc1.1.6.L120.90"
+    ],
+    "can_watch_qn_reason": 0,
+    "limit_watch_reason": 0,
+    "report": {}
+   },
+   {
+    "quality": 16,
+    "format": "mp4",
+    "new_description": "360P 流畅",
+    "display_desc": "360P",
+    "superscript": "",
+    "codecs": [
+     "avc1.640033",
+     "hvc1.1.6.L120.90"
+    ],
+    "can_watch_qn_reason": 0,
+    "limit_watch_reason": 0,
+    "report": {}
+   }
+  ],
+  "high_format": null,
+  "last_play_time": 0,
+  "last_play_cid": 0,
+  "view_info": null,
+  "play_conf": {
+   "is_new_description": false
+  },
+  "cur_language": "",
+  "cur_production_type": 0,
+  "auto_qn_resp": {
+   "dyeid": "99bc4bec64b04d5e00079c2c6ac46f7d",
+   "qn_feature": {
+    "quality_tag": "常规",
+    "tid_name": "",
+    "sub_tid_name": ""
+   }
+  }
+ }
+}

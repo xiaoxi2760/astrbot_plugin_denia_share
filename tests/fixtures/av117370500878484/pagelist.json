@@ -1,0 +1,40 @@
+{
+ "_meta": {
+  "sample": "av117370500878484",
+  "endpoint": "pagelist",
+  "captured_at": "2026-10-06T11:51:20+08:00",
+  "http_status": 200,
+  "error": null,
+  "request": {
+   "method": "GET",
+   "url": "https://api.bilibili.test/x/player/pagelist?jsonp=REDACTED&aid=REDACTED",
+   "params": {
+    "jsonp": "json",
+    "aid": "117370500878484"
+   },
+   "wbi_signed": false
+  }
+ },
+ "code": 0,
+ "message": "OK",
+ "ttl": 1,
+ "data": [
+  {
+   "cid": 42393799048,
+   "page": 1,
+   "from": "vupload",
+   "part": "空间向量大题！一个视频搞定所有重点！",
+   "duration": 2683,
+   "vid": "",
+   "weblink": "",
+   "dimension": {
+    "width": 1920,
+    "height": 1080,
+    "rotate": 0
+   },
+   "first_frame": "http://img2.bilibili.test/bfs/storyff/_00003h0cbwcht8yw721nxxbuk8d83kb_firsti.jpg",
+   "ctime": 1790932346,
+   "asr_language": "cmn"
+  }
+ ]
+}

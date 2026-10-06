@@ -1,0 +1,38 @@
+{
+ "_meta": {
+  "sample": "BV1GJ411x7h7",
+  "endpoint": "pagelist",
+  "captured_at": "2026-10-06T11:47:49+08:00",
+  "http_status": 200,
+  "error": null,
+  "request": {
+   "method": "GET",
+   "url": "https://api.bilibili.test/x/player/pagelist?jsonp=REDACTED&bvid=REDACTED",
+   "params": {
+    "jsonp": "json",
+    "bvid": "BV1GJ411x7h7"
+   },
+   "wbi_signed": false
+  }
+ },
+ "code": 0,
+ "message": "OK",
+ "ttl": 1,
+ "data": [
+  {
+   "cid": 137649199,
+   "page": 1,
+   "from": "vupload",
+   "part": "Never Gonna Give You Up - Rick Astley",
+   "duration": 213,
+   "vid": "",
+   "weblink": "",
+   "dimension": {
+    "width": 1920,
+    "height": 1080,
+    "rotate": 0
+   },
+   "ctime": 1577835803
+  }
+ ]
+}

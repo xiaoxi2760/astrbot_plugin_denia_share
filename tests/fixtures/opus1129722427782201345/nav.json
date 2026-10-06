@@ -1,0 +1,26 @@
+{
+ "_meta": {
+  "sample": "opus1129722427782201345",
+  "endpoint": "nav",
+  "captured_at": "2026-10-06T11:51:31+08:00",
+  "http_status": 200,
+  "error": null,
+  "request": {
+   "method": "GET",
+   "url": "https://api.bilibili.test/x/web-interface/nav",
+   "params": {},
+   "wbi_signed": false
+  }
+ },
+ "code": -101,
+ "message": "账号未登录",
+ "ttl": 1,
+ "data": {
+  "isLogin": false,
+  "wbi_img": {
+   "img_url": "https://img0.bilibili.test/bfs/wbi/7cd084941338484aae1ad9425b84077c.png",
+   "sub_url": "https://img0.bilibili.test/bfs/wbi/4932caff0ff746eab6f01bf08b70ac45.png"
+  },
+  "ip_region": "CN"
+ }
+}

@@ -1,0 +1,105 @@
+{
+ "_meta": {
+  "sample": "BV1fnHL68EPT",
+  "endpoint": "playurl/fnval1",
+  "captured_at": "2026-10-06T11:48:12+08:00",
+  "http_status": 200,
+  "error": null,
+  "request": {
+   "method": "GET",
+   "url": "https://api.bilibili.test/x/player/wbi/playurl?bvid=REDACTED&cid=REDACTED&fnval=REDACTED&fnver=REDACTED&fourk=REDACTED&high_quality=REDACTED&otype=REDACTED&platform=REDACTED&qn=REDACTED&wts=REDACTED&w_rid=REDACTED",
+   "params": {
+    "bvid": "BV1fnHL68EPT",
+    "cid": "42455072935",
+    "fnval": "1",
+    "fnver": "0",
+    "fourk": "1",
+    "high_quality": "1",
+    "otype": "json",
+    "platform": "pc",
+    "qn": "64",
+    "wts": "1791258490",
+    "w_rid": "a4b5af6eb94a0e0a9855e1f0aaa6be8b"
+   },
+   "wbi_signed": true
+  }
+ },
+ "code": 0,
+ "message": "OK",
+ "ttl": 1,
+ "data": {
+  "from": "local",
+  "result": "suee",
+  "message": "",
+  "quality": 64,
+  "format": "mp4720",
+  "timelength": 6720183,
+  "accept_format": "mp4720,mp4",
+  "accept_description": [
+   "高清 720P",
+   "流畅 360P"
+  ],
+  "accept_quality": [
+   64,
+   16
+  ],
+  "video_codecid": 7,
+  "seek_param": "start",
+  "seek_type": "offset",
+  "durl": [
+   {
+    "order": 1,
+    "length": 6720183,
+    "size": 989623302,
+    "ahead": "",
+    "vhead": "",
+    "url": "https://host-h2i438c-edge-mountaintoys-cn.test:4483/upgcxcode/35/29/42455072935/42455072935-1-192.mp4?e=REDACTED&os=REDACTED&platform=REDACTED&mid=REDACTED&og=REDACTED&uipk=REDACTED&deadline=REDACTED&trid=REDACTED&oi=REDACTED&nbs=REDACTED&gen=REDACTED&upsig=REDACTED&uparams=REDACTED&mcdnid=REDACTED&bvc=REDACTED&nettype=REDACTED&bw=REDACTED&lrs=REDACTED&qn_dyeid=REDACTED&agrr=REDACTED&buvid=REDACTED&build=REDACTED&dl=REDACTED&f=REDACTED&orderid=REDACTED",
+    "backup_url": [
+     "https://cdn1.bilivideo.test/upgcxcode/35/29/42455072935/42455072935-1-192.mp4?e=REDACTED&uipk=REDACTED&platform=REDACTED&oi=REDACTED&deadline=REDACTED&trid=REDACTED&mid=REDACTED&nbs=REDACTED&gen=REDACTED&os=REDACTED&og=REDACTED&upsig=REDACTED&uparams=REDACTED&bvc=REDACTED&nettype=REDACTED&bw=REDACTED&lrs=REDACTED&buvid=REDACTED&build=REDACTED&dl=REDACTED&f=REDACTED&qn_dyeid=REDACTED&agrr=REDACTED&orderid=REDACTED",
+     "https://cdn2.bilivideo.test/upgcxcode/35/29/42455072935/42455072935-1-192.mp4?e=REDACTED&oi=REDACTED&platform=REDACTED&og=REDACTED&trid=REDACTED&mid=REDACTED&nbs=REDACTED&uipk=REDACTED&deadline=REDACTED&gen=REDACTED&os=REDACTED&upsig=REDACTED&uparams=REDACTED&bvc=REDACTED&nettype=REDACTED&bw=REDACTED&lrs=REDACTED&agrr=REDACTED&buvid=REDACTED&build=REDACTED&dl=REDACTED&f=REDACTED&qn_dyeid=REDACTED&orderid=REDACTED"
+    ]
+   }
+  ],
+  "support_formats": [
+   {
+    "quality": 64,
+    "format": "mp4720",
+    "new_description": "720P 准高清",
+    "display_desc": "720P",
+    "superscript": "",
+    "codecs": null,
+    "can_watch_qn_reason": 0,
+    "limit_watch_reason": 0,
+    "report": {}
+   },
+   {
+    "quality": 16,
+    "format": "mp4",
+    "new_description": "360P 流畅",
+    "display_desc": "360P",
+    "superscript": "",
+    "codecs": null,
+    "can_watch_qn_reason": 0,
+    "limit_watch_reason": 0,
+    "report": {}
+   }
+  ],
+  "high_format": null,
+  "last_play_time": 0,
+  "last_play_cid": 0,
+  "view_info": null,
+  "play_conf": {
+   "is_new_description": false
+  },
+  "cur_language": "",
+  "cur_production_type": 0,
+  "auto_qn_resp": {
+   "dyeid": "ca4f79679c35921600d4771b6ac46f7b",
+   "qn_feature": {
+    "quality_tag": "常规",
+    "tid_name": "",
+    "sub_tid_name": ""
+   }
+  }
+ }
+}

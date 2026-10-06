@@ -1,0 +1,162 @@
+{
+ "_meta": {
+  "sample": "BV1cwHa6mEPH",
+  "endpoint": "view",
+  "captured_at": "2026-10-06T11:48:16+08:00",
+  "http_status": 200,
+  "error": null,
+  "request": {
+   "method": "GET",
+   "url": "https://api.bilibili.test/x/web-interface/view?bvid=REDACTED",
+   "params": {
+    "bvid": "BV1cwHa6mEPH"
+   },
+   "wbi_signed": false
+  }
+ },
+ "code": 0,
+ "message": "OK",
+ "ttl": 1,
+ "data": {
+  "bvid": "BV1cwHa6mEPH",
+  "aid": 117374359438410,
+  "videos": 2,
+  "tid": 168,
+  "tid_v2": 2046,
+  "tname": "",
+  "tname_v2": "",
+  "copyright": 1,
+  "pic": "http://img2.bilibili.test/bfs/archive/3a2fb171fb66551511c183579d06d6da42616dc4.jpg",
+  "title": "【抢先看】重回2002，永不空军的鱼竿被军方收编？军方进仓库一看：激光炮手电、隐身涂层、全球降雨弹……你管这叫鱼竿？",
+  "pubdate": 1790990812,
+  "ctime": 1790990812,
+  "desc": "",
+  "desc_v2": null,
+  "state": 0,
+  "duration": 4414,
+  "rights": {
+   "bp": 0,
+   "elec": 0,
+   "download": 1,
+   "movie": 0,
+   "pay": 0,
+   "hd5": 0,
+   "no_reprint": 1,
+   "autoplay": 1,
+   "ugc_pay": 0,
+   "is_cooperation": 0,
+   "ugc_pay_preview": 0,
+   "no_background": 0,
+   "clean_mode": 0,
+   "is_stein_gate": 0,
+   "is_360": 0,
+   "no_share": 0,
+   "arc_pay": 0,
+   "free_watch": 0
+  },
+  "owner": {
+   "mid": 49387738,
+   "name": "夫仔漫馆",
+   "face": "https://img1.bilibili.test/bfs/face/3b34e968b7dc1b8fb0a0f25bfbc3bd1eb921482b.jpg"
+  },
+  "stat": {
+   "aid": 117374359438410,
+   "view": 1341405,
+   "danmaku": 1540,
+   "reply": 935,
+   "favorite": 6472,
+   "coin": 809,
+   "share": 532,
+   "now_rank": 0,
+   "his_rank": 0,
+   "like": 55515,
+   "dislike": 0,
+   "evaluation": "",
+   "vt": 0
+  },
+  "argue_info": {
+   "argue_msg": "含AI生成内容",
+   "argue_type": 0,
+   "argue_link": ""
+  },
+  "dynamic": "",
+  "cid": 42413395765,
+  "dimension": {
+   "width": 1280,
+   "height": 720,
+   "rotate": 0
+  },
+  "premiere": null,
+  "teenage_mode": 1,
+  "is_chargeable_season": false,
+  "is_story": false,
+  "is_upower_exclusive": false,
+  "is_upower_play": false,
+  "is_upower_preview": false,
+  "enable_vt": 0,
+  "vt_display": "",
+  "is_upower_exclusive_with_qa": false,
+  "is_hua_sheng": false,
+  "no_cache": false,
+  "pages": [
+   {
+    "cid": 42413395765,
+    "page": 1,
+    "from": "vupload",
+    "part": "1",
+    "duration": 503,
+    "vid": "",
+    "weblink": "",
+    "dimension": {
+     "width": 1280,
+     "height": 720,
+     "rotate": 0
+    },
+    "first_frame": "http://img0.bilibili.test/bfs/storyff/_00003muo8n8er1j292pjkampr1t8xmb_firsti.jpg",
+    "ctime": 1790990812
+   },
+   {
+    "cid": 42413458031,
+    "page": 2,
+    "from": "vupload",
+    "part": "2",
+    "duration": 3911,
+    "vid": "",
+    "weblink": "",
+    "dimension": {
+     "width": 1280,
+     "height": 720,
+     "rotate": 0
+    },
+    "first_frame": "http://img2.bilibili.test/bfs/storyff/_00000jcawou88zfdp2jvi6nw80x8d4b_firsti.jpg",
+    "ctime": 1790990812
+   }
+  ],
+  "subtitle": {
+   "allow_submit": false,
+   "list": []
+  },
+  "label": {
+   "type": 1
+  },
+  "is_season_display": false,
+  "user_garb": {
+   "url_image_ani_cut": ""
+  },
+  "honor_reply": {
+   "honor": [
+    {
+     "aid": 117374359438410,
+     "type": 7,
+     "desc": "热门收录",
+     "weekly_recommend_num": 0
+    }
+   ]
+  },
+  "like_icon": "",
+  "need_jump_bv": false,
+  "disable_show_up_info": false,
+  "is_story_play": 0,
+  "is_view_self": false
+ }
+}

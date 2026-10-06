@@ -1,0 +1,55 @@
+{
+ "_meta": {
+  "sample": "BV1cwHa6mEPH",
+  "endpoint": "pagelist",
+  "captured_at": "2026-10-06T11:48:18+08:00",
+  "http_status": 200,
+  "error": null,
+  "request": {
+   "method": "GET",
+   "url": "https://api.bilibili.test/x/player/pagelist?jsonp=REDACTED&bvid=REDACTED",
+   "params": {
+    "jsonp": "json",
+    "bvid": "BV1cwHa6mEPH"
+   },
+   "wbi_signed": false
+  }
+ },
+ "code": 0,
+ "message": "OK",
+ "ttl": 1,
+ "data": [
+  {
+   "cid": 42413395765,
+   "page": 1,
+   "from": "vupload",
+   "part": "1",
+   "duration": 503,
+   "vid": "",
+   "weblink": "",
+   "dimension": {
+    "width": 1280,
+    "height": 720,
+    "rotate": 0
+   },
+   "first_frame": "http://img0.bilibili.test/bfs/storyff/_00003muo8n8er1j292pjkampr1t8xmb_firsti.jpg",
+   "ctime": 1790990812
+  },
+  {
+   "cid": 42413458031,
+   "page": 2,
+   "from": "vupload",
+   "part": "2",
+   "duration": 3911,
+   "vid": "",
+   "weblink": "",
+   "dimension": {
+    "width": 1280,
+    "height": 720,
+    "rotate": 0
+   },
+   "first_frame": "http://img2.bilibili.test/bfs/storyff/_00000jcawou88zfdp2jvi6nw80x8d4b_firsti.jpg",
+   "ctime": 1790990812
+  }
+ ]
+}

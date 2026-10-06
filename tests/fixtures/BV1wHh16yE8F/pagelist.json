@@ -1,0 +1,104 @@
+{
+ "_meta": {
+  "sample": "BV1wHh16yE8F",
+  "endpoint": "pagelist",
+  "captured_at": "2026-10-06T11:48:28+08:00",
+  "http_status": 200,
+  "error": null,
+  "request": {
+   "method": "GET",
+   "url": "https://api.bilibili.test/x/player/pagelist?jsonp=REDACTED&bvid=REDACTED",
+   "params": {
+    "jsonp": "json",
+    "bvid": "BV1wHh16yE8F"
+   },
+   "wbi_signed": false
+  }
+ },
+ "code": 0,
+ "message": "OK",
+ "ttl": 1,
+ "data": [
+  {
+   "cid": 42184345005,
+   "page": 1,
+   "from": "vupload",
+   "part": "1-6",
+   "duration": 11236,
+   "vid": "",
+   "weblink": "",
+   "dimension": {
+    "width": 1280,
+    "height": 720,
+    "rotate": 0
+   },
+   "first_frame": "http://img0.bilibili.test/bfs/storyff/_000029ewc0me7rfwh27qgeqcycmk6qb_firsti.jpg",
+   "ctime": 1790316570
+  },
+  {
+   "cid": 42184477488,
+   "page": 2,
+   "from": "vupload",
+   "part": "7-12",
+   "duration": 11244,
+   "vid": "",
+   "weblink": "",
+   "dimension": {
+    "width": 1280,
+    "height": 720,
+    "rotate": 0
+   },
+   "first_frame": "http://img2.bilibili.test/bfs/storyff/_00002cokipnxx3tss2vvzgrrpd5jmbb_firsti.jpg",
+   "ctime": 1790316570
+  },
+  {
+   "cid": 42184609509,
+   "page": 3,
+   "from": "vupload",
+   "part": "13-18",
+   "duration": 11380,
+   "vid": "",
+   "weblink": "",
+   "dimension": {
+    "width": 1280,
+    "height": 720,
+    "rotate": 0
+   },
+   "first_frame": "http://img0.bilibili.test/bfs/storyff/_0000093pbxrioj9ry2jbn2t1oojf85b_firsti.jpg",
+   "ctime": 1790316570
+  },
+  {
+   "cid": 42184868185,
+   "page": 4,
+   "from": "vupload",
+   "part": "19-24",
+   "duration": 11413,
+   "vid": "",
+   "weblink": "",
+   "dimension": {
+    "width": 1280,
+    "height": 720,
+    "rotate": 0
+   },
+   "first_frame": "http://img1.bilibili.test/bfs/storyff/_000027n53lcxzxvxm264jbcxsf7aahb_firsti.jpg",
+   "ctime": 1790316570
+  },
+  {
+   "cid": 42185066279,
+   "page": 5,
+   "from": "vupload",
+   "part": "25-30",
+   "duration": 11367,
+   "vid": "",
+   "weblink": "",
+   "dimension": {
+    "width": 1280,
+    "height": 720,
+    "rotate": 0
+   },
+   "first_frame": "http://img0.bilibili.test/bfs/storyff/_00003i1ae2piq62g02riykc3i6mf47b_firsti.jpg",
+   "ctime": 1790316570,
+   "asr_language": "cmn"
+  }
+ ]
+}

@@ -1,0 +1,229 @@
+{
+ "_meta": {
+  "sample": "opus1129722427782201345",
+  "endpoint": "polymer/dynamic/v1/detail",
+  "captured_at": "2026-10-06T11:51:33+08:00",
+  "http_status": 200,
+  "error": null,
+  "request": {
+   "method": "GET",
+   "url": "https://api.bilibili.test/x/polymer/web-dynamic/v1/detail?id=REDACTED",
+   "params": {
+    "id": "1129722427782201345"
+   },
+   "wbi_signed": false
+  }
+ },
+ "code": 0,
+ "message": "0",
+ "ttl": 1,
+ "data": {
+  "item": {
+   "basic": {
+    "comment_id_str": "43551358",
+    "comment_type": 12,
+    "like_icon": {
+     "action_url": "",
+     "end_url": "",
+     "id": 0,
+     "start_url": ""
+    },
+    "rid_str": "43551358"
+   },
+   "id_str": "1129722427782201345",
+   "modules": {
+    "module_author": {
+     "avatar": {
+      "container_size": {
+       "height": 1.35,
+       "width": 1.35
+      },
+      "fallback_layers": {
+       "is_critical_group": true,
+       "layers": [
+        {
+         "general_spec": {
+          "pos_spec": {
+           "axis_x": 0.675,
+           "axis_y": 0.675,
+           "coordinate_pos": 2
+          },
+          "render_spec": {
+           "opacity": 1
+          },
+          "size_spec": {
+           "height": 1,
+           "width": 1
+          }
+         },
+         "layer_config": {
+          "is_critical": true,
+          "tags": {
+           "AVATAR_LAYER": {},
+           "GENERAL_CFG": {
+            "config_type": 1,
+            "general_config": {
+             "web_css_style": {
+              "borderRadius": "50%"
+             }
+            }
+           }
+          }
+         },
+         "resource": {
+          "res_image": {
+           "image_src": {
+            "placeholder": 6,
+            "remote": {
+             "bfs_style": "widget-layer-avatar",
+             "url": "https://img0.bilibili.test/bfs/face/a71b4dd6647ddf0c813bcf74e062edab9224cb0e.jpg"
+            },
+            "src_type": 1
+           }
+          },
+          "res_type": 3
+         },
+         "visible": true
+        },
+        {
+         "general_spec": {
+          "pos_spec": {
+           "axis_x": 0.8000000000000002,
+           "axis_y": 0.8000000000000002,
+           "coordinate_pos": 1
+          },
+          "render_spec": {
+           "opacity": 1
+          },
+          "size_spec": {
+           "height": 0.41666666666666663,
+           "width": 0.41666666666666663
+          }
+         },
+         "layer_config": {
+          "tags": {
+           "GENERAL_CFG": {
+            "config_type": 1,
+            "general_config": {
+             "web_css_style": {
+              "background-color": "rgb(255,255,255)",
+              "border": "2px solid rgba(255,255,255,1)",
+              "borderRadius": "50%",
+              "boxSizing": "border-box"
+             }
+            }
+           },
+           "ICON_LAYER": {}
+          }
+         },
+         "resource": {
+          "res_image": {
+           "image_src": {
+            "local": 4,
+            "src_type": 2
+           }
+          },
+          "res_type": 3
+         },
+         "visible": true
+        }
+       ]
+      },
+      "mid": "37974444"
+     },
+     "face": "https://img0.bilibili.test/bfs/face/a71b4dd6647ddf0c813bcf74e062edab9224cb0e.jpg",
+     "face_nft": false,
+     "following": null,
+     "jump_url": "//https://host-space-bilibili-com.test/37974444/dynamic",
+     "label": "",
+     "mid": 37974444,
+     "name": "黑马程序员",
+     "official_verify": {
+      "desc": "",
+      "type": 1
+     },
+     "pendant": {
+      "expire": 0,
+      "image": "",
+      "image_enhance": "",
+      "image_enhance_frame": "",
+      "n_pid": 0,
+      "name": "",
+      "pid": 0
+     },
+     "pub_action": "投稿了文章",
+     "pub_location_text": "",
+     "pub_time": "2025年10月31日 09:00",
+     "pub_ts": 1761872400,
+     "type": "AUTHOR_TYPE_NORMAL",
+     "vip": {
+      "avatar_subscript": 1,
+      "avatar_subscript_url": "",
+      "due_date": 1845475200000,
+      "label": {
+       "bg_color": "#FB7299",
+       "bg_style": 1,
+       "border_color": "",
+       "img_label_uri_hans": "",
+       "img_label_uri_hans_static": "http://img0.bilibili.test/bfs/vip/10df1f7f4af1292f773489e36554a05177785143.png",
+       "img_label_uri_hant": "",
+       "img_label_uri_hant_static": "https://img0.bilibili.test/bfs/activity-plat/static/20220614/e369244d0b14644f5e1a06431e22a4d5/uckjAv3Npy.png",
+       "label_theme": "annual_vip",
+       "path": "http://img0.bilibili.test/bfs/vip/label_annual.png",
+       "text": "年度大会员",
+       "text_color": "#FFFFFF",
+       "use_img_label": true
+      },
+      "nickname_color": "#FB7299",
+      "status": 1,
+      "theme_type": 0,
+      "type": 2
+     }
+    },
+    "module_dynamic": {
+     "additional": null,
+     "desc": null,
+     "major": {
+      "article": {
+       "covers": [
+        "https://img0.bilibili.test/bfs/new_dyn/3a1a615adb7534ddeb9342c0b39bdd3437974444.jpg"
+       ],
+       "desc": "[图片] 小伙伴们，你们是否也有这样的困惑： · 看到GPT、Midjourney、Sora等AI应用层出不穷，内心激动，却不知如何从“使用者”变为“创造者”？ · 想学习大模型技术，但知识点如浩瀚烟海，Python、机器学习、深度学习、NLP……不知从何开始，如何串联？ · 担心学习成本太高，缺乏实战项目，理论无法落地？ 黑马程序员作为IT教育行业的领导者，一直走在时代前沿，为了解决大家的学习痛点，我们正式发布这份为小伙伴们量身定制的 「AI大模型学习路线」，带你从零基础的小白，进阶为能开发、能调试、甚",
+       "id": 43551358,
+       "jump_url": "//https://www.bilibili.test/read/cv43551358/",
+       "label": "59.1万阅读",
+       "title": "2026黑马程序员AI大模型开发学习路线图"
+      },
+      "type": "MAJOR_TYPE_ARTICLE"
+     },
+     "topic": null
+    },
+    "module_more": {
+     "three_point_items": [
+      {
+       "label": "举报",
+       "type": "THREE_POINT_REPORT"
+      }
+     ]
+    },
+    "module_stat": {
+     "comment": {
+      "count": 393,
+      "forbidden": false
+     },
+     "forward": {
+      "count": 171,
+      "forbidden": false
+     },
+     "like": {
+      "count": 2145,
+      "forbidden": false,
+      "status": false
+     }
+    }
+   },
+   "type": "DYNAMIC_TYPE_ARTICLE",
+   "visible": true
+  }
+ }
+}

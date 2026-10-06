@@ -1,0 +1,397 @@
+{
+ "_meta": {
+  "sample": "opus1255560717556252676",
+  "endpoint": "reply/wbi/main",
+  "captured_at": "2026-10-06T11:51:38+08:00",
+  "http_status": 200,
+  "error": null,
+  "request": {
+   "method": "GET",
+   "url": "https://api.bilibili.test/x/v2/reply/wbi/main?mode=REDACTED&next=REDACTED&oid=REDACTED&plat=REDACTED&type=REDACTED&wts=REDACTED&w_rid=REDACTED",
+   "params": {
+    "mode": "3",
+    "next": "0",
+    "oid": "411332718",
+    "plat": "1",
+    "type": "11",
+    "wts": "1791258696",
+    "w_rid": "835918d76e88e2d51ba5d05b21566f3a"
+   },
+   "wbi_signed": true
+  }
+ },
+ "code": 0,
+ "message": "OK",
+ "ttl": 1,
+ "data": {
+  "cursor": {
+   "is_begin": true,
+   "prev": 0,
+   "next": 2,
+   "is_end": false,
+   "pagination_reply": {
+    "next_offset": "CAEiAggC"
+   },
+   "session_id": "",
+   "mode": 3,
+   "mode_text": "",
+   "all_count": 1,
+   "support_mode": [
+    2,
+    3
+   ],
+   "name": "热门评论"
+  },
+  "replies": [
+   {
+    "rpid": 319671819296,
+    "oid": 411332718,
+    "type": 11,
+    "mid": 441616812,
+    "root": 0,
+    "parent": 0,
+    "dialog": 0,
+    "count": 0,
+    "rcount": 0,
+    "state": 0,
+    "fansgrade": 0,
+    "attr": 0,
+    "ctime": 1791171497,
+    "mid_str": "441616812",
+    "oid_str": "411332718",
+    "rpid_str": "319671819296",
+    "root_str": "0",
+    "parent_str": "0",
+    "dialog_str": "0",
+    "like": 0,
+    "action": 0,
+    "member": {
+     "mid": "441616812",
+     "uname": "一二恋恋不忘二一",
+     "handle": "",
+     "sex": "保密",
+     "sign": "",
+     "avatar": "https://img0.bilibili.test/bfs/face/dfd9b9b0b3ebd4b790e384b68ade4e95298a8b5a.jpg",
+     "rank": "10000",
+     "face_nft_new": 0,
+     "is_senior_member": 0,
+     "senior": {},
+     "level_info": {
+      "current_level": 5,
+      "current_min": 0,
+      "current_exp": 0,
+      "next_exp": 0
+     },
+     "pendant": {
+      "pid": 0,
+      "name": "",
+      "image": "",
+      "expire": 0,
+      "image_enhance": "",
+      "image_enhance_frame": "",
+      "n_pid": 0
+     },
+     "nameplate": {
+      "nid": 0,
+      "name": "",
+      "image": "",
+      "image_small": "",
+      "level": "",
+      "condition": ""
+     },
+     "official_verify": {
+      "type": -1,
+      "desc": ""
+     },
+     "vip": {
+      "vipType": 2,
+      "vipDueDate": 1815321600000,
+      "dueRemark": "",
+      "accessStatus": 0,
+      "vipStatus": 1,
+      "vipStatusWarn": "",
+      "themeType": 0,
+      "label": {
+       "path": "http://img0.bilibili.test/bfs/vip/label_annual.png",
+       "text": "年度大会员",
+       "label_theme": "annual_vip",
+       "text_color": "#FFFFFF",
+       "bg_style": 1,
+       "bg_color": "#FB7299",
+       "border_color": "",
+       "use_img_label": true,
+       "img_label_uri_hans": "",
+       "img_label_uri_hant": "",
+       "img_label_uri_hans_static": "http://img0.bilibili.test/bfs/vip/6234b05743730217bac0aa02d19ed98b49458b68.png",
+       "img_label_uri_hant_static": "https://img0.bilibili.test/bfs/activity-plat/static/20220614/e369244d0b14644f5e1a06431e22a4d5/VEW8fCC0hg.png",
+       "label_id": 65,
+       "label_goto": {
+        "mobile": "https://host-big-bilibili-com.test/mobile/index?navhide=REDACTED&from_spmid=REDACTED",
+        "pc_web": "https://host-account-bilibili-com.test/big?from_spmid=REDACTED"
+       },
+       "img_label_uri_i18n": "",
+       "img_label_uri_i18n_static": "",
+       "label_type": 1
+      },
+      "avatar_subscript": 1,
+      "nickname_color": "#FB7299"
+     },
+     "fans_detail": null,
+     "tribee": null,
+     "user_sailing": {
+      "pendant": null,
+      "cardbg": null,
+      "cardbg_with_focus": null
+     },
+     "user_sailing_v2": {},
+     "is_contractor": false,
+     "contract_desc": "",
+     "nft_interaction": null,
+     "avatar_item": {
+      "container_size": {
+       "width": 1.8,
+       "height": 1.8
+      },
+      "fallback_layers": {
+       "layers": [
+        {
+         "visible": true,
+         "general_spec": {
+          "pos_spec": {
+           "coordinate_pos": 2,
+           "axis_x": 0.9,
+           "axis_y": 0.9
+          },
+          "size_spec": {
+           "width": 1,
+           "height": 1
+          },
+          "render_spec": {
+           "opacity": 1
+          }
+         },
+         "layer_config": {
+          "tags": {
+           "AVATAR_LAYER": {}
+          },
+          "is_critical": true,
+          "layer_mask": {
+           "general_spec": {
+            "pos_spec": {
+             "coordinate_pos": 2,
+             "axis_x": 0.9,
+             "axis_y": 0.9
+            },
+            "size_spec": {
+             "width": 1,
+             "height": 1
+            },
+            "render_spec": {
+             "opacity": 1
+            }
+           },
+           "mask_src": {
+            "src_type": 3,
+            "draw": {
+             "draw_type": 1,
+             "fill_mode": 1,
+             "color_config": {
+              "day": {
+               "argb": "#FF000000"
+              }
+             }
+            }
+           }
+          }
+         },
+         "resource": {
+          "res_type": 3,
+          "res_image": {
+           "image_src": {
+            "src_type": 1,
+            "placeholder": 6,
+            "remote": {
+             "url": "https://img0.bilibili.test/bfs/face/dfd9b9b0b3ebd4b790e384b68ade4e95298a8b5a.jpg",
+             "bfs_style": "widget-layer-avatar"
+            }
+           }
+          }
+         }
+        },
+        {
+         "visible": true,
+         "general_spec": {
+          "pos_spec": {
+           "coordinate_pos": 1,
+           "axis_x": 1.0333333333333332,
+           "axis_y": 1.0333333333333332
+          },
+          "size_spec": {
+           "width": 0.39999999999999997,
+           "height": 0.39999999999999997
+          },
+          "render_spec": {
+           "opacity": 1
+          }
+         },
+         "layer_config": {
+          "tags": {
+           "ICON_LAYER": {}
+          }
+         },
+         "resource": {
+          "res_type": 5,
+          "res_native_draw": {
+           "draw_src": {
+            "src_type": 3,
+            "draw": {
+             "draw_type": 1,
+             "fill_mode": 1,
+             "color_config": {
+              "is_dark_mode_aware": true,
+              "day": {
+               "argb": "#FFFFFFFF"
+              },
+              "night": {
+               "argb": "#FF17181A"
+              }
+             }
+            }
+           }
+          }
+         }
+        },
+        {
+         "visible": true,
+         "general_spec": {
+          "pos_spec": {
+           "coordinate_pos": 1,
+           "axis_x": 1.0666666666666667,
+           "axis_y": 1.0666666666666667
+          },
+          "size_spec": {
+           "width": 0.3333333333333333,
+           "height": 0.3333333333333333
+          },
+          "render_spec": {
+           "opacity": 1
+          }
+         },
+         "layer_config": {
+          "tags": {
+           "ICON_LAYER": {}
+          }
+         },
+         "resource": {
+          "res_type": 3,
+          "res_image": {
+           "image_src": {
+            "src_type": 1,
+            "placeholder": 1,
+            "remote": {
+             "url": "http://img0.bilibili.test/bfs/vip/dbe23f4ede5c120f11e18630cdd023010bce03b3.png@80w_80h_1c.webp",
+             "bfs_style": "widget-layer-avatar"
+            }
+           }
+          }
+         }
+        }
+       ],
+       "is_critical_group": true
+      },
+      "mid": "441616812"
+     }
+    },
+    "content": {
+     "message": "就国庆1天假的有没有[吃瓜]",
+     "members": [],
+     "emote": {
+      "[吃瓜]": {
+       "id": 415,
+       "package_id": 1,
+       "state": 0,
+       "type": 1,
+       "attr": 0,
+       "text": "[吃瓜]",
+       "url": "https://img0.bilibili.test/bfs/emote/4191ce3c44c2b3df8fd97c33f85d3ab15f4f3c84.png",
+       "meta": {
+        "size": 1,
+        "suggest": [
+         ""
+        ]
+       },
+       "mtime": 1668688325,
+       "jump_title": "吃瓜"
+      }
+     },
+     "jump_url": {},
+     "max_line": 6
+    },
+    "replies": null,
+    "assist": 0,
+    "up_action": {
+     "like": false,
+     "reply": false
+    },
+    "invisible": false,
+    "reply_control": {
+     "max_line": 6,
+     "time_desc": "1天前发布",
+     "translation_switch": 1,
+     "support_share": true
+    },
+    "folder": {
+     "has_folded": false,
+     "is_folded": false,
+     "rule": ""
+    },
+    "dynamic_id_str": "0",
+    "note_cvid_str": "0",
+    "track_info": ""
+   }
+  ],
+  "top": {
+   "admin": null,
+   "upper": null,
+   "vote": null
+  },
+  "top_replies": [],
+  "effects": {
+   "preloading": ""
+  },
+  "assist": 0,
+  "blacklist": 0,
+  "vote": 0,
+  "config": {
+   "showtopic": 1,
+   "show_up_flag": true,
+   "read_only": false
+  },
+  "upper": {
+   "mid": 37974444
+  },
+  "control": {
+   "input_disable": false,
+   "root_input_text": "这里是评论区，不是无人区;-)",
+   "child_input_text": "这里是评论区，不是无人区;-)",
+   "giveup_input_text": "不发没关系，请继续友善哦~",
+   "screenshot_icon_state": 3,
+   "upload_picture_icon_state": 1,
+   "answer_guide_text": "需要升级成为lv2会员后才可以评论，先去答题转正吧！",
+   "answer_guide_icon_url": "http://img0.bilibili.test/bfs/emote/96940d16602cacbbac796245b7bb99fa9b5c970c.png",
+   "answer_guide_ios_url": "https://www.bilibili.test/h5/newbie/entry?navhide=REDACTED&re_src=REDACTED",
+   "answer_guide_android_url": "https://www.bilibili.test/h5/newbie/entry?navhide=REDACTED&re_src=REDACTED",
+   "bg_text": "",
+   "empty_page": null,
+   "show_type": 1,
+   "show_text": "",
+   "web_selection": false,
+   "disable_jump_emote": false,
+   "enable_charged": false,
+   "enable_cm_biz_helper": false,
+   "preload_resources": null
+  },
+  "note": 0,
+  "callbacks": null
+ }
+}

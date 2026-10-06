@@ -1,0 +1,725 @@
+{
+ "generated_at": "2026-10-06T11:51:38+08:00",
+ "nav": {
+  "http_status": 200,
+  "code": -101,
+  "isLogin": false,
+  "img_key": "7cd084941338484aae1ad9425b84077c",
+  "sub_key": "4932caff0ff746eab6f01bf08b70ac45",
+  "mixin_key": "ea1db124af3c7062474693fa704f4ff8"
+ },
+ "samples": [
+  {
+   "sample": "BV1GJ411x7h7",
+   "kind": "bv",
+   "bvid": "BV1GJ411x7h7",
+   "aid": 80433022,
+   "cid": 137649199,
+   "title": "【官方 MV】Never Gonna Give You Up - Rick Astley",
+   "tid": 193,
+   "tname": "",
+   "pubdate": 1577835803,
+   "duration": 213,
+   "videos": 1,
+   "pages": 1,
+   "page_titles": [
+    "Never Gonna Give You Up - Rick Astley"
+   ],
+   "playurl": {
+    "fnval4048": {
+     "code": 0,
+     "message": "OK",
+     "http_status": 200,
+     "error": null,
+     "quality": 64,
+     "accept_quality": [
+      112,
+      80,
+      64,
+      32,
+      16
+     ],
+     "dash_video": 6,
+     "dash_audio": 3,
+     "codec_by_qn": {
+      "32": {
+       "hev1(12)": 218550,
+       "avc1(7)": 786766,
+       "av01(13)": 184371
+      },
+      "16": {
+       "hev1(12)": 153220,
+       "avc1(7)": 350253,
+       "av01(13)": 155867
+      }
+     },
+     "video_has_backup": true,
+     "audio_has_backup": true,
+     "durl_segments": 0,
+     "durl_lengths_ms": [],
+     "has_dash_key": true
+    },
+    "fnval1": {
+     "code": 0,
+     "message": "OK",
+     "http_status": 200,
+     "error": null,
+     "quality": 64,
+     "accept_quality": [
+      64,
+      16
+     ],
+     "dash_video": 0,
+     "dash_audio": 0,
+     "codec_by_qn": {},
+     "video_has_backup": false,
+     "audio_has_backup": false,
+     "durl_segments": 1,
+     "durl_lengths_ms": [
+      213000
+     ],
+     "has_dash_key": false
+    },
+    "fnval16": {
+     "code": 0,
+     "message": "OK",
+     "http_status": 200,
+     "error": null,
+     "quality": 64,
+     "accept_quality": [
+      112,
+      80,
+      64,
+      32,
+      16
+     ],
+     "dash_video": 4,
+     "dash_audio": 3,
+     "codec_by_qn": {
+      "32": {
+       "hev1(12)": 218550,
+       "avc1(7)": 786766
+      },
+      "16": {
+       "hev1(12)": 153220,
+       "avc1(7)": 350253
+      }
+     },
+     "video_has_backup": true,
+     "audio_has_backup": true,
+     "durl_segments": 0,
+     "durl_lengths_ms": [],
+     "has_dash_key": true
+    }
+   },
+   "errors": [],
+   "nav": {
+    "http_status": 200,
+    "code": -101,
+    "isLogin": false,
+    "img_key": "7cd084941338484aae1ad9425b84077c",
+    "sub_key": "4932caff0ff746eab6f01bf08b70ac45",
+    "mixin_key": "ea1db124af3c7062474693fa704f4ff8"
+   }
+  },
+  {
+   "sample": "BV1YtHs62EHZ",
+   "kind": "bv",
+   "bvid": "BV1YtHs62EHZ",
+   "aid": 117387328295977,
+   "cid": 42480174110,
+   "title": "被 解 救 的 杰 戈",
+   "tid": 216,
+   "tname": "",
+   "pubdate": 1791188729,
+   "duration": 433,
+   "videos": 1,
+   "pages": 1,
+   "page_titles": [
+    "被 解 救 的 杰 戈"
+   ],
+   "playurl": {
+    "fnval4048": {
+     "code": 0,
+     "message": "OK",
+     "http_status": 200,
+     "error": null,
+     "quality": 64,
+     "accept_quality": [
+      112,
+      80,
+      64,
+      32,
+      16
+     ],
+     "dash_video": 6,
+     "dash_audio": 3,
+     "codec_by_qn": {
+      "32": {
+       "avc1(7)": 335472,
+       "hvc1(12)": 202428,
+       "av01(13)": 174695
+      },
+      "16": {
+       "hvc1(12)": 148359,
+       "avc1(7)": 228824,
+       "av01(13)": 129325
+      }
+     },
+     "video_has_backup": true,
+     "audio_has_backup": true,
+     "durl_segments": 0,
+     "durl_lengths_ms": [],
+     "has_dash_key": true
+    },
+    "fnval1": {
+     "code": 0,
+     "message": "OK",
+     "http_status": 200,
+     "error": null,
+     "quality": 64,
+     "accept_quality": [
+      64,
+      16
+     ],
+     "dash_video": 0,
+     "dash_audio": 0,
+     "codec_by_qn": {},
+     "video_has_backup": false,
+     "audio_has_backup": false,
+     "durl_segments": 1,
+     "durl_lengths_ms": [
+      432518
+     ],
+     "has_dash_key": false
+    },
+    "fnval16": {
+     "code": 0,
+     "message": "OK",
+     "http_status": 200,
+     "error": null,
+     "quality": 64,
+     "accept_quality": [
+      112,
+      80,
+      64,
+      32,
+      16
+     ],
+     "dash_video": 4,
+     "dash_audio": 3,
+     "codec_by_qn": {
+      "32": {
+       "avc1(7)": 335472,
+       "hvc1(12)": 202428
+      },
+      "16": {
+       "hvc1(12)": 148359,
+       "avc1(7)": 228824
+      }
+     },
+     "video_has_backup": true,
+     "audio_has_backup": true,
+     "durl_segments": 0,
+     "durl_lengths_ms": [],
+     "has_dash_key": true
+    }
+   },
+   "errors": [],
+   "nav": {
+    "http_status": 200,
+    "code": -101,
+    "isLogin": false,
+    "img_key": "7cd084941338484aae1ad9425b84077c",
+    "sub_key": "4932caff0ff746eab6f01bf08b70ac45",
+    "mixin_key": "ea1db124af3c7062474693fa704f4ff8"
+   }
+  },
+  {
+   "sample": "BV1fnHL68EPT",
+   "kind": "bv",
+   "bvid": "BV1fnHL68EPT",
+   "aid": 117382311907328,
+   "cid": 42455072935,
+   "title": "【哥布林故事总集篇】愿你也能像哥布林一样，开启逆袭翻盘的旅途",
+   "tid": 85,
+   "tname": "",
+   "pubdate": 1791112191,
+   "duration": 6721,
+   "videos": 1,
+   "pages": 1,
+   "page_titles": [
+    "【哥布林故事总集篇】愿你也能像哥布林一样，开启逆袭翻盘的旅途"
+   ],
+   "playurl": {
+    "fnval4048": {
+     "code": 0,
+     "message": "OK",
+     "http_status": 200,
+     "error": null,
+     "quality": 64,
+     "accept_quality": [
+      116,
+      80,
+      64,
+      32,
+      16
+     ],
+     "dash_video": 6,
+     "dash_audio": 3,
+     "codec_by_qn": {
+      "32": {
+       "avc1(7)": 510278,
+       "hvc1(12)": 406822,
+       "av01(13)": 345738
+      },
+      "16": {
+       "hvc1(12)": 284176,
+       "avc1(7)": 343793,
+       "av01(13)": 243530
+      }
+     },
+     "video_has_backup": true,
+     "audio_has_backup": true,
+     "durl_segments": 0,
+     "durl_lengths_ms": [],
+     "has_dash_key": true
+    },
+    "fnval1": {
+     "code": 0,
+     "message": "OK",
+     "http_status": 200,
+     "error": null,
+     "quality": 64,
+     "accept_quality": [
+      64,
+      16
+     ],
+     "dash_video": 0,
+     "dash_audio": 0,
+     "codec_by_qn": {},
+     "video_has_backup": false,
+     "audio_has_backup": false,
+     "durl_segments": 1,
+     "durl_lengths_ms": [
+      6720183
+     ],
+     "has_dash_key": false
+    },
+    "fnval16": {
+     "code": 0,
+     "message": "OK",
+     "http_status": 200,
+     "error": null,
+     "quality": 64,
+     "accept_quality": [
+      116,
+      80,
+      64,
+      32,
+      16
+     ],
+     "dash_video": 4,
+     "dash_audio": 3,
+     "codec_by_qn": {
+      "32": {
+       "avc1(7)": 510278,
+       "hvc1(12)": 406822
+      },
+      "16": {
+       "hvc1(12)": 284176,
+       "avc1(7)": 343793
+      }
+     },
+     "video_has_backup": true,
+     "audio_has_backup": true,
+     "durl_segments": 0,
+     "durl_lengths_ms": [],
+     "has_dash_key": true
+    }
+   },
+   "errors": [],
+   "nav": {
+    "http_status": 200,
+    "code": -101,
+    "isLogin": false,
+    "img_key": "7cd084941338484aae1ad9425b84077c",
+    "sub_key": "4932caff0ff746eab6f01bf08b70ac45",
+    "mixin_key": "ea1db124af3c7062474693fa704f4ff8"
+   }
+  },
+  {
+   "sample": "BV1cwHa6mEPH",
+   "kind": "bv",
+   "bvid": "BV1cwHa6mEPH",
+   "aid": 117374359438410,
+   "cid": 42413395765,
+   "title": "【抢先看】重回2002，永不空军的鱼竿被军方收编？军方进仓库一看：激光炮手电、隐身涂层、全球降雨弹……你管这叫鱼竿？",
+   "tid": 168,
+   "tname": "",
+   "pubdate": 1790990812,
+   "duration": 4414,
+   "videos": 2,
+   "pages": 2,
+   "page_titles": [
+    "1",
+    "2"
+   ],
+   "playurl": {
+    "fnval4048": {
+     "code": 0,
+     "message": "OK",
+     "http_status": 200,
+     "error": null,
+     "quality": 64,
+     "accept_quality": [
+      64,
+      32,
+      16
+     ],
+     "dash_video": 6,
+     "dash_audio": 3,
+     "codec_by_qn": {
+      "32": {
+       "avc1(7)": 669621,
+       "hvc1(12)": 436872,
+       "av01(13)": 383924
+      },
+      "16": {
+       "hvc1(12)": 307217,
+       "avc1(7)": 466698,
+       "av01(13)": 266599
+      }
+     },
+     "video_has_backup": true,
+     "audio_has_backup": true,
+     "durl_segments": 0,
+     "durl_lengths_ms": [],
+     "has_dash_key": true
+    },
+    "fnval1": {
+     "code": 0,
+     "message": "OK",
+     "http_status": 200,
+     "error": null,
+     "quality": 64,
+     "accept_quality": [
+      64,
+      16
+     ],
+     "dash_video": 0,
+     "dash_audio": 0,
+     "codec_by_qn": {},
+     "video_has_backup": false,
+     "audio_has_backup": false,
+     "durl_segments": 1,
+     "durl_lengths_ms": [
+      502735
+     ],
+     "has_dash_key": false
+    },
+    "fnval16": {
+     "code": 0,
+     "message": "OK",
+     "http_status": 200,
+     "error": null,
+     "quality": 64,
+     "accept_quality": [
+      64,
+      32,
+      16
+     ],
+     "dash_video": 4,
+     "dash_audio": 3,
+     "codec_by_qn": {
+      "32": {
+       "avc1(7)": 669621,
+       "hvc1(12)": 436872
+      },
+      "16": {
+       "hvc1(12)": 307217,
+       "avc1(7)": 466698
+      }
+     },
+     "video_has_backup": true,
+     "audio_has_backup": true,
+     "durl_segments": 0,
+     "durl_lengths_ms": [],
+     "has_dash_key": true
+    }
+   },
+   "errors": [],
+   "nav": {
+    "http_status": 200,
+    "code": -101,
+    "isLogin": false,
+    "img_key": "7cd084941338484aae1ad9425b84077c",
+    "sub_key": "4932caff0ff746eab6f01bf08b70ac45",
+    "mixin_key": "ea1db124af3c7062474693fa704f4ff8"
+   }
+  },
+  {
+   "sample": "BV1wHh16yE8F",
+   "kind": "bv",
+   "bvid": "BV1wHh16yE8F",
+   "aid": 117330151545529,
+   "cid": 42184345005,
+   "title": "诡探，30集全！",
+   "tid": 184,
+   "tname": "",
+   "pubdate": 1790316570,
+   "duration": 56640,
+   "videos": 5,
+   "pages": 5,
+   "page_titles": [
+    "1-6",
+    "7-12",
+    "13-18",
+    "19-24",
+    "25-30"
+   ],
+   "playurl": {
+    "fnval4048": {
+     "code": 0,
+     "message": "OK",
+     "http_status": 200,
+     "error": null,
+     "quality": 64,
+     "accept_quality": [
+      64,
+      32,
+      16
+     ],
+     "dash_video": 6,
+     "dash_audio": 3,
+     "codec_by_qn": {
+      "32": {
+       "avc1(7)": 199750,
+       "hvc1(12)": 169706,
+       "av01(13)": 140907
+      },
+      "16": {
+       "hvc1(12)": 122523,
+       "avc1(7)": 139880,
+       "av01(13)": 102551
+      }
+     },
+     "video_has_backup": true,
+     "audio_has_backup": true,
+     "durl_segments": 0,
+     "durl_lengths_ms": [],
+     "has_dash_key": true
+    },
+    "fnval1": {
+     "code": 0,
+     "message": "OK",
+     "http_status": 200,
+     "error": null,
+     "quality": 64,
+     "accept_quality": [
+      64,
+      16
+     ],
+     "dash_video": 0,
+     "dash_audio": 0,
+     "codec_by_qn": {},
+     "video_has_backup": false,
+     "audio_has_backup": false,
+     "durl_segments": 1,
+     "durl_lengths_ms": [
+      11235043
+     ],
+     "has_dash_key": false
+    },
+    "fnval16": {
+     "code": 0,
+     "message": "OK",
+     "http_status": 200,
+     "error": null,
+     "quality": 64,
+     "accept_quality": [
+      64,
+      32,
+      16
+     ],
+     "dash_video": 4,
+     "dash_audio": 3,
+     "codec_by_qn": {
+      "32": {
+       "avc1(7)": 199750,
+       "hvc1(12)": 169706
+      },
+      "16": {
+       "hvc1(12)": 122523,
+       "avc1(7)": 139880
+      }
+     },
+     "video_has_backup": true,
+     "audio_has_backup": true,
+     "durl_segments": 0,
+     "durl_lengths_ms": [],
+     "has_dash_key": true
+    }
+   },
+   "errors": [],
+   "nav": {
+    "http_status": 200,
+    "code": -101,
+    "isLogin": false,
+    "img_key": "7cd084941338484aae1ad9425b84077c",
+    "sub_key": "4932caff0ff746eab6f01bf08b70ac45",
+    "mixin_key": "ea1db124af3c7062474693fa704f4ff8"
+   }
+  },
+  {
+   "sample": "opus1255560717556252676",
+   "kind": "opus",
+   "opus_id": "1255560717556252676",
+   "oid": 411332718,
+   "comment_type": 11,
+   "bvid": null,
+   "title": "1255560717556252676",
+   "desc_len": 0,
+   "opus_type": "DYNAMIC_TYPE_DRAW",
+   "nav": {
+    "http_status": 200,
+    "code": -101,
+    "isLogin": false,
+    "img_key": "7cd084941338484aae1ad9425b84077c",
+    "sub_key": "4932caff0ff746eab6f01bf08b70ac45",
+    "mixin_key": "ea1db124af3c7062474693fa704f4ff8"
+   }
+  },
+  {
+   "sample": "av117370500878484",
+   "kind": "av",
+   "bvid": "BV1Aaa26DE77",
+   "aid": 117370500878484,
+   "cid": 42393799048,
+   "title": "空间向量大题！一个视频搞定所有重点！",
+   "tid": 208,
+   "tname": "",
+   "pubdate": 1790932346,
+   "duration": 2683,
+   "videos": 1,
+   "pages": 1,
+   "page_titles": [
+    "空间向量大题！一个视频搞定所有重点！"
+   ],
+   "playurl": {
+    "fnval4048": {
+     "code": 0,
+     "message": "OK",
+     "http_status": 200,
+     "error": null,
+     "quality": 64,
+     "accept_quality": [
+      80,
+      64,
+      32,
+      16
+     ],
+     "dash_video": 6,
+     "dash_audio": 3,
+     "codec_by_qn": {
+      "32": {
+       "avc1(7)": 79549,
+       "hvc1(12)": 99344,
+       "av01(13)": 80235
+      },
+      "16": {
+       "hvc1(12)": 70209,
+       "avc1(7)": 55314,
+       "av01(13)": 56802
+      }
+     },
+     "video_has_backup": true,
+     "audio_has_backup": true,
+     "durl_segments": 0,
+     "durl_lengths_ms": [],
+     "has_dash_key": true
+    },
+    "fnval1": {
+     "code": 0,
+     "message": "OK",
+     "http_status": 200,
+     "error": null,
+     "quality": 64,
+     "accept_quality": [
+      64,
+      16
+     ],
+     "dash_video": 0,
+     "dash_audio": 0,
+     "codec_by_qn": {},
+     "video_has_backup": false,
+     "audio_has_backup": false,
+     "durl_segments": 1,
+     "durl_lengths_ms": [
+      2682322
+     ],
+     "has_dash_key": false
+    },
+    "fnval16": {
+     "code": 0,
+     "message": "OK",
+     "http_status": 200,
+     "error": null,
+     "quality": 64,
+     "accept_quality": [
+      80,
+      64,
+      32,
+      16
+     ],
+     "dash_video": 4,
+     "dash_audio": 3,
+     "codec_by_qn": {
+      "32": {
+       "avc1(7)": 79549,
+       "hvc1(12)": 99344
+      },
+      "16": {
+       "hvc1(12)": 70209,
+       "avc1(7)": 55314
+      }
+     },
+     "video_has_backup": true,
+     "audio_has_backup": true,
+     "durl_segments": 0,
+     "durl_lengths_ms": [],
+     "has_dash_key": true
+    }
+   },
+   "playurl_aid_fallback": true,
+   "errors": [],
+   "nav": {
+    "http_status": 200,
+    "code": -101,
+    "isLogin": false,
+    "img_key": "7cd084941338484aae1ad9425b84077c",
+    "sub_key": "4932caff0ff746eab6f01bf08b70ac45",
+    "mixin_key": "ea1db124af3c7062474693fa704f4ff8"
+   }
+  },
+  {
+   "sample": "opus1129722427782201345",
+   "kind": "opus",
+   "opus_id": "1129722427782201345",
+   "oid": 43551358,
+   "comment_type": 12,
+   "bvid": null,
+   "title": "[图片] 小伙伴们，你们是否也有这样的困惑： · 看到GPT、Midjourney、Sora等AI应用层出不穷，内心激动",
+   "desc_len": 255,
+   "opus_type": "DYNAMIC_TYPE_ARTICLE",
+   "nav": {
+    "http_status": 200,
+    "code": -101,
+    "isLogin": false,
+    "img_key": "7cd084941338484aae1ad9425b84077c",
+    "sub_key": "4932caff0ff746eab6f01bf08b70ac45",
+    "mixin_key": "ea1db124af3c7062474693fa704f4ff8"
+   }
+  }
+ ]
+}

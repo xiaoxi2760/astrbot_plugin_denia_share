@@ -557,6 +557,23 @@ CONFIG_META: tuple[dict[str, Any], ...] = (
         "hint": "超过此时间未使用的缓存会被自动清理，设为 0 禁用自动清理",
     },
     {
+        "key": "RESULT_CACHE_TTL_SECONDS",
+        "group": "维护",
+        "subgroup": "缓存清理",
+        "label": "重复解析间隔",
+        "type": "int",
+        "default": 600,
+        "min": 0,
+        "max": 86400,
+        "unit": "秒",
+        "hint": (
+            "同一条链接在此时长内再次发来时，直接用上一次的结果，不重新请求 B站/抖音等平台。"
+            "设为 0 表示每次都重新解析。"
+            "间隔别设得比「缓存保留时长」长：磁盘上的媒体文件先被清掉时，"
+            "卡片还能发但视频会发不出来（插件会自动重新解析，只是白费一次请求）"
+        ),
+    },
+    {
         "key": "CACHE_CLEANUP_INTERVAL_MINUTES",
         "group": "维护",
         "subgroup": "缓存清理",
@@ -1025,6 +1042,17 @@ class ParserConfig:
     @property
     def CACHE_CLEANUP_INTERVAL_MINUTES(self) -> int:
         return int(self._cfg_get("CACHE_CLEANUP_INTERVAL_MINUTES", 60))
+
+    @property
+    def RESULT_CACHE_TTL_SECONDS(self) -> int:
+        """同一条链接多久之内不重复解析（秒）。0 = 每次都重新解析。
+
+        与 :attr:`CACHE_TTL_HOURS` 是**两回事**：那个管磁盘上的媒体文件留多久，
+        这个管内存里的解析结果复用多久。前者默认 24 小时、后者默认 10 分钟，
+        所以「缓存保留时长 > 重复解析间隔」是正常的；反过来配（重复解析间隔
+        比文件留得久）也不会出错 —— 命中时发现文件没了会自动重新解析。
+        """
+        return int(self._cfg_get("RESULT_CACHE_TTL_SECONDS", 600))
 
     # ---------------- 渲染 ---------------- #
 

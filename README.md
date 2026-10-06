@@ -150,12 +150,45 @@ DOM 是手写桩。详见 [`tests/frontend/README.md`](tests/frontend/README.md)
 
 ## 许可
 
-MIT，详见 [LICENSE](LICENSE)。引用了两处第三方代码：
+MIT，详见 [LICENSE](LICENSE)。引用了四处第三方代码：
 
 | 来源 | 许可 | 用到哪里 |
 | --- | --- | --- |
 | [astrbot_plugin_rika_share](https://github.com/iris1598/astrbot_plugin_rika_share) | MIT | 解析框架、卡片渲染器，以及 B站 / 微博 / 小红书 / AcFun / NGA 的解析实现等 |
 | [Johnserf-Seed/f2](https://github.com/Johnserf-Seed/f2) | Apache-2.0 | 抖音 `a_bogus` 签名（`core/parsers/douyin/sign.py`） |
+| [Nemo2011/bilibili-api](https://github.com/Nemo2011/bilibili-api) | **GPL-3.0-or-later** | B站解析（`core/parsers/bilibili.py`，`requirements.txt` 里的 `bilibili-api-python`） |
+| 娅娅解析 yaya v7.6.0 | Apache-2.0 | B站**备用**取流（`core/bili_fallback/`）—— WBI 签名、playurl 取流、流选择 |
+
+> **关于 B站那条 GPL 依赖**：本项目自身代码是 MIT，但 B站解析走的是
+> [bilibili-api-python](https://pypi.org/project/bilibili-api-python/)（GPL-3.0-or-later），
+> 这是一处**运行期依赖**、非代码复制。需要注意两点：
+>
+> 1. 分发本插件时该依赖会一并被安装，**整体的分发许可需按 GPL-3.0 对待**。
+>    仅自用、不对外分发时不受此限。
+> 2. 上游原仓库（`MoyuScript/bilibili-api`）已删除，现在由 `Nemo2011` 的 fork 维护，
+>    PyPI 上可正常安装（17.4.2）。若哪天该依赖装不上，插件会在日志里给出提示并
+>    **只停用 B站**，其余十个平台照常工作。
+
+### B站的备用解析
+
+`bilibili-api-python` 是第三方依赖，B站改接口时它跟不上就会失效。为此本项目自带
+一份不依赖它的实现（`core/bili_fallback/`），两级兜底：
+
+| 情况 | 走哪条路 | 结果 |
+| --- | --- | --- |
+| 依赖正常 | 主力 `bilibili-api-python` | 全功能 |
+| 依赖在，但取流出错 | 主力报错 → 自建取流接管 | 视频正常，动态等仍不可用 |
+| **依赖整个装不上** | 整体切到自建解析器 | **视频正常**，动态 / 直播 / 收藏夹 / 专栏不可用 |
+
+自建实现只做 **BV / av 视频**，刻意不碰登录态机制、AI 总结、在线人数、番剧 ——
+备用路径一旦开始复刻主力，就会跟着主力一起腐化。它存在的意义是
+「主力彻底不能用时仍能下载视频」，不是「功能对等」。
+
+切到备用模式时：启动日志会明确告知，**每张卡片上也会标一行**「动态 / 直播 /
+收藏夹 / 专栏暂不可用」。依赖正常时完全感觉不到它的存在。
+
+它同样读 `backupUrl`（每条流实测带 2 个备用 CDN），并沿用 `BILI_CODEC` /
+`BILI_QUALITY` 两项配置；扫码登录的 cookie 也会照常生效。
 
 其余部分（GitHub / Pixiv / Steam 解析、网页界面与外观自定义、媒体发送、卡片外观配置项等）
 为本项目实现。Apache-2.0 全文随包附在 `LICENSES/Apache-2.0.txt`，相关源文件头都带来源说明。

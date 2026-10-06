@@ -1,0 +1,39 @@
+{
+ "_meta": {
+  "sample": "BV1fnHL68EPT",
+  "endpoint": "pagelist",
+  "captured_at": "2026-10-06T11:48:08+08:00",
+  "http_status": 200,
+  "error": null,
+  "request": {
+   "method": "GET",
+   "url": "https://api.bilibili.test/x/player/pagelist?jsonp=REDACTED&bvid=REDACTED",
+   "params": {
+    "jsonp": "json",
+    "bvid": "BV1fnHL68EPT"
+   },
+   "wbi_signed": false
+  }
+ },
+ "code": 0,
+ "message": "OK",
+ "ttl": 1,
+ "data": [
+  {
+   "cid": 42455072935,
+   "page": 1,
+   "from": "vupload",
+   "part": "【哥布林故事总集篇】愿你也能像哥布林一样，开启逆袭翻盘的旅途",
+   "duration": 6721,
+   "vid": "",
+   "weblink": "",
+   "dimension": {
+    "width": 1920,
+    "height": 1080,
+    "rotate": 0
+   },
+   "first_frame": "http://img1.bilibili.test/bfs/storyff/_000010nuo7xhobwdn2sp8ab5h0btkob_firsti.jpg",
+   "ctime": 1791112191
+  }
+ ]
+}
