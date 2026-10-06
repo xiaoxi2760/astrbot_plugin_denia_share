@@ -18,6 +18,7 @@ import os
 import re
 import io
 import json
+import time
 import asyncio
 import hashlib
 from pathlib import Path
@@ -276,7 +277,8 @@ class DeniaSharePlugin(Star):
         # 平台（文件被删/改名，或新版本加载失败）摘掉 —— 见 _init_custom_parsers。
         self._custom_parser_keys: set[str] = set()
         self._init_parsers()
-        self._result_cache: dict[str, ParseResult] = {}
+        # 存 (写入时刻, 结果) —— 时刻是给「重复解析间隔」用的，见 _get_cached_result
+        self._result_cache: dict[str, tuple[float, ParseResult]] = {}
         self._render_cache: dict[str, Path] = {}
         self._cache_cleanup_task: asyncio.Task | None = None
 
@@ -357,9 +359,28 @@ class DeniaSharePlugin(Star):
         pconfig = get_config()
         disabled = self.disabled_platforms
         if "bilibili" not in disabled:
-            self.parsers["bilibili"] = BilibiliParser(
-                self.downloader, bili_ck=pconfig.BILI_CK, config_dir=self.config_dir
-            )
+            # bilibili_api 缺失时会换上自建替补解析器（B站视频仍可用）；
+            # 连替补都起不来才是 None，此时跳过注册而不是拖垮整个插件。
+            if BilibiliParser is None:
+                from .core.parsers import BILIBILI_FALLBACK_ERROR, BILIBILI_IMPORT_ERROR
+
+                logger.error(
+                    f"[denia_share] B站解析器未启用：bilibili-api-python 导入失败"
+                    f"（{BILIBILI_IMPORT_ERROR}），自建替补也不可用"
+                    f"（{BILIBILI_FALLBACK_ERROR}）。其余平台不受影响；"
+                    f"需要 B站请执行 pip install 'bilibili-api-python>=16.0.0'"
+                )
+            else:
+                from .core.parsers import BILIBILI_IS_FALLBACK
+
+                self.parsers["bilibili"] = BilibiliParser(
+                    self.downloader, bili_ck=pconfig.BILI_CK, config_dir=self.config_dir
+                )
+                if BILIBILI_IS_FALLBACK:
+                    logger.warning(
+                        "[denia_share] bilibili-api-python 不可用，B站已切到自建备用解析："
+                        "视频可解析下载，动态 / 直播 / 收藏夹 / 专栏暂不可用"
+                    )
         if "douyin" not in disabled:
             self.parsers["douyin"] = DouyinParser(self.downloader)
         if "kuaishou" not in disabled:
@@ -648,7 +669,7 @@ class DeniaSharePlugin(Star):
 
         try:
             cache_key = f"pixiv:{keyword}"
-            result = self._result_cache.get(cache_key)
+            result = self._get_cached_result(cache_key)
             if result is None:
                 result = await parser.search(keyword)
                 self._remember_result(cache_key, result)
@@ -712,7 +733,7 @@ class DeniaSharePlugin(Star):
         url = event.message_str.strip()
         try:
             cache_key = self.result_cache_key(url)
-            result = self._result_cache.get(cache_key)
+            result = self._get_cached_result(cache_key)
             if result is None:
                 keyword, searched = parser.search_url(url)
                 result = await parser.parse(keyword, searched)
@@ -801,10 +822,93 @@ class DeniaSharePlugin(Star):
     def _remember_result(self, cache_key: str, result: ParseResult) -> None:
         """写入解析结果内存缓存，并维持条数上限（见 MAX_RESULT_CACHE_ENTRIES）。"""
         cache = self._result_cache
-        cache[cache_key] = result
+        cache[cache_key] = (time.monotonic(), result)
         # dict 保持插入序：超限就丢最早写入的（FIFO 够用，这里只是防无界增长）
         while len(cache) > MAX_RESULT_CACHE_ENTRIES:
             cache.pop(next(iter(cache)), None)
+
+    @staticmethod
+    def _cache_media_gone(result: ParseResult) -> bool:
+        """缓存里的结果，其媒体文件是否**已经被磁盘清理掉了**。
+
+        为什么必须查：``PathTask`` 首次下载后把路径存进 ``_path``，之后再取
+        一律直接返回，**不检查文件还在不在**；发送侧也不一定查
+        ``path.exists()``。于是只要解析结果还在内存里、而磁盘文件已按
+        ``CACHE_TTL_HOURS`` 被清掉，就会拿着一个不存在的路径去发媒体 ——
+        卡片正常发出去、**视频/图片/封面静默消失**，日志里什么都没有。
+
+        覆盖范围用 ``result._iter_media_tasks()``（视频 / 封面 / 音频 / 图片 /
+        graphics / 转发），那是 ``core/data.py`` 里已有的媒体清单，收口在一处
+        免得以后加了新内容类型这里漏掉。头像另算 —— 它只是装饰，但它同样会
+        画在卡片上，文件没了会出现裂图。
+
+        只查已解析出路径的（``resolved`` 非 None）：还在下载中的、或下载失败
+        的不据此判定，那两种情况另有分支管。
+        """
+        tasks = list(result._iter_media_tasks())
+        author = getattr(result, "author", None)
+        avatar = getattr(author, "avatar", None) if author is not None else None
+        if avatar is not None:
+            tasks.append(("头像", avatar))
+
+        for _label, task in tasks:
+            path = task.resolved
+            if path is not None and not path.exists():
+                return True
+        return False
+
+    def _get_cached_result(self, cache_key: str) -> ParseResult | None:
+        """取可用的缓存结果；不可用（过期 / 媒体已清理）时顺手删掉并返回 None。
+
+        两种失效都**删掉条目**而不是留着等下次 —— 留着等于每次都白查一遍
+        磁盘，而且会让「清空缓存」之外的路径继续返回一份发不出媒体的结果。
+        """
+        entry = self._result_cache.get(cache_key)
+        if entry is None:
+            return None
+        stored_at, result = entry
+
+        # 读侧兑底：手改过 JSON / 配置项是脏值时不能让整条链路跟着报错。
+        # 用 int() 包一层 —— 裸 int("abc") 抛 ValueError，会被 _process_url 的
+        # except Exception 吞成「处理出错」，而且异常发生在 pop 之前，
+        # 坏条目永远摘不掉，那一个 key 从此每次都报错、无法自愈。
+        try:
+            ttl = int(get_config().RESULT_CACHE_TTL_SECONDS)
+        except (TypeError, ValueError):
+            ttl = 600
+            logger.warning(
+                "[denia_share] 重复解析间隔配置不是整数，按 600 秒处理",
+            )
+        if ttl <= 0:
+            # 0 = 关掉这个优化，每次都重新解析。**不能写成「跳过过期检查」**：
+            # 那样 TTL=0 反而变成永不过期，与配置项文案正好相反。
+            self._drop_cache_entry(cache_key)
+            return None
+        if (time.monotonic() - stored_at) >= ttl:
+            self._drop_cache_entry(cache_key)
+            logger.debug(
+                f"[denia_share] 解析结果已过重复解析间隔（{ttl}s），重新解析"
+            )
+            return None
+
+        if self._cache_media_gone(result):
+            self._drop_cache_entry(cache_key)
+            logger.info(
+                "[denia_share] 缓存里的媒体文件已被清理，重新解析一次（只是白费一次请求）"
+            )
+            return None
+
+        return result
+
+    def _drop_cache_entry(self, cache_key: str) -> None:
+        """摘掉一条解析结果，并连带摘掉它的渲染卡片。
+
+        两者必须**同步**摘：卡片是从这份结果画出来的，结果都重解析了，卡片还
+        留着的话，``renderer.render`` 见到 ``existing.exists()`` 就直接返回旧图，
+        用户看到的标题/点赞数是上一次的。只做一半会出现「视频是新的、卡片是旧的」。
+        """
+        self._result_cache.pop(cache_key, None)
+        self._render_cache.pop(cache_key, None)
 
     # ==================== 解析记录 ====================
 
@@ -935,6 +1039,12 @@ class DeniaSharePlugin(Star):
         self._renderer = ShareCardRenderer(self.cache_dir, **pconfig.renderer_options())
         # 渲染参数进了产物文件名，配置变了就得让旧缓存失效
         self._render_cache.clear()
+
+        # 解析结果缓存**同样要清**：B站编码 / 清晰度 / 代理 / 限长这些配置项
+        # 都影响解析结果。不清的话，用户在配置页把编码从 AV1 换成 H.264，
+        # 再发同一条链接，拿到的还是旧结果 —— 配置改了却看不出效果，
+        # 正是最容易被当成「插件没生效」的一类问题。
+        self._result_cache.clear()
 
         # 截图后端的代理 / 证书校验同样是构造时读死的，热更新要一起重建
         self._build_screenshot_service()
@@ -1183,12 +1293,15 @@ class DeniaSharePlugin(Star):
 
         for image in result.img_contents:
             path = await image.path_task.safe_get()
-            if path:
+            # exists() 兜底：PathTask 记着首次下载的路径，之后一律直接返回、
+            # 不碰文件系统。文件被缓存清理任务删掉时，这里会把一个不存在的
+            # 路径交给协议端（图片则渲染成裂图）。视频那条链路已有同样检查。
+            if path and path.exists():
                 nodes.append([Comp.Image.fromFileSystem(str(path))])
         for graphic in result.graphics:
             if isinstance(graphic, ImageContent):
                 path = await graphic.path_task.safe_get()
-                if path:
+                if path and path.exists():
                     nodes.append([Comp.Image.fromFileSystem(str(path))])
             elif isinstance(graphic, str):
                 nodes.append([Comp.Plain(graphic)])
@@ -1235,6 +1348,14 @@ class DeniaSharePlugin(Star):
                 continue
             path = await cont.path_task.safe_get()
             if path is None:
+                continue
+            # 双保险：正常情况下主流程已经拦掉了「缓存命中但文件已清理」的情况
+            # （见 _cache_media_gone）。这里再挡一次 —— 清理任务可能正好在
+            # _get_cached_result 检查之后、这里之前把文件删了。
+            if not path.exists():
+                logger.warning(
+                    f"[denia_share] 媒体文件已不存在，跳过发送: {path.name}"
+                )
                 continue
 
             if isinstance(cont, VideoContent):

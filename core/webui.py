@@ -631,9 +631,17 @@ class WebUIApi:
         cache_key = str(body.get("cache_key") or "").strip()
         if not cache_key:
             return _error("缺少 cache_key")
-        result = self.plugin._result_cache.get(cache_key)
+        # **必须走 _get_cached_result，不能直接 .get()**：缓存值是
+        # (写入时刻, 结果) 元组，直接取会拿到元组、当成 ParseResult 往下传就崩。
+        # 而且「过了重复解析间隔 / 媒体文件已被清理」这两种失效只有它知道 ——
+        # 直接 .get() 会让「解析结果已过期」这个 410 永远不触发。
+        result = self.plugin._get_cached_result(cache_key)
         if result is None:
-            return _error("解析结果已过期（插件重启或缓存被清理），请重新解析一次", 410)
+            return _error(
+                "解析结果已不可用（插件重启、已过重复解析间隔、缓存被清理，"
+                "或媒体文件已删除），请重新解析一次",
+                410,
+            )
 
         payload = await self._preview_payload(
             result,

@@ -238,6 +238,9 @@ class BilibiliParser(BaseParser):
             v_url, v_backups, a_url, a_backups = await self.extract_download_urls(
                 video=video, page_index=page_info.index,
                 warnings=limit_warnings, rights=video_info.rights,
+                # 自建取流备用路径的输入。用 video_info.bvid 而不是入参 bvid：
+                # 用户给的是 avid 时入参为空，而 video_info 里一定有。
+                bvid=video_info.bvid, cid=page_info.cid,
             )
             if page_info.duration > pconfig.VIDEO_DURATION_MAXIMUM:
                 raise IgnoreException
@@ -391,10 +394,71 @@ class BilibiliParser(BaseParser):
         if message not in warnings:
             warnings.append(message)
 
+    async def _fallback_stream_urls(
+        self,
+        bvid: str,
+        cid: int,
+        target_quality,
+        *,
+        cookie_header: str = "",
+    ):
+        """自建取流备用路径。拿不到就返回 ``None``，让调用方按原逻辑走。
+
+        **什么时候才会走到这里**：``bilibili-api-python`` 调不动了 —— 接口返回形状
+        变了、版本不兼容、或者压根装不上。这条路不依赖那个库，只用 httpx 加
+        一次 WBI 签名（见 :mod:`..bili_fallback`）。
+
+        **什么时候不该走**：「没权限」。大会员专享、充电专属这类视频换个客户端
+        去请求也拿不到流，白白多打一次请求还会把日志搅浑，所以调用方要先用
+        ``restriction_type`` 判断。
+
+        :returns: ``(v_url, v_backups, a_url, a_backups)``，取不到返回 ``None``。
+        """
+        from astrbot.api import logger
+
+        from ..bili_fallback import fetch_streams
+
+        try:
+            max_qn = int(getattr(target_quality, "value", 0) or 0)
+        except (TypeError, ValueError):
+            max_qn = 0
+
+        try:
+            video, audio, _raw = await fetch_streams(
+                lambda: self.new_client(),
+                bvid,
+                cid,
+                headers=self.headers,
+                cookie_header=cookie_header,
+                codec_preference=get_config().BILI_CODEC,
+                max_qn=max_qn,
+            )
+        except Exception as error:
+            logger.warning(f"[bili] 自建取流备用路径也失败: {error}")
+            return None
+
+        if not video:
+            return None
+
+        logger.info(
+            f"[bili] 已切到自建取流备用路径（bilibili-api-python 未生效）: {bvid} p{cid}"
+        )
+        v_url, v_backups = video
+        if audio:
+            a_url, a_backups = audio
+            return v_url, v_backups, a_url, a_backups
+        return v_url, v_backups, None, []
+
     async def extract_download_urls(self, video: Video | None = None, *, bvid: str | None = None,
                                      avid: int | None = None, page_index: int = 0,
                                      warnings: list[str] | None = None,
-                                     rights: dict | None = None):
+                                     rights: dict | None = None,
+                                     cid: int | None = None):
+        """取视频/音频流地址。
+
+        ``bvid`` + ``cid`` 是**自建取流备用路径**的输入。缺了它们，备用路径不可用
+        （见 :meth:`_fallback_stream_urls`）——主力路径不受影响。
+        """
         from bilibili_api.video import (
             AudioStreamDownloadURL, VideoStreamDownloadURL, FLVStreamDownloadURL,
             MP4StreamDownloadURL, VideoDownloadURLDataDetecter, VideoQuality, VideoCodecs,
@@ -438,6 +502,15 @@ class BilibiliParser(BaseParser):
             access = analyze_play_access(
                 error=error, rights=rights, has_cookie=credential is not None,
             )
+            # **接口层面坏了**（B站改了返回形状 / bilibili_api 版本不兼容）时，
+            # 换自建路径再试一次。**「没权限」不走这条路** —— 换个客户端去请求
+            # 一样拿不到流，只会把日志搅浑。
+            if not access["restriction_type"] and bvid and cid is not None:
+                fb = await self._fallback_stream_urls(
+                    bvid, cid, target_quality, cookie_header=self._bili_ck or "",
+                )
+                if fb:
+                    return fb
             self._append_access_warning(warnings, access["message"])
             raise IgnoreException(access["message"] or "无法获取视频流") from error
 
@@ -482,6 +555,14 @@ class BilibiliParser(BaseParser):
                 return mp4_url, mp4_backups, None, []
 
         if video_stream is None:
+            # 主路径调用成功但没解析出视频流：同样是 bilibili_api 侧失灵的表现，
+            # 交给自建路径再试一次。
+            if bvid and cid is not None:
+                fb = await self._fallback_stream_urls(
+                    bvid, cid, target_quality, cookie_header=self._bili_ck or "",
+                )
+                if fb:
+                    return fb
             raise DownloadException("未找到可下载的视频流")
 
         v_backups = video_stream.backup_url if isinstance(video_stream, VideoStreamDownloadURL) else []
