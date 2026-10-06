@@ -747,16 +747,44 @@ export function createConfigView(ctx) {
     }
 
     if (item.type === "int") {
+      // 值缺失时**显示默认值**，不是空框。
+      //
+      // 之前这里是 `"" ? "" : String(value)`：一旦这个值拿不到（配置项是新增的、
+      // 文件里还没有），输入框就是空的；而空的数字框在 `.field-body` 的 flex 里
+      // 会被旁边那段长提示文字挤成**只剩微调箭头的小方块**，用户看到的就是
+      // 「既没有默认值、也点不进去」。加上 placeholder + minWidth 双保险。
+      const fallback = item.default !== undefined && item.default !== null
+        ? item.default
+        : value;
       const input = h("input", {
         class: "input",
         type: "number",
         value: value === null || value === undefined ? "" : String(value),
+        placeholder: fallback === null || fallback === undefined
+          ? ""
+          : String(fallback),
         min: item.min !== undefined ? String(item.min) : null,
         max: item.max !== undefined ? String(item.max) : null,
-        style: { maxWidth: "160px" },
+        // 必须给下限：flex 里 <input> 的 min-content 宽度是 0，会被同排的长
+        // 提示文字挤扁到只剩微调箭头（表现成「控件坏了」）。
+        style: { maxWidth: "160px", minWidth: "130px" },
         onInput: (event) => {
           const raw = event.target.value;
-          onValueChanged(item.key, raw === "" ? "" : Number(raw));
+          // 清空 / 只输入了负号：**不当成改动**，把框里的字恢复成当前值。
+          //
+          // 数字框被清空过一次就会永久停在「空 + 塌陷」状态，而「已改」还亮着 ——
+          // 看着就像插件坏了，而且用户没法从界面自救（框太小，点不进去）。
+          // 整数项本来也没有「空」这个合法状态（后端 coerce_value 会拒），所以
+          // 这里回落是安全的。
+          if (raw === "" || raw === "-") {
+            const back = currentValue(item.key);
+            event.target.value =
+              back === null || back === undefined ? String(fallback ?? "") : String(back);
+            return;
+          }
+          const n = Number(raw);
+          if (Number.isNaN(n)) return;
+          onValueChanged(item.key, n);
         },
       });
       return h("div", { class: "inline" }, [
