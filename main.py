@@ -733,26 +733,40 @@ class DeniaSharePlugin(Star):
         self, event: AstrMessageEvent, parser: Any
     ) -> AsyncGenerator[MessageEventResult, None]:
         # 白名单 / 黑名单的唯一收口点：内置平台处理器、自定义解析器、
-        # JSON 卡片三条路径最后都走这里（截图与 /pixiv 各自另有入口）。
+        # JSON 卡片三条路径最后都走这里（/shot 截图与 /pixiv 搜索各自另有入口）。
         if self._access_denied(event):
             return
-        url = event.message_str.strip()
+        # 这两个必须**在 try 之前**预置：下面的三个 except 分支都要用它们撤销
+        # 去重占位，而它们是在 try 里逐个赋值的。若 try 的第一行
+        # ``result_cache_key(url)`` 就抛了（url 含孤立代理字符时
+        # ``url.encode()`` 会抛 UnicodeEncodeError），except 里引用未赋值的
+        # ``scope`` 会再抛 UnboundLocalError —— 真实错误被掩盖，forget 不执行、
+        # 「处理出错」提示也发不出去。
+        cache_key: str | None = None
+        scope: str | None = None
+        # 已经交付出去了就别再撤销占位：_record_history 之类**交付之后**的收尾
+        # 步骤失败时撤销占位，会让下一个发同链接的人重新解析并**再发一张卡片** ——
+        # 那正好是这个功能要消灭的事。
+        delivered = False
         try:
+            url = event.message_str.strip()
             cache_key = self.result_cache_key(url)
 
             # ---- 同群重复链接去重 ----
             # 必须排在缓存查询**之前**：命中结果缓存时照旧要发卡片，而去重要的
             # 是「不再响应」。先查缓存的话第二个人的卡片就照发出来了，等于没去重。
-            scope = self._event_scope(event)
-            decision = self._link_dedup.check(scope, cache_key)
-            if decision == HINT:
-                yield event.plain_result(self._DEDUP_HINT)
-                return
-            if decision == SILENT:
-                logger.info(
-                    f"[denia_share] 同会话重复链接已静默: scope={scope} url={url[:60]}"
-                )
-                return
+            if self._dedup_applies(event):
+                scope = self._event_scope(event)
+                decision = self._link_dedup.check(scope, cache_key)
+                if decision == HINT:
+                    yield event.plain_result(self._DEDUP_HINT)
+                    return
+                if decision == SILENT:
+                    logger.info(
+                        f"[denia_share] 同会话重复链接已静默: scope={scope} "
+                        f"url={url[:60]}"
+                    )
+                    return
 
             result = self._get_cached_result(cache_key)
             if result is None:
@@ -761,6 +775,7 @@ class DeniaSharePlugin(Star):
                 self._remember_result(cache_key, result)
 
             async for r in self._deliver(event, result, cache_key):
+                delivered = True
                 yield r
 
             # 交付完成后再记录：此时媒体都已落盘，记录里能带上真实文件名
@@ -769,21 +784,19 @@ class DeniaSharePlugin(Star):
         except SilentException as e:
             # 「这条链接不归我管」是每条普通消息都会走到的正常流量，只在调试级留痕
             logger.debug(f"[denia_share] 静默跳过: {e.message}")
-            # 占位是在开始处理时记的（防并发重复劳动），但「不归我管」等于没真正
-            # 处理这条链接 —— 必须撤销，否则窗口内其他人会被静默掉，白丢一次机会。
-            self._link_dedup.forget(scope, cache_key)
+            self._forget_dedup(scope, cache_key, delivered)
         except ParseException as e:
             # 解析失败必须无条件留痕：Cookie 全失效、接口改版、被风控都走这条，
             # 而 SEND_ERROR_MESSAGES 默认是关的 —— 只由它决定「发不发群」，
             # 不能连日志一起决定，否则群里不回复、日志也一片空白，用户和运维同时失明。
             logger.warning(f"[denia_share] 解析未完成: {e.message}")
             # 同样要撤销：第一次解析挂了就该让下一个人重试，而不是废掉整个窗口
-            self._link_dedup.forget(scope, cache_key)
+            self._forget_dedup(scope, cache_key, delivered)
             if e.notify_prefix and self._send_errors:
                 yield event.plain_result(f"{e.notify_prefix} {e.message}")
         except Exception as e:
             logger.exception("解析异常")
-            self._link_dedup.forget(scope, cache_key)
+            self._forget_dedup(scope, cache_key, delivered)
             if self._send_errors:
                 # 不回显异常原文：里面常带完整 URL 与容器内本地路径
                 yield event.plain_result(
@@ -794,6 +807,39 @@ class DeniaSharePlugin(Star):
 
     #: 窗口内后来者收到的提示。只发一次（见 core/link_dedup 的说明）。
     _DEDUP_HINT = "这个链接刚刚已经解析过了哦"
+
+    @staticmethod
+    def _dedup_applies(event: AstrMessageEvent) -> bool:
+        """这次要不要走去重。
+
+        **只在群聊里去重**：需求原文是「同一个群多个链接时触发」。私聊里
+        一个人连发两次同一链接，第二次多半是「没看到回复再发一遍」，这时候
+        拦下来只会让人以为插件坏了 —— 私聊本来就不存在「刷屏」问题。
+
+        判断不出是不是私聊时（``is_private_chat()`` 本身抛异常）按**不去重**
+        处理：宁可多发一次，也不要在正常路径上误伤。
+        """
+        try:
+            return not bool(event.is_private_chat())
+        except Exception:
+            logger.debug("[denia_share] 私聊判定失败，本次不去重", exc_info=True)
+            return False
+
+    def _forget_dedup(
+        self, scope: str | None, cache_key: str | None, delivered: bool
+    ) -> None:
+        """撤销去重占位。
+
+        三个条件都要满足才撤：登记过（scope / cache_key 都有值）、还没交付
+        出去、确实走了去重分支。缺一个都会出问题：
+
+        - 没登记过就撤：``None`` 拼出来的键不存在，无害，但会掩盖「忘记登记」
+        - **已经交付还撤**：下一个人会重新解析并**再发一张卡片** —— 那正是这个
+          功能要消灭的事。``_record_history`` 这类交付后的收尾步骤失败时最容易
+          踩到。
+        """
+        if not delivered and scope and cache_key:
+            self._link_dedup.forget(scope, cache_key)
 
     @staticmethod
     def _event_scope(event: AstrMessageEvent) -> str:
