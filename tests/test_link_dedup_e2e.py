@@ -58,6 +58,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 import sys
 import time
 import types
@@ -369,6 +370,17 @@ class _FakeEvent:
 class _FakeParser:
     """平台解析器替身。记录 search_url / parse 的调用，用来断言「有没有真的去解析」。"""
 
+    #: 给 ``search_url`` 造一个真 Match 用的 pattern，**必须像个平台 pattern**：
+    #: 从整条消息里挑出**链接**那一段（而不是第一个非空白 token），边界还要在
+    #: 中文标点处停住 —— 真实解析器的 pattern 都是 ASCII 字符类，例如
+    #: ``bilibili\.com/video/BV[0-9A-Za-z]{10}``。
+    #:
+    #: 这不是随手写的：``_process_url`` 现在按 ``searched.group(0)`` 算缓存/去重键，
+    #: 替身的边界直接决定被测行为。写成 ``\S+`` 的话「【】看看这个 <url>」
+    #: 匹配到的是「【】看看这个」，键就错了 —— 而且错得很安静（异常会被
+    #: ``except Exception`` 吞成「什么都没发生」）。
+    _ANY_TOKEN = re.compile(r"https?://[^\s\"'<>，。！？、）】]+|BV[0-9A-Za-z]{10}")
+
     def __init__(self, accept: str | None = None, errors: list[BaseException] | None = None):
         # accept=None 表示什么都收；给了就只收包含该子串的链接，其余抛
         # SilentException（真解析器就是这么表示「这条链接不归我管」的）
@@ -377,13 +389,20 @@ class _FakeParser:
         self.search_calls: list[str] = []
         self.parse_calls: list[str] = []
 
-    def search_url(self, url: str) -> tuple[str, bool]:
+    def search_url(self, url: str) -> tuple[str, Any]:
+        """返回 ``(keyword, match)``。
+
+        ⚠️ 第二个元素必须是**真正的正则 Match**，不能拿 bool 顶替 ——
+        ``_process_url`` 现在按 ``searched.group(0)``（解析器实际认领的那一段）
+        算缓存/去重键，返回 bool 会让每个用例都在 try 里抛 AttributeError、
+        被 ``except Exception`` 吞成一条「处理出错」，表现为「什么都没发生」。
+        """
         self.search_calls.append(url)
         if self._accept is not None and self._accept not in url:
             raise SilentException()
-        return (url, False)
+        return (url, self._ANY_TOKEN.search(url))
 
-    async def parse(self, keyword: str, _searched: bool = False) -> ParseResult:
+    async def parse(self, keyword: str, searched: Any = None) -> ParseResult:
         self.parse_calls.append(keyword)
         if self._errors:
             raise self._errors.pop(0)
@@ -508,20 +527,35 @@ class TestSecondSenderGetsHint(unittest.TestCase):
             )
             self.assertEqual(_texts(items), [HINT], f"实际产出 {items}")
 
-    def test_parser_is_never_touched_at_all(self):
-        """search_url 一次都不该被调到。
+    def test_second_sender_never_parses_again(self):
+        """第 2 个人**绝对不能**再次 ``parse``（= 不再请求平台接口）。
 
-        这是「去重排在缓存查询之前」的行为证据：只要它排在后面，第二个人就会
-        命中结果缓存、照旧拿到一张卡片（AST 断言验不了这个，只能跑）。
+        ``search_url`` 仍会被调一次，而且**必须**调：去重/缓存的键取自
+        ``searched.group(0)``（解析器实际认领的那一段），不先问它就不知道
+        这是哪条链接。它只是一次本地正则匹配，不产生任何网络请求。
+
+        真正的行为证据是 ``parse_calls`` 不增长 —— 加上上面那条
+        「第二个人只拿到提示、没拿到卡片」，就构成「去重排在缓存查询之前」
+        的运行时证明（AST 只能验文本顺序）。
         """
         with _cfg():
             plugin = _make_plugin()
             parser = _FakeParser()
             _send(plugin, _FakeEvent(GROUP_A, URL), parser)
-            before = (len(parser.search_calls), len(parser.parse_calls))
+            parses_before = len(parser.parse_calls)
+            searches_before = len(parser.search_calls)
+
             _send(plugin, _FakeEvent(GROUP_A, URL, sender="u2"), parser)
-            after = (len(parser.search_calls), len(parser.parse_calls))
-            self.assertEqual(after, before, "被去重的那一次连 search_url 都不该调")
+
+            self.assertEqual(
+                len(parser.parse_calls), parses_before,
+                "第 2 个人又触发了解析（= 又请求了一次平台接口）",
+            )
+            # search_url 会多一次（取键要用），但它不发网络请求
+            self.assertEqual(
+                len(parser.search_calls), searches_before + 1,
+                "search_url 应恰好多调一次：键取自它匹配到的那一段",
+            )
 
     def test_hint_is_emitted_even_when_error_messages_are_off(self):
         """去重提示与 SEND_ERROR_MESSAGES 无关：它是功能的一部分，不是报错。"""

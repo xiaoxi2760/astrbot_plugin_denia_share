@@ -367,12 +367,33 @@ class TestMainWiring(unittest.TestCase):
         )
 
     def test_cleared_alongside_every_cache_clear(self):
-        """4 处清结果缓存的地方（后台清理 / 切目录 / 热更新 / 手动清空）
-        都要连带清去重窗口。"""
-        self.assertEqual(
-            self.src.count("self._link_dedup.clear()"), 4,
-            "清缓存时没连带清去重窗口：窗口里锁着后来者会被无故静默",
-        )
+        """**每一处**清结果缓存的地方都要连带清去重窗口。
+
+        窗口里锁着「只解析第一个」，而它是基于上一次解析建立的 —— 缓存都清空了
+        还锁着，后来者会被无故静默掉。
+
+        这里必须**跨文件**查：原先只数 main.py 里的 4 处，于是 core/webui.py 的
+        两处（清缓存文件 / 按 TTL 清理）看不见，而那两处同样违反这条不变量。
+        """
+        import ast
+
+        expected = {
+            "main.py": 4,     # 后台清理循环 / 切缓存目录 / 热更新 / 手动清空
+            "core/webui.py": 2,  # WebUI「清空缓存文件」/「按 TTL 清理」
+        }
+        for rel, want in expected.items():
+            with self.subTest(file=rel):
+                src = (PLUGIN_DIR / rel).read_text(encoding="utf-8")
+                ast.parse(src)  # 顺带确认文件没坏
+                self.assertEqual(
+                    src.count("._link_dedup.clear()"), want,
+                    f"{rel} 里清结果缓存的 {want} 处应当都清去重窗口",
+                )
+                # 两者的清理次数应当一一对应，少一处就是漏了
+                self.assertEqual(
+                    src.count("._result_cache.clear()"), want,
+                    f"{rel} 里清结果缓存的处数变了，请同步核对去重窗口的清理",
+                )
 
     def test_hint_text_is_a_real_sentence(self):
         """提示语是用户唯一能看到的东西，不能是占位符或漏字。"""

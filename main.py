@@ -750,17 +750,24 @@ class DeniaSharePlugin(Star):
         delivered = False
         try:
             raw_message = event.message_str.strip()
-            # **键只能用链接本身，不能用整条消息。**
-            # 三个调用方里只有两个（自定义解析器、JSON 卡片）传的是裸链接；
-            # 11 个内置平台处理器走 _dispatch 传的是**整条事件**，message_str
-            # 形如「【】看看这个 https://…」。拿整条消息当键的话，
-            # 「【】看看这个 <url>」和「<url>」是两个不同的键 ——
-            # 既不去重、也不共享结果缓存，同一个链接会被完整解析两次、
-            # 发出两张一模一样的卡片，正好是这个功能要消灭的事。
-            url_match = URL_PATTERN.search(raw_message)
-            cache_key = self.result_cache_key(
-                url_match.group(0) if url_match else raw_message
-            )
+            # **键必须来自「解析器实际匹配到的那一段」，不能自己抽 URL。**
+            #
+            # 踩过两次坑：
+            #   1. 键用整条消息 → 11 个内置平台处理器传的是整条事件，
+            #      「【】看看这个 <url>」和「<url>」成了两个键，不去重也不共用缓存。
+            #   2. 改用 `URL_PATTERN.search()` 抽「第一个 URL」→ 那是**独立**的抽取，
+            #      和解析器自己的 pattern 可以是**不同的链接**：
+            #        · 消息里两个不同平台的链接 → 第二个平台的处理器拿到第一个链接的键，
+            #          抖音解析器一次没被调用，却发出一张 B站卡片；
+            #        · 前导一个非本平台链接 → 两个不同视频共用一个键，用户收到的是
+            #          **第一个视频的卡片**；
+            #        · `URL_PATTERN` 的 `[^\s'\"<>]+` 不排除中文与标点，
+            #          「…/xxx，挺有意思」会把 8 个中文字一起吞进键。
+            #
+            # 所以顺序必须是：**先让解析器认领，再按它认领的那段算键**。
+            keyword, searched = parser.search_url(raw_message)
+            matched = searched.group(0) or raw_message
+            cache_key = self.result_cache_key(matched)
 
             # ---- 同群重复链接去重 ----
             # 必须排在缓存查询**之前**：命中结果缓存时照旧要发卡片，而去重要的
@@ -774,17 +781,12 @@ class DeniaSharePlugin(Star):
                 if decision == SILENT:
                     logger.info(
                         f"[denia_share] 同会话重复链接已静默: scope={scope} "
-                        f"url={raw_message[:60]}"
+                        f"url={matched[:60]}"
                     )
                     return
 
             result = self._get_cached_result(cache_key)
             if result is None:
-                # search_url 仍收到**整条消息**：内置 pattern 里既有 `^BV…$` 这种
-                # 锚定形式也有 `bilibili.com/video/BV…` 这种内嵌形式，传整条消息
-                # 才能让「【】看看这个 https://…」这类带前缀的转发也匹配上。
-                # 只有**键**改用链接本身，匹配行为保持原样。
-                keyword, searched = parser.search_url(raw_message)
                 result = await parser.parse(keyword, searched)
                 self._remember_result(cache_key, result)
 
@@ -1144,7 +1146,7 @@ class DeniaSharePlugin(Star):
         # B站 Cookie **只在配置项真的变了的时候**才动。
         #
         # 为什么不能无条件重新应用：这个方法是「保存配置 / 恢复默认 / 保存外观」
-        # 三个接口都会走的（webui.py:293/316/352）。无条件应用会有两种误伤 ——
+        # 三个接口都会走的（webui.py:433/463/497）。无条件应用会有两种误伤 ——
         #   · 原先「登录态优先」：改 BILI_CK 不生效，接口却回 changed + runtime_ok
         #   · 改成「配置项优先」后：配置项非空时，改任何别的配置（代理/外观）都会
         #     把配置项里的 cookie 再应用一次，覆盖掉期间的扫码登录结果

@@ -417,6 +417,11 @@ class BilibiliParser(BaseParser):
         from astrbot.api import logger
 
         from ..bili_fallback import fetch_streams
+        # get_config 在本文件里一律**方法内 import**（顶层不引，见 parse_video /
+        # extract_download_urls）。这里漏掉过一次：本函数自己的
+        # ``except Exception`` 会把随之而来的 NameError 吞成 ``return None``，
+        # 外部完全看不出异常 —— 整条「主力报错 → 自建接管」路径静默失效。
+        from ..config import get_config
 
         try:
             max_qn = int(getattr(target_quality, "value", 0) or 0)
