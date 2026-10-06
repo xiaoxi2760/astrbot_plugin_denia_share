@@ -574,6 +574,24 @@ CONFIG_META: tuple[dict[str, Any], ...] = (
         ),
     },
     {
+        "key": "DUPLICATE_LINK_WINDOW_SECONDS",
+        "group": "维护",
+        "subgroup": "缓存清理",
+        "label": "同群重复链接去重",
+        "type": "int",
+        "default": 60,
+        "min": 0,
+        "max": 3600,
+        "unit": "秒",
+        "hint": (
+            "同一个会话里，第一个人发某链接后的此时长内，其他人再发同一条链接就**不再解析、"
+            "也不再发卡片**，只回一句「这个链接刚刚已经解析过了哦」，且这句提示也只发一次。"
+            "设为 0 关闭（每个人都能收到卡片）。"
+            "与「重复解析间隔」的区别：那个是复用上次结果**照发卡片**，这个是**不响应**——"
+            "后者是为了止住群里一条热链被连着转发时刷屏"
+        ),
+    },
+    {
         "key": "CACHE_CLEANUP_INTERVAL_MINUTES",
         "group": "维护",
         "subgroup": "缓存清理",
@@ -1042,6 +1060,18 @@ class ParserConfig:
     @property
     def CACHE_CLEANUP_INTERVAL_MINUTES(self) -> int:
         return int(self._cfg_get("CACHE_CLEANUP_INTERVAL_MINUTES", 60))
+
+    @property
+    def DUPLICATE_LINK_WINDOW_SECONDS(self) -> int:
+        """同一个会话内，同一链接的「去重静默窗口」（秒）。0 = 关闭。
+
+        与 :attr:`RESULT_CACHE_TTL_SECONDS` 是两回事，别混：
+
+        - 重复解析间隔：命中缓存后**照旧发卡片**，省的是「再请求一次平台接口」
+        - 本项：窗口内的后来者**不解析也不发卡片**，只回一句提示（且只回一次），
+          治的是「群里一条热链被连着转发，机器人连发好几张卡」
+        """
+        return int(self._cfg_get("DUPLICATE_LINK_WINDOW_SECONDS", 60))
 
     @property
     def RESULT_CACHE_TTL_SECONDS(self) -> int:

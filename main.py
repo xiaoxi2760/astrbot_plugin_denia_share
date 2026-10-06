@@ -39,6 +39,7 @@ from .core.media_utils import (
 )
 from .core.config import init_config, get_config, verify_schema_alignment
 from .core.download import StreamDownloader
+from .core.link_dedup import HINT, PROCEED, SILENT, LinkDedup
 from .core.data import (
     ParseResult, ImageContent, VideoContent, AudioContent, Author, platform_of,
 )
@@ -280,6 +281,8 @@ class DeniaSharePlugin(Star):
         # 存 (写入时刻, 结果) —— 时刻是给「重复解析间隔」用的，见 _get_cached_result
         self._result_cache: dict[str, tuple[float, ParseResult]] = {}
         self._render_cache: dict[str, Path] = {}
+        # 同群重复链接去重：只解析第一个，后来者不解析也不收卡片（见 core/link_dedup）
+        self._link_dedup = LinkDedup(lambda: self._dedup_window())
         self._cache_cleanup_task: asyncio.Task | None = None
 
         self._renderer = ShareCardRenderer(self.cache_dir, **pconfig.renderer_options())
@@ -477,6 +480,9 @@ class DeniaSharePlugin(Star):
                     await cleanup_cache_dir(self.cache_dir, ttl_hours=ttl)
                     self._result_cache.clear()
                     self._render_cache.clear()
+                    # 去重窗口也一起清：窗口里的「只解析第一个」是基于上一次解析
+                    # 建立的，缓存都清空了还锁着，后来者会被无故静默掉
+                    self._link_dedup.clear()
             except asyncio.CancelledError:
                 raise
             except Exception:
@@ -733,6 +739,21 @@ class DeniaSharePlugin(Star):
         url = event.message_str.strip()
         try:
             cache_key = self.result_cache_key(url)
+
+            # ---- 同群重复链接去重 ----
+            # 必须排在缓存查询**之前**：命中结果缓存时照旧要发卡片，而去重要的
+            # 是「不再响应」。先查缓存的话第二个人的卡片就照发出来了，等于没去重。
+            scope = self._event_scope(event)
+            decision = self._link_dedup.check(scope, cache_key)
+            if decision == HINT:
+                yield event.plain_result(self._DEDUP_HINT)
+                return
+            if decision == SILENT:
+                logger.info(
+                    f"[denia_share] 同会话重复链接已静默: scope={scope} url={url[:60]}"
+                )
+                return
+
             result = self._get_cached_result(cache_key)
             if result is None:
                 keyword, searched = parser.search_url(url)
@@ -748,20 +769,60 @@ class DeniaSharePlugin(Star):
         except SilentException as e:
             # 「这条链接不归我管」是每条普通消息都会走到的正常流量，只在调试级留痕
             logger.debug(f"[denia_share] 静默跳过: {e.message}")
+            # 占位是在开始处理时记的（防并发重复劳动），但「不归我管」等于没真正
+            # 处理这条链接 —— 必须撤销，否则窗口内其他人会被静默掉，白丢一次机会。
+            self._link_dedup.forget(scope, cache_key)
         except ParseException as e:
             # 解析失败必须无条件留痕：Cookie 全失效、接口改版、被风控都走这条，
             # 而 SEND_ERROR_MESSAGES 默认是关的 —— 只由它决定「发不发群」，
             # 不能连日志一起决定，否则群里不回复、日志也一片空白，用户和运维同时失明。
             logger.warning(f"[denia_share] 解析未完成: {e.message}")
+            # 同样要撤销：第一次解析挂了就该让下一个人重试，而不是废掉整个窗口
+            self._link_dedup.forget(scope, cache_key)
             if e.notify_prefix and self._send_errors:
                 yield event.plain_result(f"{e.notify_prefix} {e.message}")
         except Exception as e:
             logger.exception("解析异常")
+            self._link_dedup.forget(scope, cache_key)
             if self._send_errors:
                 # 不回显异常原文：里面常带完整 URL 与容器内本地路径
                 yield event.plain_result(
                     f"❌ 处理出错（{type(e).__name__}），详情见 AstrBot 日志"
                 )
+
+    # ---- 同群重复链接去重的辅助 ----
+
+    #: 窗口内后来者收到的提示。只发一次（见 core/link_dedup 的说明）。
+    _DEDUP_HINT = "这个链接刚刚已经解析过了哦"
+
+    @staticmethod
+    def _event_scope(event: AstrMessageEvent) -> str:
+        """取会话标识（``unified_msg_origin`` = 平台:类型:会话ID）。
+
+        取不到时退回发送者 id：宁可把不同群当成同一个（少了去重机会），
+        也不要反过来把不同会话混成一条 —— 混成一条会误伤正常解析。
+        """
+        origin = getattr(event, "unified_msg_origin", "") or ""
+        if origin:
+            return str(origin)
+        try:
+            return f"user:{event.get_sender_id()}"
+        except Exception:
+            return "unknown"
+
+    def _dedup_window(self) -> int:
+        """读去重窗口秒数；脏值回落到默认并留一条日志。
+
+        不能让 ``int()`` 裸抛：异常会一路冒到 _process_url 的 except Exception，
+        变成「处理出错」而这条链接永远解析不了。
+        """
+        try:
+            return int(get_config().DUPLICATE_LINK_WINDOW_SECONDS)
+        except (TypeError, ValueError):
+            logger.warning(
+                "[denia_share] 同群重复链接去重窗口配置不是整数，按 60 秒处理"
+            )
+            return 60
 
     async def _deliver(
         self, event: AstrMessageEvent, result: ParseResult, cache_key: str
@@ -999,6 +1060,7 @@ class DeniaSharePlugin(Star):
             pconfig.cache_dir = self.cache_dir
             self._result_cache.clear()
             self._render_cache.clear()
+            self._link_dedup.clear()
             logger.info(f"[denia_share] 媒体缓存目录已切换到 {self.cache_dir}")
         summary["cache_dir"] = str(self.cache_dir)
         summary["cache_dir_source"] = self.cache_dir_source
@@ -1045,6 +1107,9 @@ class DeniaSharePlugin(Star):
         # 再发同一条链接，拿到的还是旧结果 —— 配置改了却看不出效果，
         # 正是最容易被当成「插件没生效」的一类问题。
         self._result_cache.clear()
+        # 去重窗口同理：窗口长度本身就是配置项之一，热更新后必须立即按新值判定，
+        # 否则用户把窗口从 60 改成 0 以为关掉了，实际还要等旧窗口过期
+        self._link_dedup.clear()
 
         # 截图后端的代理 / 证书校验同样是构造时读死的，热更新要一起重建
         self._build_screenshot_service()
@@ -1869,6 +1934,7 @@ class DeniaSharePlugin(Star):
             return
         self._result_cache.clear()
         self._render_cache.clear()
+        self._link_dedup.clear()
         yield event.plain_result(f"🧹 已清空 {cleaned} 个缓存文件")
 
     async def terminate(self):
