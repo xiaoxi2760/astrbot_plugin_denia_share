@@ -278,11 +278,92 @@ class TestMainWiring(unittest.TestCase):
             "等于没去重",
         )
 
-    def test_forget_called_on_every_failure_path(self):
+    def test_dedup_is_gated_to_group_chats(self):
+        """需求原文是「只在同一个群」，私聊必须不去重。
+
+        私聊里一个人连发两次同一链接，多半是「没看到回复再发一遍」，
+        这时候拦下来只会让人以为插件坏了 —— 私聊本来也不存在刷屏问题。
+        """
+        self.assertIn("_dedup_applies(event)", self.body)
+        self.assertLess(
+            self.body.find("_dedup_applies(event)"),
+            self.body.find("_link_dedup.check"),
+            "群聊门禁要在去重判定之前生效",
+        )
+
+    def test_forget_called_in_every_failure_path(self):
         """三个 except 分支都要撤销占位，否则失败一次废掉整个窗口。"""
+        import ast
+
+        tree = ast.parse(self.src)
+        fn = next(
+            n for n in ast.walk(tree)
+            if isinstance(n, ast.AsyncFunctionDef) and n.name == "_process_url"
+        )
+        handlers = [n for n in ast.walk(fn) if isinstance(n, ast.ExceptHandler)]
+        self.assertEqual(len(handlers), 3, "_process_url 应当正好三个 except 分支")
+        missing = []
+        for h in handlers:
+            body_src = ast.unparse(ast.Module(body=h.body, type_ignores=[]))
+            if "_forget_dedup(" not in body_src:
+                name = ast.unparse(h.type) if h.type else "?"
+                missing.append(name)
         self.assertEqual(
-            self.body.count("self._link_dedup.forget("), 3,
-            "SilentException / ParseException / Exception 三个分支都要 forget",
+            missing, [],
+            f"这些 except 分支没有撤销去重占位：{missing}。"
+            "（只统计出现次数不管位置的话，把三处挪进同一个分支也能骗过测试）",
+        )
+
+    def test_forget_is_guarded_by_delivered_flag(self):
+        """**已经交付出去就别再撤销占位**。
+
+        ``_record_history`` 这类交付之后的收尾步骤失败时撤销占位，会让下一个
+        发同链接的人重新解析并再发一张卡片 —— 那正是这个功能要消灭的事。
+        """
+        self.assertIn("def _forget_dedup(", self.src)
+        self.assertIn("not delivered", self.src)
+        self.assertIn("delivered = False", self.body, "delivered 没有预置")
+        self.assertIn("delivered = True", self.body, "交付后没有置位")
+
+    def test_scope_and_cache_key_preassigned_before_try(self):
+        """``scope`` / ``cache_key`` 必须在 try **之前**预置。
+
+        它们在 try 里逐个赋值，而 except 分支要用它们撤销占位。若 try 第一行
+        ``result_cache_key(url)`` 就抛了（url 含孤立代理字符时 ``url.encode()``
+        会抛 UnicodeEncodeError），except 引用未赋值的 ``scope`` 会再抛
+        UnboundLocalError —— 真实错误被掩盖，forget 不执行、报错提示也发不出去。
+        """
+        import ast
+
+        tree = ast.parse(self.src)
+        fn = next(
+            n for n in ast.walk(tree)
+            if isinstance(n, ast.AsyncFunctionDef) and n.name == "_process_url"
+        )
+        try_pos = next(
+            i for i, n in enumerate(fn.body) if isinstance(n, ast.Try)
+        )
+        pre = ast.unparse(ast.Module(body=fn.body[:try_pos], type_ignores=[]))
+        self.assertIn("cache_key: str | None = None", pre)
+        self.assertIn("scope: str | None = None", pre)
+
+    def test_url_read_inside_try(self):
+        """``event.message_str.strip()`` 原来在 try 之外，非 str 时会静默逃逸、
+        连日志都没有。"""
+        import ast
+
+        tree = ast.parse(self.src)
+        fn = next(
+            n for n in ast.walk(tree)
+            if isinstance(n, ast.AsyncFunctionDef) and n.name == "_process_url"
+        )
+        try_pos = next(
+            i for i, n in enumerate(fn.body) if isinstance(n, ast.Try)
+        )
+        pre = ast.unparse(ast.Module(body=fn.body[:try_pos], type_ignores=[]))
+        self.assertNotIn(
+            "message_str", pre,
+            "取 url 还在 try 之外：message_str 不是 str 时会静默逃逸且无日志",
         )
 
     def test_cleared_alongside_every_cache_clear(self):
