@@ -353,6 +353,129 @@ class TestConfigWiring(unittest.TestCase):
         self.fail("schema 里没有 RESULT_CACHE_TTL_SECONDS")
 
 
+class TestConfigVisibilityContract(unittest.TestCase):
+    """配置项**只**在 WebUI 里可改；原生面板一个字段都不展示，只留指路。
+
+    为什么钉死：``_conf_schema.json`` 是 AstrBot 原生配置面板的数据源，
+    ``pages/denia/views/config.js`` 用的是 ``CONFIG_META``（经
+    ``config_meta_payload()`` 下发）。两条路各有一份数据，谁不同步就会出现
+    「WebUI 里没有、原生面板里有」这种用户完全找不到的字段。
+
+    原生面板侧靠 ``invisible: true`` 隐藏字段；全隐藏之后**只剩分组标题和分组
+    描述**还露在外面，不在那里写指路提示的话，用户看到的就是九个空分组。
+    """
+
+    WEBUI_POINTER = "请到插件 WebUI"
+
+    def _schema(self) -> dict:
+        import json
+
+        return json.loads(
+            (PLUGIN_DIR / "_conf_schema.json").read_text(encoding="utf-8")
+        )
+
+    def test_every_item_is_invisible_in_native_panel(self):
+        schema = self._schema()
+        visible = [
+            f"{group}/{key}"
+            for group, body in schema.items()
+            if isinstance(body, dict) and "items" in body
+            for key, item in body["items"].items()
+            if not item.get("invisible")
+        ]
+        self.assertEqual(
+            visible, [],
+            "这些项会出现在 AstrBot 原生配置面板里；约定是全部移到 WebUI："
+            + ", ".join(visible),
+        )
+
+    def test_schema_covers_every_meta_key(self):
+        """schema 与 CONFIG_META 的键集合必须完全一致，两条路不能各漏各的。"""
+        schema = self._schema()
+        schema_keys = {
+            key
+            for body in schema.values()
+            if isinstance(body, dict) and "items" in body
+            for key in body["items"]
+        }
+        meta_keys = {m["key"] for m in CONFIG_META}
+        self.assertEqual(
+            meta_keys - schema_keys, set(),
+            "这些项 WebUI 有、原生面板的 schema 没有（两边会不一致）",
+        )
+        self.assertEqual(
+            schema_keys - meta_keys, set(),
+            "这些项 schema 有、CONFIG_META 没有（WebUI 渲染不出来）",
+        )
+
+    def test_every_group_points_to_webui(self):
+        """原生面板只剩分组标题，所以指路提示必须写在**每个**分组描述里。"""
+        schema = self._schema()
+        groups = {
+            group
+            for group, body in schema.items()
+            if isinstance(body, dict) and "items" in body
+        }
+        missing = [
+            g for g in sorted(groups)
+            if self.WEBUI_POINTER not in str(schema[g].get("description") or "")
+        ]
+        self.assertEqual(
+            missing, [],
+            f"这些分组的描述里没有「{self.WEBUI_POINTER}」指路提示：{missing}",
+        )
+
+    def test_pointer_names_the_same_group_as_webui(self):
+        """提示里写的组名要和 WebUI 导航里的组名一致，否则用户点了找不到。
+
+        WebUI 的分组标题直接取 ``CONFIG_META`` 的 ``group`` 字段
+        （见 ``pages/denia/views/config.js``），所以这里也从 CONFIG_META 取，
+        不手写 —— 手写就会和 WebUI 对不上。
+        """
+        schema = self._schema()
+        webui_groups = []
+        for meta in CONFIG_META:
+            if meta["group"] not in webui_groups:
+                webui_groups.append(meta["group"])
+        for group in webui_groups:
+            with self.subTest(group=group):
+                self.assertIn(
+                    f"「{group}」", str(schema[group].get("description") or ""),
+                    f"「{group}」的描述里没有点出同名分组",
+                )
+
+    def test_webui_payload_exposes_every_item(self):
+        """WebUI 拿到的 payload 必须包含全部配置项，含新增的重复解析间隔。"""
+        from astrbot_plugin_denia_share.core.config import config_meta_payload
+
+        payload = config_meta_payload()
+        items = payload.get("items")
+        keys = (
+            {i.get("key") for i in items} if isinstance(items, list)
+            else set(items or {})
+        )
+        self.assertIn("RESULT_CACHE_TTL_SECONDS", keys)
+        self.assertEqual(
+            keys, {m["key"] for m in CONFIG_META},
+            "WebUI payload 与 CONFIG_META 的键集合不一致",
+        )
+
+    def test_new_item_is_friendly_in_webui(self):
+        """新增项在 WebUI 里要有中文标签和分组，不能只露个裸 key。"""
+        from astrbot_plugin_denia_share.core.config import config_meta_payload
+
+        items = {
+            i["key"]: i
+            for i in config_meta_payload()["items"]
+            if isinstance(i, dict) and "key" in i
+        }
+        item = items["RESULT_CACHE_TTL_SECONDS"]
+        self.assertEqual(item.get("label"), "重复解析间隔")
+        self.assertEqual(item.get("group"), "维护")
+        self.assertEqual(item.get("unit"), "秒")
+        self.assertTrue(item.get("hint"), "缺 hint，用户看不懂这个开关")
+
+
 class TestMediaSendGuardWiring(unittest.TestCase):
     """``_try_send_media`` 里的 path.exists() 兜底（AST 层面）。
 

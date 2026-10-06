@@ -12,6 +12,9 @@ desc: |
   - 管理页面：总览、手动解析、缓存管理、界面与卡片外观、全部配置项
   - Docker 分容器部署下视频发不出去时，可选共享缓存目录或媒体中转
 
+  ⚠️ **所有配置项都在插件 WebUI 的「配置」页里改**，AstrBot 的原生配置面板
+  不再展示任何字段（只留分组标题和一行指路）。启用后打开管理页面即可。
+
   详细说明见仓库 [README](https://github.com/xiaoxi2760/astrbot_plugin_denia_share#readme)。
 
   MIT 许可；解析框架与卡片渲染等部分基于 astrbot_plugin_rika_share（MIT）与
