@@ -749,8 +749,18 @@ class DeniaSharePlugin(Star):
         # 那正好是这个功能要消灭的事。
         delivered = False
         try:
-            url = event.message_str.strip()
-            cache_key = self.result_cache_key(url)
+            raw_message = event.message_str.strip()
+            # **键只能用链接本身，不能用整条消息。**
+            # 三个调用方里只有两个（自定义解析器、JSON 卡片）传的是裸链接；
+            # 11 个内置平台处理器走 _dispatch 传的是**整条事件**，message_str
+            # 形如「【】看看这个 https://…」。拿整条消息当键的话，
+            # 「【】看看这个 <url>」和「<url>」是两个不同的键 ——
+            # 既不去重、也不共享结果缓存，同一个链接会被完整解析两次、
+            # 发出两张一模一样的卡片，正好是这个功能要消灭的事。
+            url_match = URL_PATTERN.search(raw_message)
+            cache_key = self.result_cache_key(
+                url_match.group(0) if url_match else raw_message
+            )
 
             # ---- 同群重复链接去重 ----
             # 必须排在缓存查询**之前**：命中结果缓存时照旧要发卡片，而去重要的
@@ -764,13 +774,17 @@ class DeniaSharePlugin(Star):
                 if decision == SILENT:
                     logger.info(
                         f"[denia_share] 同会话重复链接已静默: scope={scope} "
-                        f"url={url[:60]}"
+                        f"url={raw_message[:60]}"
                     )
                     return
 
             result = self._get_cached_result(cache_key)
             if result is None:
-                keyword, searched = parser.search_url(url)
+                # search_url 仍收到**整条消息**：内置 pattern 里既有 `^BV…$` 这种
+                # 锚定形式也有 `bilibili.com/video/BV…` 这种内嵌形式，传整条消息
+                # 才能让「【】看看这个 https://…」这类带前缀的转发也匹配上。
+                # 只有**键**改用链接本身，匹配行为保持原样。
+                keyword, searched = parser.search_url(raw_message)
                 result = await parser.parse(keyword, searched)
                 self._remember_result(cache_key, result)
 
@@ -792,12 +806,15 @@ class DeniaSharePlugin(Star):
             logger.warning(f"[denia_share] 解析未完成: {e.message}")
             # 同样要撤销：第一次解析挂了就该让下一个人重试，而不是废掉整个窗口
             self._forget_dedup(scope, cache_key, delivered)
-            if e.notify_prefix and self._send_errors:
+            # 已经交付出去了就别再报「处理出错」：卡片已经发到群里了，
+            # 收尾步骤（记解析记录之类）失败不影响用户拿到了内容，
+            # 再补一句报错只会让人以为这条链接没解析成功。
+            if not delivered and e.notify_prefix and self._send_errors:
                 yield event.plain_result(f"{e.notify_prefix} {e.message}")
         except Exception as e:
             logger.exception("解析异常")
             self._forget_dedup(scope, cache_key, delivered)
-            if self._send_errors:
+            if not delivered and self._send_errors:
                 # 不回显异常原文：里面常带完整 URL 与容器内本地路径
                 yield event.plain_result(
                     f"❌ 处理出错（{type(e).__name__}），详情见 AstrBot 日志"
