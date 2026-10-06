@@ -581,8 +581,11 @@ class WebUIApi:
         # http(s) 开头。聊天侧 _process_url 就是把整条 message_str 传给
         # parser.search_url（各解析器自己的 pattern 负责从文本里摘链接），所以
         # 「4.33 a@a.AG ... https://v.douyin.com/xxx/ 复制此链接…」这类口令在群里
-        # 能解析，在这里也必须能。如果自己另起一套「先抽 URL 再匹配」，缓存键还会
-        # 和聊天链路（整段文本的哈希）分叉，同一条分享在两条链路各存一份。
+        # 能解析，在这里也必须能。
+        #
+        # **缓存键要用 `searched.group(0)`（解析器实际匹配到的那一段），不是整段文本。**
+        # 聊天侧现在就是这么算的（见 main._process_url），两边算法必须一致 ——
+        # 否则同一条分享在网页里解析一次、群里再解析一次，各存一份缓存。
         url = str(body.get("url") or "").strip()
         if not url:
             return _error("请填写要解析的链接或分享口令")
@@ -610,10 +613,10 @@ class WebUIApi:
             return _error(f"解析出错：{str(exc)[:160]}", 500)
 
         elapsed_ms = int((time.perf_counter() - started) * 1000)
-        # 与聊天链路的 _process_url 用同一个键，否则同一链接会各缓存一份；
+        # 与聊天链路用**同一个键算法**：解析器匹配到的那一段，而不是整段文本。
         # 也必须走 _remember_result —— 直接写字典会绕过 MAX_RESULT_CACHE_ENTRIES
         # 上限，只用网页解析的部署里这个缓存会无界增长。
-        cache_key = plugin.result_cache_key(url)
+        cache_key = plugin.result_cache_key(searched.group(0) or url)
         plugin._remember_result(cache_key, result)
 
         payload = await self._preview_payload(
@@ -1097,6 +1100,10 @@ class WebUIApi:
                 return _error(f"清空缓存文件失败：{str(exc)[:160]}", 500)
             self.plugin._result_cache.clear()
             self.plugin._render_cache.clear()
+            # 去重窗口也要清：窗口里的「只解析第一个」是基于上一次解析建立的，
+            # 缓存都清空了还锁着，后来者会被无故静默掉。main.py 的四处清理
+            # 同样都清，缺这一处就等于破坏了那条不变量。
+            self.plugin._link_dedup.clear()
             # 卡片文件被清空，缓存里的 base64 全部指向不存在的文件
             clear_image_cache()
 
@@ -1124,6 +1131,7 @@ class WebUIApi:
             # 与 clear_cache(scope=files) 保持一致，别只清一半。
             self.plugin._result_cache.clear()
             self.plugin._render_cache.clear()
+            self.plugin._link_dedup.clear()
             clear_image_cache()
         files, size = await asyncio.to_thread(_dir_stats, self.plugin.cache_dir)
         return _json_response(
