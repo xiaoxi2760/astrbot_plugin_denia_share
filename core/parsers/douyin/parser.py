@@ -48,7 +48,16 @@ class DouyinParser(BaseParser):
     @handle("jingxuan.douyin", r"jingxuan\.douyin\.com/m/(?P<ty>slides|video|note)/(?P<vid>\d+)")
     async def _parse_douyin(self, searched: re.Match[str]):
         ty, vid = searched.group("ty"), searched.group("vid")
+        result = await self._fetch_douyin(ty, vid)
+        # 补规范链接：下面三条路径返回的结果都可能没有 url，而卡片页脚左侧画的就是它。
+        # 这里用 handler 抓到的作品号拼一条 —— 用户常发的是 v.douyin.com 短链或带口令的
+        # 分享文案，两者显示出来只是一串无意义短码；展开成 /video/<作品号> 才是用户
+        # 认得的那个「号码」。只在为空时补，解析器自己给出的更优先。
+        if not result.url:
+            result.url = f"https://www.douyin.com/{ty}/{vid}"
+        return result
 
+    async def _fetch_douyin(self, ty: str, vid: str):
         # 重置本条作品的请求预算。**必须在这里、只重置一次**：预算要跨下面所有
         # URL 变体共享 —— 4 个 URL 各自重试一轮就是最坏 48 次 GET，
         # 正是最容易把出口 IP 打进限流页的形状（见 session.MAX_REQUESTS_PER_WORK）。

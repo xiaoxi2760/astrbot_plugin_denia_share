@@ -175,7 +175,34 @@ class BaseParser:
         handler = self._handlers.get(searched.re)
         if handler is None:
             raise SilentException(f"无法匹配 {keyword}")
-        return await handler(self, searched)
+        result = await handler(self, searched)
+        self.fill_result_url(result, searched)
+        return result
+
+    @staticmethod
+    def fill_result_url(result: ParseResult, searched: Match[str]) -> ParseResult:
+        """解析结果的 ``url`` 缺失时，用解析器实际匹配到的那一段链接补上。
+
+        **为什么必须在这里兜底**：卡片页脚左侧画的就是 ``short_url(result.url)``，
+        而 ``url`` 完全由每个 handler 自己在 ``self.result(...)`` 里传，漏传没有任何
+        报错 —— 卡片只是安安静静地少一行。实测抖音（视频/图文两条路径）、小红书、
+        AcFun、Pixiv 收藏、B站动态/专栏一共 10 处 ``result()`` 都没传，页脚于是空着。
+
+        放在 ``parse`` 里而不是让各解析器自己记得传，是因为这是所有平台、所有 handler
+        （含自定义解析器、``parse_with_redirect``、WebUI 手动解析）的**唯一收口点**：
+        在这里补一次，所有路径同时得救；散在各解析器里补，下次新增 handler 又会漏。
+
+        只在为空时补，绝不覆盖解析器给出的规范链接 —— 有些平台会给出比用户发的
+        短链更完整的地址（展开后的作品号、无追踪参数的干净链接），那才是要显示的。
+
+        用 ``searched.group(0)`` 而不是用户发的整条消息：后者可能是一段带口令的
+        分享文案，把它写进 url 会让页脚显示一整段废话，也可能被原样回显到历史记录。
+        """
+        if not getattr(result, "url", None):
+            matched = searched.group(0)
+            if matched:
+                result.url = matched
+        return result
 
     @final
     async def parse_with_redirect(self, url: str, headers: dict[str, str] | None = None) -> ParseResult:
