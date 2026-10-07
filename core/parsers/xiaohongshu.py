@@ -53,10 +53,17 @@ class XiaoHongShuParser(BaseParser):
         query, xhs_id = searched.group("query", "xhs_id")
 
         try:
-            return await self.parse_explore(f"{xhs_domain}/explore/{query}", xhs_id)
+            result = await self.parse_explore(f"{xhs_domain}/explore/{query}", xhs_id)
         except Exception as e:
             logger.warning(f"parse_explore failed, error: {e}, fallback to parse_discovery")
-            return await self.parse_discovery(f"{xhs_domain}/discovery/item/{query}")
+            result = await self.parse_discovery(f"{xhs_domain}/discovery/item/{query}")
+
+        # 补规范链接：两条路径返回的结果原本都不带 url，卡片页脚左侧因此空着。
+        # 用 xhs_id 而不是 query —— query 连着 xsec_token 等一长串查询参数，
+        # 页脚那点宽度只放得下作品号。短链与安全落地页都经过这里，一处补齐。
+        if not result.url:
+            result.url = f"{xhs_domain}/explore/{xhs_id}"
+        return result
 
     # originalUrl 参数的域名白名单（含子域）。见 _is_trusted_note_url 的说明。
     _TRUSTED_HOSTS: ClassVar[tuple[str, ...]] = (

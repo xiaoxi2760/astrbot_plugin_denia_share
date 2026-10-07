@@ -43,7 +43,7 @@ class AcfunParser(BaseParser):
         author = self.create_author(video_info.name, video_info.avatar_url)
         result = self.result(
             title=video_info.title, text=video_info.text, author=author,
-            timestamp=video_info.timestamp,
+            timestamp=video_info.timestamp, url=url,
         )
         # 超时长不再把整条结果丢掉：标题 / 作者 / 封面照常返回，缺料信息走
         # extra["limit_warnings"]（卡片与聊天消息都消费这个通道），与其他平台一致。
