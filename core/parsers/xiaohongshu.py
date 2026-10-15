@@ -196,23 +196,50 @@ class XiaoHongShuParser(BaseParser):
             raise ParseException("图文详情里既没有视频也没有图片")
         return result
 
-    @staticmethod
-    def _no_watermark(url: str | None) -> str | None:
+    @classmethod
+    def _no_watermark(cls, url: str | None) -> str | None:
         """把带鉴权的 webpic 链接改写成公开的无水印原图链接。
 
         - ``sns-webpic-*`` 是鉴权 CDN，部分场景会叠加平台水印（画面中央「小红书」字样）
         - ``sns-img-hw`` 是公开原图 CDN，无水印
 
+        改写只做一件事：**原样保留 path 里的完整 fileId**，丢掉鉴权段
+        （``/{时间戳}/{32位hex}/``）与 ``!nd_*`` 变换后缀。sns-img-hw 上的
+        对象名就是 fileId，而 fileId 的命名空间前缀不止一种
+        （``notes_pre_post/``、``spectrum/``、``oss-sg/notes_pre_post/``、
+        ``note_pre_post_uhdr/``…）—— 少带一段就是 404。
+
         来源：娅娅版 astrbot_plugin_media_parser，实测（2026-08-23）fileId 需保留
-        命名空间前缀（``notes_pre_post/``、``spectrum/``），图集常见的裸 ``1040g...``
-        同样可用。匹配不上时原样返回，不会把链接弄坏。
+        命名空间前缀。旧实现用正则只识别 ``notes_pre_post/``、``spectrum/``
+        两个写死的前缀，其余前缀会被吞掉；2026-10-15 实测笔记
+        xhslink.cn/o/raJQGfoLlq（``oss-sg/notes_pre_post/…`` 与
+        ``note_pre_post_uhdr/…``）图集因此全部 404，改成按 path 结构定位。
+        匹配不上时原样返回，不会把链接弄坏。
         """
         if not url or ("sns-webpic" not in url and "sns-img" not in url):
             return url
-        matched = re.search(r"((?:(?:notes_pre_post|spectrum)/)?1040g[^!?]+)", url)
-        if not matched:
+        file_id = cls._extract_file_id(url)
+        if not file_id:
             return url
-        return f"https://sns-img-hw.xhscdn.com/{matched.group(1)}?imageView2/2/w/1080/format/jpg"
+        return f"https://sns-img-hw.xhscdn.com/{file_id}?imageView2/2/w/1080/format/jpg"
+
+    @staticmethod
+    def _extract_file_id(url: str) -> str | None:
+        """从 webpic 直链的 path 里取出完整 fileId（含全部命名空间前缀）。
+
+        直链 path 结构为 ``/{时间戳}/{32位hex}/{fileId}!{变换}``；
+        鉴权段 0~2 段（老链接可能没有）。只认「还有 ``1040g`` 开头的实链段」
+        这一种形状，认不出返回 ``None``，由调用方原样保留链接。
+        """
+        from urllib.parse import urlparse
+
+        segments = [s for s in urlparse(url).path.split("/") if s]
+        while segments and re.fullmatch(r"\d{10,14}|[0-9a-fA-F]{32}", segments[0]):
+            segments.pop(0)
+        file_id = "/".join(segments).split("!", 1)[0]
+        if not re.search(r"(?:^|/)1040g", file_id):
+            return None
+        return file_id
 
     def _extract_initial_state_raw(self, html: str) -> str:
         pattern = r"window\.__INITIAL_STATE__=(.*?)</script>"
