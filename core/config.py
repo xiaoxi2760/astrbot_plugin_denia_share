@@ -19,6 +19,8 @@ import re
 from pathlib import Path
 from typing import Any
 
+from .constants import PLATFORMS
+
 _config = None
 
 _HEX_COLOR_RE = re.compile(r"^#[0-9a-fA-F]{6}$")
@@ -76,6 +78,34 @@ CONFIG_SECTIONS: tuple[dict[str, Any], ...] = (
 #   返回的 platforms 列表），目前仅 DISABLED_PLATFORMS 使用
 #   subgroup 可选：组内第三级小标题（配置项多的分组按它再分段，如「卡片外观」
 #   按 基础/内容元素/配色 拆分）；不带 subgroup 的项排在同组最前
+
+# 分解析器代理开关：按平台逐个决定「这个解析器要不要走代理地址」。
+#
+# 键名规则 ``PROXY_<平台键大写>``（如 PROXY_BILIBILI），与 :meth:`ParserConfig.proxy_for`
+# 的查键规则一致 —— 由 PLATFORMS 生成而不是手写，新增平台时自动多一个开关。
+# 默认全部关闭：代理地址填了、开关没开，该平台照样直连。
+# 自定义解析器没有对应的配置项，一律直连。
+#
+# ``widget: switch-grid``：WebUI 配置页把这些项渲染成**一排小开关**的网格
+# （配置页十来个 bool 逐行摆太占地方），label 只放平台名，开/关文案由
+# 前端的 tile 控件自带（直连 / 走代理）。
+_PROXY_SWITCH_ITEMS: tuple[dict[str, Any], ...] = tuple(
+    {
+        "key": f"PROXY_{key.upper()}",
+        "group": "高级设置",
+        "subgroup": "网络",
+        "widget": "switch-grid",
+        "label": meta.display_name,
+        "type": "bool",
+        "default": False,
+        "hint": (
+            f"开启后「{meta.label}」的接口请求与媒体下载才走代理地址，"
+            "默认关闭 = 直连。代理地址留空时本开关无效"
+        ),
+    }
+    for key, meta in PLATFORMS.items()
+)
+
 CONFIG_META: tuple[dict[str, Any], ...] = (
     # ---------------- 解析设置 ---------------- #
     {
@@ -515,11 +545,25 @@ CONFIG_META: tuple[dict[str, Any], ...] = (
         "key": "PROXY",
         "group": "高级设置",
         "subgroup": "网络",
-        "label": "全局代理",
+        "label": "代理地址",
         "type": "string",
         "default": "",
         "placeholder": "http://127.0.0.1:7897",
-        "hint": "留空不使用。作用于下载与自建请求（GitHub/Pixiv/截图）。填运行 AstrBot 那台机器上的地址",
+        "hint": (
+            "留空不使用。填运行 AstrBot 那台机器上的地址；"
+            "具体哪些解析器走它由下面各平台的「走代理」开关决定，全部默认关闭"
+        ),
+    },
+    *_PROXY_SWITCH_ITEMS,
+    {
+        "key": "PROXY_SCREENSHOT",
+        "group": "高级设置",
+        "subgroup": "网络",
+        "widget": "switch-grid",
+        "label": "网页截图",
+        "type": "bool",
+        "default": False,
+        "hint": "开启后截图请求才走代理地址，默认关闭 = 直连。代理地址留空时本开关无效",
     },
     {
         "key": "HTTP_VERIFY_SSL",
@@ -930,8 +974,32 @@ class ParserConfig:
 
     @property
     def PROXY(self) -> str:
-        """全局代理地址，形如 http://127.0.0.1:7890，留空不使用。"""
+        """代理地址，形如 http://127.0.0.1:7890，留空不使用。
+
+        这里只存地址；**哪些解析器真的走它**由各 ``PROXY_<平台>`` 开关决定，
+        见 :meth:`proxy_for`。
+        """
         return str(self._cfg_get("PROXY", "") or "").strip()
+
+    def proxy_for(self, platform_key: str) -> str | None:
+        """某个平台解析器的生效代理；开关没开（或地址为空）时返回 None = 直连。
+
+        查键规则：``PROXY_<平台键大写>``。内置平台的开关由 CONFIG_META 按
+        PLATFORMS 生成；自定义解析器没有对应配置项，``_cfg_get`` 拿到默认值
+        False，永远直连。
+        """
+        address = self.PROXY
+        if not address:
+            return None
+        key = f"PROXY_{str(platform_key).strip().upper()}"
+        if not bool(self._cfg_get(key, False)):
+            return None
+        return address
+
+    @property
+    def SCREENSHOT_PROXY(self) -> str:
+        """截图服务的生效代理；「网页截图走代理」关着时返回空串 = 直连。"""
+        return self.PROXY if bool(self._cfg_get("PROXY_SCREENSHOT", False)) else ""
 
     @property
     def HTTP_VERIFY_SSL(self) -> bool:

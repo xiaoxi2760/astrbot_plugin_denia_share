@@ -748,6 +748,41 @@ textarea.input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--
 }
 .cfg-subhead:first-child { margin-top: 2px; }
 
+/* 开关网格（widget="switch-grid"，分解析器代理开关用）：
+   一排多个紧凑 tile，宽度不够自动换行 —— 替代「一个 bool 占一整行」。
+   tile 内是 平台名 + 小开关（自带直连/走代理文案）+ 已改标记；
+   每个开关的详细说明收进 tile 的 title 悬浮提示。 */
+.cfg-switch-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 8px;
+  max-width: 760px;
+}
+.cfg-switch-tile {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 7px 10px;
+  border: 1px solid var(--border-2);
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+  cursor: pointer;
+  user-select: none;
+  transition: border-color var(--dur) var(--ease), background var(--dur) var(--ease);
+}
+.cfg-switch-tile:hover { border-color: var(--accent); }
+.cfg-switch-tile .switch { margin-left: auto; }
+.cfg-switch-tile .switch-text { font-size: 11px; color: var(--text-3); }
+.cfg-switch-tile .switch input:checked ~ .switch-text { color: var(--accent); }
+.cfg-switch-tile-name {
+  font-size: 12.5px;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 /* ---------------- 布局辅助 ---------------- */
 
 .two-col {

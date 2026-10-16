@@ -51,7 +51,8 @@ class ExampleParser(BaseParser):
         url = f"https://example.com/post/{pid}"
 
         # 自建 httpx 客户端**必须**走 self.new_client()（或 self.client_kwargs()）：
-        # 它会带上超时、证书校验开关与全局代理。裸建 AsyncClient 会让
+        # 它会带上超时、证书校验开关与代理配置（内置平台按各自的「走代理」开关
+        # 决定；自定义解析器没有对应配置项，一律直连）。裸建 AsyncClient 会让
         # 「只在环境变量里配代理」的部署静默直连。
         async with self.new_client() as client:
             response = await client.get(url, headers=self.headers)

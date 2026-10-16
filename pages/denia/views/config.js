@@ -347,11 +347,14 @@ export function createConfigView(ctx) {
     return sectionNode;
   }
 
-  /** 组内渲染：带 subgroup 的按子组（第三级）分段，没有子组的项排在最前。 */
+  /** 组内渲染：带 subgroup 的按子组（第三级）分段，没有子组的项排在最前。
+
+      连续的 widget="switch-grid" 项（分解析器代理开关这类「一排小开关」）
+      合并进一个网格渲染，不再一行一个大开关 —— 十来个 bool 逐行摆太占地。 */
   function renderGroupBody(items) {
     const body = h("div");
     if (!items.some((item) => item.subgroup)) {
-      for (const item of items) body.appendChild(renderField(item));
+      appendFieldSequence(body, items);
       return body;
     }
     const order = [];
@@ -366,9 +369,72 @@ export function createConfigView(ctx) {
     }
     for (const sub of order) {
       if (sub) body.appendChild(h("div", { class: "cfg-subhead", text: sub }));
-      for (const item of buckets.get(sub)) body.appendChild(renderField(item));
+      appendFieldSequence(body, buckets.get(sub));
     }
     return body;
+  }
+
+  /** 按顺序铺一组字段行，途中把连续的 switch-grid 项收拢成开关网格。 */
+  function appendFieldSequence(host, items) {
+    let index = 0;
+    while (index < items.length) {
+      const item = items[index];
+      if (item.widget === "switch-grid") {
+        const run = [];
+        while (index < items.length && items[index].widget === "switch-grid") {
+          run.push(items[index]);
+          index += 1;
+        }
+        host.appendChild(renderSwitchGrid(run));
+        continue;
+      }
+      host.appendChild(renderField(item));
+      index += 1;
+    }
+  }
+
+  /* ---------------- 开关网格（分解析器代理开关等紧凑 bool 组） ----------------
+
+     后端在 CONFIG_META 里给这类项打了 widget="switch-grid"。每个 tile：
+     平台名 + 小开关（自带「直连 / 走代理」文案），长说明收进 title 悬浮提示，
+     「已改」标记与逐行形态共用 data-dirty-mark 机制，syncDirtyUI 无感。 */
+  function renderSwitchGrid(items) {
+    const tiles = items.map((item) => {
+      const control = switchControl(
+        Boolean(currentValue(item.key)),
+        (next) => onValueChanged(item.key, next),
+        "走代理",
+        "直连",
+      );
+      // 外层**不能用 <label>**：switchControl 自己就是 label，嵌套后点一下
+      // 会被两层 label 各转发一次、开关来回切两次等于没切。用 div + 点击转发：
+      // 点到开关本体时交给它自己的 label，点到其余区域由这里替用户拨开关。
+      const tile = h("div", { class: "cfg-switch-tile", title: item.hint || "" }, [
+        h("span", { class: "cfg-switch-tile-name", text: item.label }),
+        control,
+        h("span", {
+          class: "cfg-dirty",
+          text: "已改",
+          hidden: hasDraft(item.key) ? null : true,
+          dataset: { dirtyMark: item.key },
+        }),
+      ]);
+      tile.addEventListener("click", (event) => {
+        if (control.contains(event.target)) return;
+        const box = control.querySelector("input");
+        if (!box) return;
+        box.checked = !box.checked;
+        box.dispatchEvent(new Event("change"));
+      });
+      return tile;
+    });
+    return h("div", { class: "field" }, [
+      h("div", { class: "cfg-switch-grid" }, tiles),
+      h("div", {
+        class: "field-hint",
+        text: "开关打开 = 该项的接口请求与媒体下载走上面的代理地址；悬停查看各项说明",
+      }),
+    ]);
   }
 
   /* ---------------- 配置项（字段行） ---------------- */

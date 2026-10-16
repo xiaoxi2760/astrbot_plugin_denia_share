@@ -78,7 +78,7 @@ Dashboard 侧边栏「插件 WebUI → 希望解析器」，分五个标签：
 | `VIDEO_DURATION_MAXIMUM` / `VIDEO_SIZE_MAXIMUM_MB` | 480 秒 / 100 MB | 超限不下载视频，卡片照发 |
 | `SEND_ERROR_MESSAGES` | 关 | 解析失败要不要在群里回一句；关了更安静 |
 | `BILI_CK` | 空 | 建议用 `/bili_login` 扫码，配了才能下 1080P 及以上 |
-| `PROXY` | 空 | 全局代理，作用于媒体下载与自建请求 |
+| `PROXY` | 空 | 代理地址；配合各平台的「走代理」开关（`PROXY_<平台>`）使用，开关默认全部关闭 = 直连 |
 | `GITHUB_TOKEN` | 空 | 建议填：免 token 只有 60 次/小时，且按出口 IP 计，共享 IP 下极易被限流 |
 | `CACHE_TTL_HOURS` | 24 小时 | 缓存保留时长（磁盘上的媒体文件），0 = 不自动清理 |
 | `RESULT_CACHE_TTL_SECONDS` | 600 秒 | 重复解析间隔：同一条链接在这个时长内再发来时直接用上次结果，**照发卡片**，不重新请求平台接口；0 = 每次都重新解析 |

@@ -374,11 +374,95 @@
         "secret": true
       },
       "PROXY": {
-        "description": "全局代理",
+        "description": "代理地址",
         "type": "string",
         "default": "",
         "invisible": true,
-        "hint": "留空不使用。作用于下载与自建请求（GitHub/Pixiv/截图）。填运行 AstrBot 那台机器上的地址"
+        "hint": "留空不使用。填运行 AstrBot 那台机器上的地址；具体哪些解析器走它由下面各平台的「走代理」开关决定，全部默认关闭"
+      },
+      "PROXY_BILIBILI": {
+        "description": "B站走代理",
+        "type": "bool",
+        "default": false,
+        "invisible": true,
+        "hint": "开启后「哔哩哔哩」的接口请求与媒体下载才走上面的代理地址，默认关闭 = 直连。代理地址留空时本开关无效"
+      },
+      "PROXY_DOUYIN": {
+        "description": "抖音走代理",
+        "type": "bool",
+        "default": false,
+        "invisible": true,
+        "hint": "开启后「抖音」的接口请求与媒体下载才走上面的代理地址，默认关闭 = 直连。代理地址留空时本开关无效"
+      },
+      "PROXY_KUAISHOU": {
+        "description": "快手走代理",
+        "type": "bool",
+        "default": false,
+        "invisible": true,
+        "hint": "开启后「快手」的接口请求与媒体下载才走上面的代理地址，默认关闭 = 直连。代理地址留空时本开关无效"
+      },
+      "PROXY_WEIBO": {
+        "description": "微博走代理",
+        "type": "bool",
+        "default": false,
+        "invisible": true,
+        "hint": "开启后「微博」的接口请求与媒体下载才走上面的代理地址，默认关闭 = 直连。代理地址留空时本开关无效"
+      },
+      "PROXY_XIAOHONGSHU": {
+        "description": "小红书走代理",
+        "type": "bool",
+        "default": false,
+        "invisible": true,
+        "hint": "开启后「小红书」的接口请求与媒体下载才走上面的代理地址，默认关闭 = 直连。代理地址留空时本开关无效"
+      },
+      "PROXY_TWITTER": {
+        "description": "Twitter / X 走代理",
+        "type": "bool",
+        "default": false,
+        "invisible": true,
+        "hint": "开启后「小蓝鸟」的接口请求与媒体下载才走上面的代理地址，默认关闭 = 直连。代理地址留空时本开关无效"
+      },
+      "PROXY_NGA": {
+        "description": "NGA走代理",
+        "type": "bool",
+        "default": false,
+        "invisible": true,
+        "hint": "开启后「NGA」的接口请求与媒体下载才走上面的代理地址，默认关闭 = 直连。代理地址留空时本开关无效"
+      },
+      "PROXY_ACFUN": {
+        "description": "AcFun走代理",
+        "type": "bool",
+        "default": false,
+        "invisible": true,
+        "hint": "开启后「猴山」的接口请求与媒体下载才走上面的代理地址，默认关闭 = 直连。代理地址留空时本开关无效"
+      },
+      "PROXY_GITHUB": {
+        "description": "GitHub走代理",
+        "type": "bool",
+        "default": false,
+        "invisible": true,
+        "hint": "开启后「GitHub」的接口请求与媒体下载才走上面的代理地址，默认关闭 = 直连。代理地址留空时本开关无效"
+      },
+      "PROXY_PIXIV": {
+        "description": "Pixiv走代理",
+        "type": "bool",
+        "default": false,
+        "invisible": true,
+        "hint": "开启后「Pixiv」的接口请求与媒体下载才走上面的代理地址，默认关闭 = 直连。代理地址留空时本开关无效"
+      },
+      "PROXY_STEAM": {
+        "description": "Steam走代理",
+        "type": "bool",
+        "default": false,
+        "invisible": true,
+        "hint": "开启后「Steam」的接口请求与媒体下载才走上面的代理地址，默认关闭 = 直连。代理地址留空时本开关无效"
+      },
+      "PROXY_SCREENSHOT": {
+        "description": "网页截图走代理",
+        "type": "bool",
+        "default": false,
+        "invisible": true,
+        "hint": "开启后截图请求才走上面的代理地址，默认关闭 = 直连。代理地址留空时本开关无效"
       },
       "HTTP_VERIFY_SSL": {
         "description": "校验 HTTPS 证书",
