@@ -23,6 +23,10 @@ from .media_verify import HEAD_PROBE_BYTES, classify_media_response, sniff_image
 from .constants import COMMON_HEADER, DOWNLOAD_TIMEOUT
 from .exception import IgnoreException, DownloadException
 
+# 导入即修一次 NO_PROXY：httpx 0.28 解析不了 ``[::1]`` 这种方括号写法，
+# 而下载器也走 trust_env。详见 core/http_env.py。
+from . import http_env  # noqa: F401  (import for side effect)
+
 # 图片并发上限。
 #
 # 远端返回的图集长度不受控（微博长文、抖音图文、NGA 帖），而每个条目都会立刻

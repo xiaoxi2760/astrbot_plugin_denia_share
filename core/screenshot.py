@@ -37,6 +37,10 @@ from astrbot.api import logger
 
 from .constants import COMMON_HEADER
 
+# 本模块自建 3 个 httpx.AsyncClient，且**不经过** base_parser / download，
+# 所以兜底必须自己 import 一次 —— 否则截图会单独踩方括号 NO_PROXY 的坑。
+from . import http_env  # noqa: F401  (import for side effect)
+
 THUM_BASE: Final = "https://image.thum.io/get"
 CF_API_BASE: Final = "https://api.cloudflare.com/client/v4"
 

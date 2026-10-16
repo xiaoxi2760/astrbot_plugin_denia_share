@@ -53,7 +53,7 @@ export const VIEWS = {
   },
   config: {
     title: "配置",
-    sub: "按「大类 → 分组 → 子组」组织的全部配置项，保存后立即生效",
+    sub: "按分类查找设置，保存后立即生效",
     factory: createConfigView,
   },
 };
@@ -142,6 +142,23 @@ export const api = {
   },
 };
 
+/** 更新界面偏好时立即应用样式，并按调用顺序持久化各次增量。 */
+export function createPrefsSaver({ api, prefs, applyPrefs, onError }) {
+  let queue = Promise.resolve();
+  return function savePrefs(patch) {
+    const snapshot = { ...patch };
+    Object.assign(prefs, snapshot);
+    applyPrefs();
+
+    const save = () => api.post("appearance", { prefs: snapshot });
+    const operation = queue.then(save, save);
+    queue = operation.catch((error) => {
+      if (onError) onError(error);
+    });
+    return queue;
+  };
+}
+
 /* 界面外观偏好已抽到 ./prefs.js（ACCENT_PRESETS / prefs / applyPrefs / loadPrefs），
  * 这里只保留视图框架。 */
 
@@ -159,21 +176,20 @@ const state = {
   reloadButton: document.getElementById("btn-reload"),
 };
 
+const savePrefs = createPrefsSaver({
+  api,
+  prefs,
+  applyPrefs,
+  onError: (error) => toast(`外观偏好保存失败：${error.message || error}`, "err"),
+});
+
 /** 提供给视图的控制台上下文。 */
 const ctx = {
   api,
   prefs,
   accentPresets: ACCENT_PRESETS,
   applyPrefs,
-  async savePrefs(patch) {
-    Object.assign(prefs, patch);
-    applyPrefs();
-    try {
-      await api.post("appearance", { prefs: patch });
-    } catch (error) {
-      toast(`外观偏好保存失败：${error.message || error}`, "err");
-    }
-  },
+  savePrefs,
   setHead(text, kind = "") {
     if (!text) {
       state.pill.hidden = true;
@@ -205,6 +221,9 @@ const ctx = {
 function setActiveNav(view) {
   document.querySelectorAll(".rail-item").forEach((item) => {
     item.classList.toggle("is-active", item.dataset.view === view);
+    item.setAttribute("aria-label", VIEWS[item.dataset.view]?.title || item.dataset.view);
+    if (item.dataset.view === view) item.setAttribute("aria-current", "page");
+    else item.removeAttribute("aria-current");
   });
 }
 

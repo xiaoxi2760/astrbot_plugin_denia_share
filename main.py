@@ -252,21 +252,32 @@ class DeniaSharePlugin(Star):
         pconfig.cache_dir = self.cache_dir
 
         try:
-            from .core.config import migrate_grouped_config
+            from .core.config import migrate_grouped_config, migrate_proxy_switches
 
-            if migrate_grouped_config(config):
+            # 顺序要紧：分代理开关迁移**必须先跑**。
+            # migrate_grouped_config 的规则是「分组值 == 默认值且扁平值 ≠ 默认值
+            # → 用扁平值」，而开关键默认值就是 False —— 老配置里残留的扁平
+            # PROXY_*: true 会被它顶进分组，盖掉用户在新版里显式关掉的同一个开关，
+            # 症状是「我明明关了，重启后又走代理」。migrate_proxy_switches 会先把这
+            # 些扁平位并入分组再删掉，于是通用迁移再也看不到它们。
+            changed = migrate_proxy_switches(config)
+            changed = migrate_grouped_config(config) or changed
+            if changed:
                 save = getattr(config, "save_config", None)
                 if callable(save):
                     save()
         except Exception:
             logger.warning("旧版配置迁移失败，将使用兼容回退读取", exc_info=True)
 
+        # 直连下载器：常驻。代理下载器按需懒建（见 _downloader_for）——
+        # 代理绑定在 httpx 连接池上没法按请求切换，分解析器代理靠两个实例实现
         self.downloader = StreamDownloader(
             self.cache_dir,
-            proxies=pconfig.PROXY or None,
+            proxies=None,
             max_size_mb=pconfig.VIDEO_SIZE_MAXIMUM_MB,
             verify_ssl=pconfig.HTTP_VERIFY_SSL,
         )
+        self._proxy_downloader: StreamDownloader | None = None
         self.disabled_platforms = pconfig.DISABLED_PLATFORMS
         self._send_errors = pconfig.SEND_ERROR_MESSAGES
 
@@ -358,6 +369,31 @@ class DeniaSharePlugin(Star):
             self._webui_ready = False
             logger.warning("[denia_share] WebUI 接口注册失败", exc_info=True)
 
+    def _downloader_for(self, platform_key: str) -> StreamDownloader:
+        """按平台的「走代理」开关挑下载器：开了走代理池，没开走直连池。
+
+        StreamDownloader 的代理绑定在连接池上（httpx client 构造参数），
+        没法按请求切换，所以「分解析器代理」靠两个下载器实例实现：
+        共享同一个缓存目录；直连池常驻，代理池只在有平台开关打开时才建。
+        与解析器接口请求同源：都问 ``pconfig.proxy_for(platform_key)``。
+        """
+        pconfig = get_config()
+        if pconfig.proxy_for(platform_key) is None:
+            return self.downloader
+
+        if self._proxy_downloader is None:
+            self._proxy_downloader = StreamDownloader(
+                self.cache_dir,
+                proxies=pconfig.PROXY or None,
+                max_size_mb=pconfig.VIDEO_SIZE_MAXIMUM_MB,
+                verify_ssl=pconfig.HTTP_VERIFY_SSL,
+            )
+            logger.info(
+                f"[denia_share] 已创建代理下载器（{pconfig.PROXY}），"
+                "供打开了「走代理」开关的解析器下载媒体使用"
+            )
+        return self._proxy_downloader
+
     def _init_parsers(self):
         pconfig = get_config()
         disabled = self.disabled_platforms
@@ -377,7 +413,7 @@ class DeniaSharePlugin(Star):
                 from .core.parsers import BILIBILI_IS_FALLBACK
 
                 self.parsers["bilibili"] = BilibiliParser(
-                    self.downloader, bili_ck=pconfig.BILI_CK, config_dir=self.config_dir
+                    self._downloader_for("bilibili"), bili_ck=pconfig.BILI_CK, config_dir=self.config_dir
                 )
                 if BILIBILI_IS_FALLBACK:
                     logger.warning(
@@ -385,26 +421,32 @@ class DeniaSharePlugin(Star):
                         "视频可解析下载，动态 / 直播 / 收藏夹 / 专栏暂不可用"
                     )
         if "douyin" not in disabled:
-            self.parsers["douyin"] = DouyinParser(self.downloader)
+            self.parsers["douyin"] = DouyinParser(self._downloader_for("douyin"))
         if "kuaishou" not in disabled:
-            self.parsers["kuaishou"] = KuaiShouParser(self.downloader)
+            self.parsers["kuaishou"] = KuaiShouParser(self._downloader_for("kuaishou"))
         if "weibo" not in disabled:
-            self.parsers["weibo"] = WeiBoParser(self.downloader)
+            self.parsers["weibo"] = WeiBoParser(self._downloader_for("weibo"))
         if "xiaohongshu" not in disabled:
-            self.parsers["xiaohongshu"] = XiaoHongShuParser(self.downloader, xhs_ck=pconfig.XHS_CK)
+            self.parsers["xiaohongshu"] = XiaoHongShuParser(
+                self._downloader_for("xiaohongshu"), xhs_ck=pconfig.XHS_CK
+            )
         if "twitter" not in disabled:
-            self.parsers["twitter"] = TwitterParser(self.downloader)
+            self.parsers["twitter"] = TwitterParser(self._downloader_for("twitter"))
         if "nga" not in disabled:
-            self.parsers["nga"] = NGAParser(self.downloader)
+            self.parsers["nga"] = NGAParser(self._downloader_for("nga"))
         if "acfun" not in disabled:
-            self.parsers["acfun"] = AcfunParser(self.downloader)
+            self.parsers["acfun"] = AcfunParser(self._downloader_for("acfun"))
         if "github" not in disabled:
-            self.parsers["github"] = GitHubParser(self.downloader, token=pconfig.GITHUB_TOKEN)
+            self.parsers["github"] = GitHubParser(
+                self._downloader_for("github"), token=pconfig.GITHUB_TOKEN
+            )
         if "pixiv" not in disabled:
-            self.parsers["pixiv"] = PixivParser(self.downloader, cookie=pconfig.PIXIV_CK)
+            self.parsers["pixiv"] = PixivParser(
+                self._downloader_for("pixiv"), cookie=pconfig.PIXIV_CK
+            )
         if "steam" not in disabled:
             self.parsers["steam"] = SteamParser(
-                self.downloader,
+                self._downloader_for("steam"),
                 itad_key=pconfig.ITAD_API_KEY,
                 region=pconfig.STEAM_REGION,
             )
@@ -423,6 +465,8 @@ class DeniaSharePlugin(Star):
             self._custom_loader = CustomParserLoader(
                 self._data_dir / CUSTOM_PARSERS_SUBDIR
             )
+        # 自定义解析器一律用直连下载器：它们没有对应的「走代理」配置项
+        # （AstrBot 会剔除 schema 之外的键），代理池只服务于内置平台。
         result = self._custom_loader.reload(
             self.downloader, skip_keys=set(self.disabled_platforms)
         )
@@ -459,7 +503,7 @@ class DeniaSharePlugin(Star):
             backend=pconfig.SCREENSHOT_BACKEND,
             cf_account_id=pconfig.CF_ACCOUNT_ID,
             cf_api_token=pconfig.CF_API_TOKEN,
-            proxy=pconfig.PROXY,
+            proxy=pconfig.SCREENSHOT_PROXY,
             verify_ssl=pconfig.HTTP_VERIFY_SSL,
         )
         self._screenshot_fallback = pconfig.SCREENSHOT_FALLBACK
@@ -1132,13 +1176,27 @@ class DeniaSharePlugin(Star):
 
         try:
             await self.downloader.reconfigure(
-                proxies=pconfig.PROXY or None,
+                proxies=None,
                 max_size_mb=pconfig.VIDEO_SIZE_MAXIMUM_MB,
                 cache_dir=self.cache_dir,
                 verify_ssl=pconfig.HTTP_VERIFY_SSL,
             )
         except Exception:
             logger.warning("[denia_share] 更新下载器参数失败", exc_info=True)
+
+        # 代理下载器跟随同一份缓存目录 / 体积上限 / 证书开关，代理地址取配置值。
+        # 地址被清空时 reconfigure 会把它的池切成直连 —— 池子留着不关，
+        # 省得下次有平台开开关又要重建。
+        if self._proxy_downloader is not None:
+            try:
+                await self._proxy_downloader.reconfigure(
+                    proxies=pconfig.PROXY or None,
+                    max_size_mb=pconfig.VIDEO_SIZE_MAXIMUM_MB,
+                    cache_dir=self.cache_dir,
+                    verify_ssl=pconfig.HTTP_VERIFY_SSL,
+                )
+            except Exception:
+                logger.warning("[denia_share] 更新代理下载器参数失败", exc_info=True)
 
         self.parsers = {}
         self._init_parsers()
@@ -2010,6 +2068,9 @@ class DeniaSharePlugin(Star):
             except asyncio.CancelledError:
                 pass
         await self.downloader.aclose()
+        if self._proxy_downloader is not None:
+            await self._proxy_downloader.aclose()
+            self._proxy_downloader = None
 
         for task in list(self._bili_login_tasks.values()):
             if not task.done():

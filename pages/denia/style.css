@@ -3,19 +3,18 @@
  * 设计约束：
  * - 只跟随 AstrBot 注入的 <html data-theme>，深浅两套变量，不硬编码浅色底。
  * - 不引外部资源（字体/图标/框架），受限 iframe 里最稳。
- * - 布局：左侧边栏 + 内容区，内容区用玻璃拟态卡片分块。
+ * - 布局：左侧边栏 + 内容区，以清晰的间距与轻边框区分内容。
  * - 自定义：主题色 / 圆角 / 紧凑 / 动效由 <html> 上的 data-* 与 CSS 变量驱动，
  *   由 app.js 的 applyPrefs() 在启动时写入。
  *
- * 维护约定：整份文件用 5 段「哨兵追加」写成，改样式时按段落在合适位置增补即可，
- * 别把某个规则的 `{` 和 `}` 拆到两段里（拆了就会把后面所有内容吞进这条规则）。
+ * 维护约定：同一组件的规则放在一起，响应式覆盖集中在窄屏适配段。
  */
 
 :root {
   --bg: #eef1f6;
   --bg-grad-a: rgba(47, 111, 221, 0.06);
   --bg-grad-b: rgba(139, 124, 246, 0.05);
-  --panel: rgba(255, 255, 255, 0.72);
+  --panel: #ffffff;
   --panel-solid: #ffffff;
   --panel-2: rgba(20, 32, 54, 0.045);
   --panel-border: rgba(20, 32, 54, 0.09);
@@ -40,7 +39,7 @@
   --radius-lg: 20px;
   --pad: 16px;
   --gap: 14px;
-  --shadow-1: 0 1px 2px rgba(15, 23, 42, 0.05), 0 6px 24px -8px rgba(15, 23, 42, 0.1);
+  --shadow-1: 0 1px 3px rgba(15, 23, 42, 0.035);
   --shadow-2: 0 12px 40px -12px rgba(15, 23, 42, 0.25);
   --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   --ease: cubic-bezier(0.22, 0.68, 0.36, 1);
@@ -51,7 +50,7 @@
   --bg: #0d1017;
   --bg-grad-a: rgba(110, 166, 245, 0.08);
   --bg-grad-b: rgba(154, 124, 255, 0.07);
-  --panel: rgba(24, 29, 39, 0.66);
+  --panel: #181d27;
   --panel-solid: #181d27;
   --panel-2: rgba(255, 255, 255, 0.05);
   --panel-border: rgba(255, 255, 255, 0.09);
@@ -71,7 +70,7 @@
   --warn-soft: rgba(229, 181, 103, 0.14);
   --err: #f28b85;
   --err-soft: rgba(242, 139, 133, 0.14);
-  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.3), 0 8px 28px -10px rgba(0, 0, 0, 0.5);
+  --shadow-1: 0 1px 3px rgba(0, 0, 0, 0.15);
   --shadow-2: 0 16px 48px -12px rgba(0, 0, 0, 0.6);
 }
 
@@ -263,7 +262,8 @@ body {
   background-clip: content-box;
 }
 
-.view { display: flex; flex-direction: column; gap: var(--gap); max-width: 1160px; animation: view-in 0.28s var(--ease); }
+.view { display: flex; flex-direction: column; gap: var(--gap); max-width: 1160px; width: 100%; margin-inline: auto; animation: view-in 0.28s var(--ease); }
+.card-stack { display: flex; flex-direction: column; gap: var(--gap); min-width: 0; }
 @keyframes view-in {
   from { opacity: 0; transform: translateY(8px); }
   to { opacity: 1; transform: none; }
@@ -276,8 +276,6 @@ body {
   border-radius: var(--radius-lg);
   padding: var(--pad);
   box-shadow: var(--shadow-1);
-  backdrop-filter: blur(14px) saturate(1.25);
-  -webkit-backdrop-filter: blur(14px) saturate(1.25);
 }
 
 /* 状态卡：卡里有需要用户处理的事（如缓存目录回退）。只写正文小字容易被划过去，
@@ -484,9 +482,9 @@ textarea.input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--
 .parser-error span { color: var(--text-2); word-break: break-word; }
 /* ---------------- 表单（配置页） ---------------- */
 
-.field { padding: 10px 0; border-top: 1px dashed var(--border); }
+.field { padding: 14px 0; border-top: 1px solid var(--border); }
 .field:first-of-type { border-top: none; }
-.field-label { display: flex; align-items: center; gap: 8px; font-size: 12.5px; font-weight: 500; margin-bottom: 5px; }
+.field-label { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 12.5px; font-weight: 500; margin-bottom: 7px; }
 .field-label code {
   font-family: var(--mono);
   font-size: 10.5px;
@@ -495,14 +493,14 @@ textarea.input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--
   padding: 1px 6px;
   border-radius: 5px;
 }
-.field-body { display: flex; align-items: flex-start; gap: 10px; }
+.field-body { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 6px 12px; }
 /* min-width 不能省：flex 里 <input>/<select> 的 min-content 宽度是 0，会被同排的
    长提示文字挤扁（数字框尤其明显，会缩成只剩微调箭头的小方块，看着像控件坏了）。 */
 .field-body .input,
 .field-body .select { max-width: 380px; min-width: 130px; }
 .field-body textarea.input { max-width: 100%; min-width: 0; min-height: 74px; resize: vertical; }
 /* 提示文字不参与挤压：让它自己换行，把宽度让给控件 */
-.field-body .field-hint { flex: 1 1 260px; min-width: 0; }
+.field-body .field-hint { flex: 1 0 100%; min-width: 0; max-width: 760px; overflow-wrap: anywhere; }
 .field-hint { margin: 5px 0 0; font-size: 11.5px; color: var(--text-3); }
 .unit { color: var(--text-3); font-size: 11.5px; flex: 0 0 auto; padding-top: 8px; }
 
@@ -687,6 +685,7 @@ textarea.input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--
   position: sticky;
   top: 0;
   z-index: 6;
+  background: var(--panel-solid);
 }
 
 .cfg-tabs-row { margin-top: 10px; overflow-x: auto; }
@@ -748,6 +747,41 @@ textarea.input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--
 }
 .cfg-subhead:first-child { margin-top: 2px; }
 
+/* 开关网格（widget="switch-grid"，分解析器代理开关用）：
+   一排多个紧凑 tile，宽度不够自动换行 —— 替代「一个 bool 占一整行」。
+   tile 内是 平台名 + 小开关（自带直连/走代理文案）+ 已改标记；
+   每个开关的详细说明收进 tile 的 title 悬浮提示。 */
+.cfg-switch-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(210px, 100%), 1fr));
+  gap: 8px;
+  max-width: 760px;
+}
+.cfg-switch-tile {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 7px 10px;
+  border: 1px solid var(--border-2);
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+  cursor: pointer;
+  user-select: none;
+  transition: border-color var(--dur) var(--ease), background var(--dur) var(--ease);
+}
+.cfg-switch-tile:hover { border-color: var(--accent); }
+.cfg-switch-tile .switch { margin-left: auto; }
+.cfg-switch-tile .switch-text { font-size: 11px; color: var(--text-3); }
+.cfg-switch-tile .switch input:checked ~ .switch-text { color: var(--accent); }
+.cfg-switch-tile-name {
+  font-size: 12.5px;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 /* ---------------- 布局辅助 ---------------- */
 
 .two-col {
@@ -763,6 +797,28 @@ textarea.input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--
 .detail-grid { display: grid; grid-template-columns: auto 1fr; gap: 4px 14px; font-size: 12px; }
 .detail-grid dt { color: var(--text-3); }
 .detail-grid dd { margin: 0; word-break: break-all; }
+
+/* 次要工具默认收起，让常用输入、操作与结果保持在前面。 */
+.tool-drawer {
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius);
+  background: var(--panel);
+  min-width: 0;
+}
+.tool-drawer > summary {
+  padding: 13px var(--pad);
+  cursor: pointer;
+  color: var(--text-2);
+}
+.tool-drawer > summary strong { font-size: 13px; color: var(--text); }
+.tool-drawer > summary span { margin-left: 12px; font-size: 12px; color: var(--text-3); }
+.tool-drawer[open] > summary { border-bottom: 1px solid var(--border); }
+.tool-drawer > .card { border: 0; box-shadow: none; background: transparent; }
+.tool-drawer > .card > .card-head { margin-top: 0; }
+.appearance-advanced-group { margin-top: 12px; border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 0 12px; }
+.appearance-advanced-summary { padding: 10px 0; color: var(--text-2); font-size: 12.5px; cursor: pointer; }
+.appearance-advanced-group[open] > summary { border-bottom: 1px solid var(--border); }
+:where(button, input, select, textarea, summary):focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 
 .empty {
   padding: 26px 18px;
@@ -886,6 +942,7 @@ textarea.input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--
 }
 @media (max-width: 980px) {
   .appearance-grid { grid-template-columns: 1fr; }
+  .appearance-grid .preview-stage { position: static; }
 }
 
 .swatch-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
@@ -968,6 +1025,19 @@ textarea.input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--
   .rail-badge { position: absolute; top: 2px; right: 2px; }
   .stage-head { padding: 14px 16px 10px; }
   .stage-body { padding: 2px 14px 26px; }
+  .stage-title { min-width: 0; }
+  .stage-title p { max-width: 44ch; }
+  .stage-actions { flex: 0 0 auto; gap: 6px; }
+  .stat-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .stat { padding: 12px; }
+  .stat .v { font-size: 18px; overflow-wrap: anywhere; }
+  .stat .m { overflow-wrap: anywhere; }
+  .field-body .input, .field-body .select { min-width: 0; max-width: 100%; }
+  .secret-wrap { min-width: 0; max-width: 100%; }
+  .field-body > .secret-wrap, .field-body > .list-editor-host { flex-basis: 100%; }
+  .tool-drawer > summary span { display: block; margin: 3px 0 0 15px; }
+  .option-grid { grid-template-columns: minmax(0, 1fr); }
+  .savebar { flex-wrap: wrap; padding: 10px; }
 }
 
 /* ---------------- 页头彩蛋文案（.stage-head 静态区，banner.js 驱动轮换） ---------------- */

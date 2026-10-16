@@ -15,6 +15,10 @@ from typing_extensions import Unpack
 from .data import Platform, ParseResult, Author, VideoContent, ImageContent, AudioContent, ParseResultKwargs
 from .task import PathTask
 from .download import StreamDownloader
+
+# 导入即修一次 NO_PROXY：httpx 0.28 解析不了 ``[::1]`` 这种方括号写法，
+# 而本文件是所有解析器客户端的必经之路。详见 core/http_env.py。
+from . import http_env  # noqa: F401  (import for side effect)
 from .constants import IOS_HEADER, COMMON_HEADER, ANDROID_HEADER, COMMON_TIMEOUT, PlatformEnum
 from .exception import ParseException, IgnoreException, DownloadException, SilentException
 
@@ -58,6 +62,23 @@ def handle(keyword: str, pattern: str):
     return decorator
 
 
+def _platform_key(platform: Any) -> str:
+    """从 ``platform`` ClassVar 里取出平台键（如 "bilibili"）。
+
+    ``Platform`` 是 dataclass（``name`` 字段），但自定义解析器可能塞别的形态，
+    所以按 name → value → str 依次回退，取不到就返回空串由调用方兜。
+    """
+    if platform is None:
+        return ""
+    name = getattr(platform, "name", None)
+    if name:
+        return str(name)
+    value = getattr(platform, "value", None)
+    if value:
+        return str(value)
+    return str(platform)
+
+
 class BaseParser:
     platform: ClassVar[Platform]
     _registry: ClassVar[list[type["BaseParser"]]] = []
@@ -68,17 +89,20 @@ class BaseParser:
         self.android_headers = ANDROID_HEADER.copy()
         self.downloader = downloader
         self.timeout = COMMON_TIMEOUT
-        # 全局代理：自建 AsyncClient 的解析器（github/pixiv 等）必须带上，
-        # 否则在直连不通的服务器环境里会直接失败
+        # 分解析器代理：代理地址填了**且**本平台的「走代理」开关打开才走代理，
+        # 其余一律直连（开关默认全关）。下载走哪个下载器由 main.py 按同一开关挑，
+        # 两边必须同源 —— 都问 proxy_for(platform.name)。
         try:
             from .config import get_config
-            self.proxies = get_config().PROXY or None
+            platform = getattr(type(self), "platform", None)
+            platform_key = _platform_key(platform)
+            self.proxies = get_config().proxy_for(platform_key) if platform_key else None
         except Exception:
-            # 不能只静默降级直连：代理配错时表现为「所有平台都解析失败」，
-            # 排查方向会被带偏，所以这里至少留一条线索
+            # 不能只静默降级直连：代理配错时表现为「该平台解析失败」，排查方向
+            # 会被带偏，所以这里至少留一条线索
             from astrbot.api import logger
             logger.warning(
-                "读取全局代理配置失败，本次请求将直连（代理配错时会导致解析全部失败）",
+                "读取代理配置失败，本次请求将直连（代理配错时会导致解析失败）",
                 exc_info=True,
             )
             self.proxies = None
@@ -92,42 +116,72 @@ class BaseParser:
         except Exception:
             return True
 
-    @staticmethod
-    def global_proxy() -> str | None:
-        """全局代理地址（读不到配置就返回 None，由调用方决定怎么兜）。"""
+    @classmethod
+    def _platform_proxy(cls) -> str | None:
+        """本解析器平台的生效代理；BaseParser 自身（无平台上下文）返回 None。
+
+        与实例侧 ``self.proxies`` 同源（都走 :meth:`ParserConfig.proxy_for`），
+        给那些**按类**拿 client_kwargs 的地方用（如抖音的 DouyinShareSession）。
+        """
+        platform = getattr(cls, "platform", None)
+        if platform is None:
+            return None
+        platform_key = _platform_key(platform)
+        if not platform_key:
+            return None
         try:
             from .config import get_config
-            return get_config().PROXY or None
+            return get_config().proxy_for(platform_key)
         except Exception:
             return None
 
     @classmethod
     def client_kwargs(cls, **overrides) -> dict:
-        """默认 httpx 客户端参数：超时 / 证书校验 / 全局代理。
+        """默认 httpx 客户端参数：超时 / 证书校验 / 分解析器代理。
 
         给那些**自己 new AsyncClient** 的解析器用（微博 / 小红书 / NGA / AcFun /
-        快手 / 抖音）。这些地方原先只传 headers 与 timeout，于是「全局代理」对它们
+        快手 / 抖音）。这些地方原先只传 headers 与 timeout，于是「代理」对它们
         完全无效 —— 在直连不通的服务器上表现为「这几个平台解析失败」，而媒体下载
         却是通的（下载器有代理），排查方向很容易被带偏。
+
+        代理只在本平台开了「走代理」开关时才带上（见 :meth:`_platform_proxy`）。
+        注意 ``trust_env`` 恒为 True：环境变量代理（``HTTP_PROXY`` 等）与插件
+        代理是**两条独立的来源**，开关只决定「要不要用插件配的那条」——
+        「只在环境变量里配代理」的部署（tests/smoke/harness.py 走的就是这条）
+        不填插件代理也能整体生效。所以配置页文案说的是「不走插件代理」，
+        而不是绝对的「直连」。
+
+        **一条 httpx 的已知副作用**（不要试图在插件里绕开）：
+        ``proxy`` 一旦非空，httpx 的 ``_get_proxy_map`` 直接返回
+        ``{"all://": proxy}``，**整张环境映射连同 ``NO_PROXY`` 绕过列表一起丢掉**。
+        也就是说「给某平台打开走代理开关」会让该平台不再享受环境变量的 NO_PROXY
+        例外（比如内网域名、169.254.169.254 这类元数据地址）。需要例外时，
+        把该地址直接排除在代理目标之外，或不给该平台开开关。
 
         调用方传的键覆盖默认值，所以 ``follow_redirects=False`` 这类特例照常可用。
         """
         kwargs: dict[str, object] = {
             "timeout": COMMON_TIMEOUT,
             "verify": cls.verify_ssl_enabled(),
-            # 代理来源有两处：插件配置的 PROXY（下面显式传 proxy）与环境变量
-            # （httpx 的 trust_env）。**这里显式写 True 并要求调用方别各写各的**：
-            # 原先微博/小红书写了 trust_env=False，于是「只在环境变量里配代理」的部署中，
-            # 这两个平台会悄悄直连 —— 表现为「就它俩解析失败」，排查时极难想到。
+            # 代理来源有两处：插件配置的 PROXY + 平台开关（下面显式传 proxy）与
+            # 环境变量（httpx 的 trust_env）。**这里显式写 True 并要求调用方别
+            # 各写各的**：原先微博/小红书写了 trust_env=False，于是
+            # 「只在环境变量里配代理」的部署中，这两个平台会悄悄直连。
             "trust_env": True,
         }
-        if proxy := cls.global_proxy():
+        if proxy := cls._platform_proxy():
             kwargs["proxy"] = proxy
         kwargs.update(overrides)
         return kwargs
 
     def new_client(self, **kwargs) -> "AsyncClient":
-        """创建带代理与默认超时的 httpx 客户端。"""
+        """创建带代理与默认超时的 httpx 客户端。
+
+        ``self.proxies`` 与 ``client_kwargs`` 走同一个裁决点
+        (:meth:`ParserConfig.proxy_for`)，实例侧再显式盖一次是为了让
+        「构造时读到的平台代理」与「实时读到的」必然一致 —— 热更新后
+        ``self.proxies`` 会由 main.py 重建解析器来刷新，两者不会长期分叉。
+        """
         from httpx import AsyncClient
         merged = self.client_kwargs(
             timeout=self.timeout,
@@ -206,7 +260,13 @@ class BaseParser:
 
     @final
     async def parse_with_redirect(self, url: str, headers: dict[str, str] | None = None) -> ParseResult:
-        redirect_url = await self.get_redirect_url(url, headers=headers or self.headers)
+        # 重定向这一跳必须显式带本平台的代理：get_redirect_url 是 staticmethod，
+        # 它内部的 client_kwargs 按 BaseParser 自己解析，那边没有平台上下文、
+        # 拿不到 proxy —— 于是「平台开了走代理、重定向这一跳却静默直连」。
+        # 抖音/小红书/微博/B站的短链全走这里，是真实路径不是理论问题。
+        redirect_url = await self.get_redirect_url(
+            url, headers=headers or self.headers, proxy=self.proxies
+        )
         if redirect_url == url:
             raise ParseException(f"无法重定向 URL: {url}")
         keyword, searched = self.search_url(redirect_url)
@@ -226,14 +286,23 @@ class BaseParser:
         return ParseResult(platform=cls.platform, **kwargs)
 
     @staticmethod
-    async def get_redirect_url(url: str, headers: dict[str, str] | None = None) -> str:
+    async def get_redirect_url(
+        url: str,
+        headers: dict[str, str] | None = None,
+        proxy: str | None = None,
+    ) -> str:
         from httpx import AsyncClient
         headers = headers or COMMON_HEADER.copy()
+        # proxy 由调用方（实例方法）显式传入：BaseParser 自身没有平台上下文，
+        # client_kwargs 解析不出代理，只能靠这里补上调用方的开关结果
+        overrides: dict[str, object] = {
+            "headers": headers,
+            "follow_redirects": False,
+        }
+        if proxy:
+            overrides["proxy"] = proxy
         async with AsyncClient(
-            **BaseParser.client_kwargs(
-                headers=headers,
-                follow_redirects=False,
-            )
+            **BaseParser.client_kwargs(**overrides)
         ) as client:
             response = await client.get(url)
             if response.status_code >= 400:
@@ -241,14 +310,21 @@ class BaseParser:
             return response.headers.get("Location", url)
 
     @staticmethod
-    async def get_final_url(url: str, headers: dict[str, str] | None = None) -> str:
+    async def get_final_url(
+        url: str,
+        headers: dict[str, str] | None = None,
+        proxy: str | None = None,
+    ) -> str:
         from httpx import AsyncClient
         headers = headers or COMMON_HEADER.copy()
+        overrides: dict[str, object] = {
+            "headers": headers,
+            "follow_redirects": True,
+        }
+        if proxy:
+            overrides["proxy"] = proxy
         async with AsyncClient(
-            **BaseParser.client_kwargs(
-                headers=headers,
-                follow_redirects=True,
-            )
+            **BaseParser.client_kwargs(**overrides)
         ) as client:
             response = await client.get(url)
             if response.status_code >= 400:

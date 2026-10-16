@@ -36,6 +36,7 @@ export function createParseView(ctx) {
   let last = null;
   let custom = null;
   let busy = false;
+  const expandedTools = new Set();
 
   const elements = {};
 
@@ -65,10 +66,31 @@ export function createParseView(ctx) {
         card("解析结果", null, [emptyBox("还没有解析结果，输入链接或分享口令试试")]),
       );
     }
-    container.appendChild(renderShotCard());
+    appendTools();
+  }
+
+  function toolDrawer(key, title, description, content, needsAttention = false) {
+    const drawer = h("details", {
+      class: "tool-drawer",
+      open: expandedTools.has(key) || needsAttention,
+      onToggle: () => {
+        if (drawer.open) expandedTools.add(key);
+        else expandedTools.delete(key);
+      },
+    }, [
+      h("summary", {}, [h("strong", { text: title }), h("span", { text: description })]),
+      content,
+    ]);
+    return drawer;
+  }
+
+  function appendTools() {
+    container.appendChild(toolDrawer("shot", "截图工具", "输入网址，单独测试网页截图", renderShotCard()));
     // 老版本后端没有 custom_parsers 接口时 custom 为 null，整卡不渲染
     const customCard = renderCustomParserCard();
-    if (customCard) container.appendChild(customCard);
+    if (customCard) container.appendChild(toolDrawer(
+      "custom", "解析器扩展", "管理自定义解析器与重新加载", customCard, Boolean(custom.errors?.length),
+    ));
   }
 
   /* ---------------- 输入区 ---------------- */
@@ -173,7 +195,7 @@ export function createParseView(ctx) {
         h("div", { class: "empty" }, [spinner(), " 正在解析，视频/图集较大时会慢一些…"]),
       ]),
     );
-    container.appendChild(renderShotCard());
+    appendTools();
 
     try {
       const payload = await ctx.api.post("parse", {

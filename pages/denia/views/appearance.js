@@ -57,6 +57,7 @@ export function createAppearanceView(ctx) {
   let previewMeta = null;
   let previewBusy = false;
   let previewTimer = 0;
+  let interfaceExpanded = false;
   const elements = {};
 
   /* ---------------- 数据加载 ---------------- */
@@ -210,7 +211,13 @@ export function createAppearanceView(ctx) {
       title: "自定义颜色",
       value: HEX_RE.test(p.accent_custom) ? p.accent_custom : "#2f6fdd",
       style: { background: "none" },
-      onInput: (event) => ctx.savePrefs({ accent_custom: event.target.value.toUpperCase() }),
+      onInput: (event) => {
+        // Color inputs emit many input events while the native picker is dragged.
+        // Update the preview locally; persist once on change when the picker closes.
+        p.accent = "custom";
+        p.accent_custom = event.target.value.toUpperCase();
+        ctx.applyPrefs();
+      },
       onChange: (event) => {
         ctx.savePrefs({ accent: "custom", accent_custom: event.target.value.toUpperCase() });
         render();
@@ -377,6 +384,30 @@ export function createAppearanceView(ctx) {
       onChange: (event) => setCard("RENDER_WATERMARK", event.target.value.trim().slice(0, 12)),
     });
 
+    const signatureGroup = h("details", { class: "appearance-advanced-group" }, [
+      h("summary", { class: "appearance-advanced-summary", text: "正文与署名" }),
+      numField("正文最大行数", "RENDER_DESC_MAX_LINES", { min: 0, max: 12, unit: "行（0=按布局默认 4~6 行）" }),
+      h("div", { class: "field" }, [
+        h("div", { class: "field-label", text: "卡片水印文字" }),
+        h("div", { class: "field-body" }, [watermarkInput]),
+        h("p", { class: "field-hint", text: "卡片右下角的水印，留空则不显示，最长 12 个字符" }),
+      ]),
+    ]);
+    const coverGroup = h("details", { class: "appearance-advanced-group" }, [
+      h("summary", { class: "appearance-advanced-summary", text: "封面与背景" }),
+      switchField("作者头像", "RENDER_SHOW_AVATAR", "显示", "隐藏"),
+      switchField(
+        "封面播放按钮",
+        "RENDER_SHOW_PLAY_BUTTON",
+        "显示",
+        "隐藏",
+        "视频封面中央的毛玻璃播放按钮；关掉后封面更干净",
+      ),
+      switchField("封面展示", "RENDER_COVER_FULL_SIZE", "完整", "裁切", "完整=不裁切封面，长图完整铺在卡片顶部"),
+      colorField("背景渐变 · 顶部色", "RENDER_GRADIENT_TOP"),
+      colorField("背景渐变 · 底部色", "RENDER_GRADIENT_BOTTOM"),
+    ]);
+
     return card("卡片设计器", "改的是真正发出去的分享卡片，保存后立即生效", [
       switchField("卡片渲染", "RENDER_ENABLED", "渲染卡片", "纯文本", "关闭后解析结果以纯文本发送，不再生成图片"),
       h("div", { class: "field" }, [
@@ -389,23 +420,8 @@ export function createAppearanceView(ctx) {
       ]),
       numField("卡片宽度", "RENDER_WIDTH", { min: 520, max: 1080, unit: "px（520~1080）" }),
       colorField("自定义强调色", "RENDER_ACCENT_COLOR", "留空=每个平台用自己的品牌色；填后所有卡片统一强调色"),
-      h("div", { class: "field" }, [
-        h("div", { class: "field-label", text: "卡片水印文字" }),
-        h("div", { class: "field-body" }, [watermarkInput]),
-        h("p", { class: "field-hint", text: "卡片右下角的水印，留空则不显示，最长 12 个字符" }),
-      ]),
-      numField("正文最大行数", "RENDER_DESC_MAX_LINES", { min: 0, max: 12, unit: "行（0=按布局默认 4~6 行）" }),
-      switchField("作者头像", "RENDER_SHOW_AVATAR", "显示", "隐藏"),
-      switchField(
-        "封面播放按钮",
-        "RENDER_SHOW_PLAY_BUTTON",
-        "显示",
-        "隐藏",
-        "视频封面中央的毛玻璃播放按钮；关掉后封面更干净",
-      ),
-      switchField("封面展示", "RENDER_COVER_FULL_SIZE", "完整", "裁切", "完整=不裁切封面，长图完整铺在卡片顶部"),
-      colorField("背景渐变 · 顶部色", "RENDER_GRADIENT_TOP"),
-      colorField("背景渐变 · 底部色", "RENDER_GRADIENT_BOTTOM"),
+      signatureGroup,
+      coverGroup,
     ]);
   }
   /* ---------------- 预览卡片 / 保存栏 / 装配 ---------------- */
@@ -486,10 +502,18 @@ export function createAppearanceView(ctx) {
   function render() {
     if (!container) return;
     clear(container);
+    const interfaceDrawer = h("details", {
+      class: "tool-drawer",
+      open: interfaceExpanded,
+      onToggle: () => { interfaceExpanded = interfaceDrawer.open; },
+    }, [
+      h("summary", {}, [h("strong", { text: "界面主题" }), h("span", { text: "管理页的颜色、圆角与密度" })]),
+      renderInterfaceCard(),
+    ]);
     const left = h(
       "div",
       { style: { display: "flex", flexDirection: "column", gap: "var(--gap)" } },
-      [renderInterfaceCard(), renderCardDesigner()],
+      [interfaceDrawer, renderCardDesigner()],
     );
     const right = h("div", { class: "preview-stage" }, [renderPreviewCard()]);
     container.appendChild(h("div", { class: "appearance-grid" }, [left, right]));

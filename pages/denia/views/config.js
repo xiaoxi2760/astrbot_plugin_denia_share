@@ -42,7 +42,7 @@ export function createConfigView(ctx) {
   let values = {};
   let draft = {};
   let filter = "";
-  let activeSection = "all";
+  let activeSection = null;
   let collapsed = new Set();
   /** 底部保存栏里几个需要跟着改动数走的节点，见 syncSaveBar。 */
   let saveBar = null;
@@ -59,8 +59,10 @@ export function createConfigView(ctx) {
     };
     values = payload.values || {};
     draft = {};
+    if (activeSection === null) activeSection = meta.sections[0]?.key || "all";
     const overview = await ctx.api.get("overview").catch(() => null);
     if (overview && overview.version) ctx.setVersion(`v${overview.version}`);
+    ctx.setHead("");
   }
 
   function itemOf(key) {
@@ -150,7 +152,7 @@ export function createConfigView(ctx) {
       .filter(Boolean)
       .join(" ")
       .toLowerCase();
-    return haystack.includes(filter);
+    return haystack.includes(filter.toLowerCase());
   }
 
   /** 当前应该展示的分组：选中某个大类时收窄到它；搜索时始终跨全部大类。 */
@@ -219,17 +221,32 @@ export function createConfigView(ctx) {
       class: "input",
       type: "search",
       value: filter,
+      "aria-label": "搜索配置项",
+      dataset: { configSearch: "1" },
       placeholder: "搜索配置项（名称 / 键 / 说明），跨全部大类",
       onInput: (event) => {
-        // haystack 已转小写，filter 必须同步转，否则搜大写键名（如 RENDER）永远落空
-        filter = event.target.value.trim().toLowerCase();
+        // 保留用户输入的大小写，匹配时再统一转小写；避免每次输入后搜索框文字跳变。
+        filter = event.target.value.trim();
+        // render() 会重建工具条；把焦点和光标还给新搜索框，避免每输入一个字就失焦。
+        const start = event.target.selectionStart;
+        const end = event.target.selectionEnd;
         render();
+        const nextSearch = container.querySelector("[data-config-search]");
+        if (nextSearch) {
+          nextSearch.focus();
+          if (typeof nextSearch.setSelectionRange === "function" && start !== null && end !== null) {
+            nextSearch.setSelectionRange(start, end);
+          }
+        }
       },
     });
 
     const section = meta.sections.find((s) => s.key === activeSection);
+    const matchCount = filter
+      ? meta.items.filter(matchesFilter).length
+      : meta.items.length;
     const subtitle = filter
-      ? `搜索「${filter}」· 跨全部大类`
+      ? `跨全部大类 · ${matchCount} 项匹配`
       : section
         ? `${section.label} · ${section.description}`
         : `${meta.items.length} 项，保存后立即生效`;
@@ -347,11 +364,14 @@ export function createConfigView(ctx) {
     return sectionNode;
   }
 
-  /** 组内渲染：带 subgroup 的按子组（第三级）分段，没有子组的项排在最前。 */
+  /** 组内渲染：带 subgroup 的按子组（第三级）分段，没有子组的项排在最前。
+
+  连续的 widget="switch-grid" 项（分解析器代理开关这类「一排小开关」）
+  合并进一个网格渲染，不再一行一个大开关 —— 十来个 bool 逐行摆太占地。 */
   function renderGroupBody(items) {
     const body = h("div");
     if (!items.some((item) => item.subgroup)) {
-      for (const item of items) body.appendChild(renderField(item));
+      appendFieldSequence(body, items);
       return body;
     }
     const order = [];
@@ -366,9 +386,71 @@ export function createConfigView(ctx) {
     }
     for (const sub of order) {
       if (sub) body.appendChild(h("div", { class: "cfg-subhead", text: sub }));
-      for (const item of buckets.get(sub)) body.appendChild(renderField(item));
+      appendFieldSequence(body, buckets.get(sub));
     }
     return body;
+  }
+
+  /** 按顺序铺一组字段行，途中把连续的 switch-grid 项收拢成开关网格。 */
+  function appendFieldSequence(host, items) {
+    let index = 0;
+    while (index < items.length) {
+      if (items[index].widget !== "switch-grid") {
+        host.appendChild(renderField(items[index]));
+        index += 1;
+        continue;
+      }
+      let end = index;
+      while (end < items.length && items[end].widget === "switch-grid") end += 1;
+      host.appendChild(renderSwitchGrid(items.slice(index, end)));
+      index = end;
+    }
+  }
+
+  /** 开关网格：一排紧凑 tile，宽度不够自动换行。
+
+  每格是 平台名 + 小开关（自带直连/走代理文案）+ 已改标记，详细说明收进
+  title 悬浮提示 —— 逐行展开时 12 段 hint 会把页面撑到看不见底。 */
+  function renderSwitchGrid(items) {
+    const tiles = items.map((item) => {
+      const control = switchControl(
+        Boolean(currentValue(item.key)),
+        (next) => onValueChanged(item.key, next),
+        "使用插件代理",
+        "不走插件代理",
+      );
+      // 外层**不能用 label**：switchControl 自己就是 label，嵌套后点一下
+      // 会被两层 label 各转发一次、开关来回切两次等于没切。用 div + 点击转发：
+      // 点到开关本体时交给它自己的 label，点到其余区域由这里替用户拨开关。
+      const tile = h("div", { class: "cfg-switch-tile", title: item.hint || "" }, [
+        h("span", { class: "cfg-switch-tile-name", text: item.label }),
+        control,
+        h("span", {
+          class: "cfg-dirty",
+          text: "已改",
+          hidden: hasDraft(item.key) ? null : true,
+          dataset: { dirtyMark: item.key },
+        }),
+      ]);
+      tile.addEventListener("click", (event) => {
+        if (control.contains(event.target)) return;
+        const box = control.querySelector("input");
+        if (!box) return;
+        box.checked = !box.checked;
+        box.dispatchEvent(new Event("change"));
+      });
+      return tile;
+    });
+    const hasScreenshot = items.some((item) => item.key === "PROXY_SCREENSHOT");
+    return h("div", { class: "field" }, [
+      h("div", { class: "cfg-switch-grid" }, tiles),
+      h("div", {
+        class: "field-hint",
+        text: hasScreenshot
+          ? "这些开关只控制本插件的请求是否使用上方代理地址；关闭时仍可能受运行环境代理设置影响。悬停查看各项说明"
+          : "这些开关只控制本插件该平台的接口请求与媒体下载是否使用上方代理地址；关闭时仍可能受运行环境代理设置影响。悬停查看各项说明",
+      }),
+    ]);
   }
 
   /* ---------------- 配置项（字段行） ---------------- */
@@ -387,7 +469,15 @@ export function createConfigView(ctx) {
     ])];
 
     const body = h("div", { class: "field-body" }, [control]);
-    if (item.hint) body.appendChild(h("div", { class: "field-hint", text: item.hint }));
+    if (item.hint) {
+      const hint = item.key === "PROXY"
+        ? item.hint.replace(
+            "留空 = 全部直连。",
+            "留空 = 本插件不使用此代理地址；运行环境的代理设置仍可能生效。",
+          )
+        : item.hint;
+      body.appendChild(h("div", { class: "field-hint", text: hint }));
+    }
     parts.push(body);
 
     return h("div", { class: "field" }, parts);

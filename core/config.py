@@ -19,6 +19,8 @@ import re
 from pathlib import Path
 from typing import Any
 
+from .constants import PLATFORMS
+
 _config = None
 
 _HEX_COLOR_RE = re.compile(r"^#[0-9a-fA-F]{6}$")
@@ -76,6 +78,35 @@ CONFIG_SECTIONS: tuple[dict[str, Any], ...] = (
 #   返回的 platforms 列表），目前仅 DISABLED_PLATFORMS 使用
 #   subgroup 可选：组内第三级小标题（配置项多的分组按它再分段，如「卡片外观」
 #   按 基础/内容元素/配色 拆分）；不带 subgroup 的项排在同组最前
+#   widget="switch-grid"：WebUI 把这些项渲染成一排紧凑小开关的网格（平台开关这类
+#   「十来个 bool」逐行摆太占地方），label 只放平台名，开/关文案由前端 tile 自带
+
+# 分解析器代理开关：按平台逐个决定「这个解析器要不要走代理地址」。
+#
+# 键名规则 ``PROXY_<平台键大写>``（如 PROXY_BILIBILI），与
+# :meth:`ParserConfig.proxy_for` 的查键规则一致 —— 由 PLATFORMS 生成而不是手写，
+# 新增平台时自动多一个开关。开关只控制插件配置的代理地址；关闭时不使用插件代理，
+# httpx 的环境变量代理仍可能生效。自定义解析器没有对应的插件代理开关。
+#
+# label 用正式名、hint 用正式名（不用 card_name 昵称）：配置页里混着「猴山」
+# 「小蓝鸟」找人会卡一下，正式名才是配置该用的语言。
+_PROXY_SWITCH_ITEMS: tuple[dict[str, Any], ...] = tuple(
+    {
+        "key": f"PROXY_{key.upper()}",
+        "group": "高级设置",
+        "subgroup": "网络",
+        "widget": "switch-grid",
+        "label": meta.display_name,
+        "type": "bool",
+        "default": False,
+        "hint": (
+            f"开启后「{meta.display_name}」的接口请求与媒体下载才走上面的代理地址；"
+            "关闭时不使用插件代理，环境变量代理仍可能生效。代理地址留空时本开关无效"
+        ),
+    }
+    for key, meta in PLATFORMS.items()
+)
+
 CONFIG_META: tuple[dict[str, Any], ...] = (
     # ---------------- 解析设置 ---------------- #
     {
@@ -515,11 +546,30 @@ CONFIG_META: tuple[dict[str, Any], ...] = (
         "key": "PROXY",
         "group": "高级设置",
         "subgroup": "网络",
-        "label": "全局代理",
+        "label": "代理地址",
         "type": "string",
         "default": "",
         "placeholder": "http://127.0.0.1:7897",
-        "hint": "留空不使用。作用于下载与自建请求（GitHub/Pixiv/截图）。填运行 AstrBot 那台机器上的地址",
+        "hint": (
+            "留空 = 不使用插件代理，环境变量代理仍可能生效。填运行 AstrBot 那台机器上的地址；"
+            "具体哪些平台走它由下面各平台的「走代理」开关决定，开关默认全关。"
+            "Docker 分容器部署时这里填宿主地址（如 http://172.18.0.1:7890），"
+            "不要填 127.0.0.1 —— 那是容器自己"
+        ),
+    },
+    *_PROXY_SWITCH_ITEMS,
+    {
+        "key": "PROXY_SCREENSHOT",
+        "group": "高级设置",
+        "subgroup": "网络",
+        "widget": "switch-grid",
+        "label": "网页截图",
+        "type": "bool",
+        "default": False,
+        "hint": (
+            "开启后截图请求才走上面的代理地址；关闭时不使用插件代理，"
+            "环境变量代理仍可能生效。代理地址留空时本开关无效"
+        ),
     },
     {
         "key": "HTTP_VERIFY_SSL",
@@ -802,6 +852,69 @@ def migrate_grouped_config(config: Any) -> bool:
     return changed
 
 
+def migrate_proxy_switches(config: Any) -> bool:
+    """1.2.6 起「全局代理」拆成代理地址 + 各平台「走代理」开关，一次性迁移，幂等。
+
+    **为什么必须迁移**：升级后 ``PROXY_<平台>`` 在配置里不存在，读侧按默认值
+    ``False`` 走 —— 于是老用户所有平台**静默变直连**。对只给 Pixiv 配了代理的人，
+    症状是「更新完 Pixiv 突然解析不了了」，而排查方向会先去看代理通不通，
+    恰好把注意力引到错误的组件上。而且这个窗口持续到用户第一次保存配置为止，
+    不能指望用户自觉去勾。
+
+    迁移规则：``PROXY`` 非空、且存储配置里**一个 ``PROXY_*`` 键都没有**时，
+    把全部平台开关（含 ``PROXY_SCREENSHOT``）置 True，完整保留升级前的
+    「配了代理就全走」语义；之后用户自己关掉国内那几个平台即可。
+
+    「一个键都没有」这个判据是幂等的关键：用户只要动过一次开关，配置里就有了
+    对应键，后续升级不再覆盖他的选择。
+
+    **顺带收拾扁平残留键**：``_cfg_get`` 的回退规则是「分组值 == 默认值且扁平值
+    ≠ 默认值 → 用扁平值」，而这些开关的默认值恰好就是 False。于是老配置里残留的
+    扁平 ``PROXY_*: true`` 会盖掉用户在新版里**显式关掉**的同一个开关，而且
+    分组里存的是 False（等于默认值），迁移也看不出区别 —— 症状是「我明明关了，
+    重启后又走代理了」。所以这里把扁平位并入分组后删掉，让分组成为唯一事实来源。
+
+    Returns:
+        是否改动了配置（True 时调用方应落盘）。
+    """
+    switches = [item["key"] for item in CONFIG_META if item["key"].startswith("PROXY_")]
+    if not switches:
+        return False
+
+    address = ""
+    nested = config.get("高级设置")
+    if isinstance(nested, dict):
+        address = str(nested.get("PROXY", "") or "").strip()
+    if not address:
+        address = str(config.get("PROXY", "") or "").strip()
+    if not address:
+        # 从来没配过代理：开关保持默认 False，行为不变
+        return False
+
+    group = config.get("高级设置")
+    if not isinstance(group, dict):
+        group = {}
+        config["高级设置"] = group
+
+    # 扁平残留键并入分组后删掉：分组有值 = 那是用户最新的选择，扁平位只是历史残留
+    changed = False
+    for key in switches:
+        if key not in config:
+            continue
+        if key not in group:
+            group[key] = config[key]
+        del config[key]
+        changed = True
+
+    # 分组里已经出现过开关，就认为用户做过选择，不再全开
+    if any(key in group for key in switches):
+        return changed
+
+    for key in switches:
+        group[key] = True
+    return True
+
+
 class ParserConfig:
     """解析器配置 - 由 main.py 初始化"""
 
@@ -930,8 +1043,34 @@ class ParserConfig:
 
     @property
     def PROXY(self) -> str:
-        """全局代理地址，形如 http://127.0.0.1:7890，留空不使用。"""
+        """代理地址，形如 http://127.0.0.1:7890，留空不使用。
+
+        这里只存地址；**哪些解析器真的走它**由各 ``PROXY_<平台>`` 开关决定，
+        见 :meth:`proxy_for`。
+        """
         return str(self._cfg_get("PROXY", "") or "").strip()
+
+    def proxy_for(self, platform_key: str) -> str | None:
+        """某个平台解析器的插件代理；开关没开（或地址为空）时返回 None，不传插件代理。
+        httpx 的环境变量代理仍可能生效。
+
+        查键规则：``PROXY_<平台键大写>``。内置平台的开关由 CONFIG_META 按
+        PLATFORMS 生成；自定义解析器没有对应配置项，``_cfg_get`` 拿到默认值
+        False，永远不使用插件代理。
+        """
+        address = self.PROXY
+        if not address:
+            return None
+
+        key = f"PROXY_{str(platform_key).strip().upper()}"
+        if not bool(self._cfg_get(key, False)):
+            return None
+        return address
+
+    @property
+    def SCREENSHOT_PROXY(self) -> str:
+        """截图服务的插件代理；开关关闭时返回空串，不传插件代理；环境变量代理仍可能生效。"""
+        return self.PROXY if bool(self._cfg_get("PROXY_SCREENSHOT", False)) else ""
 
     @property
     def HTTP_VERIFY_SSL(self) -> bool:

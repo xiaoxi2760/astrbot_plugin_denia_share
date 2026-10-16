@@ -95,7 +95,8 @@ export function createOverviewView(ctx) {
       ]),
     );
 
-    const left = h("div", {}, [
+    const diagnostics = h("details", { class: "tool-drawer" }, [
+      h("summary", {}, [h("strong", { text: "运行详情" }), h("span", { text: "版本、截图后端与数据目录" })]),
       card("运行状态", null, [
         h("dl", { class: "detail-grid" }, [
           h("dt", { text: "插件版本" }),
@@ -119,18 +120,18 @@ export function createOverviewView(ctx) {
       ]),
     ]);
 
-    left.appendChild(renderBiliCard());
-    left.appendChild(renderMediaCard());
+    const left = h("div", { class: "card-stack" }, [renderBiliCard(), renderMediaCard()]);
 
     // 自定义解析器的管理卡（目录 / 重载 / 报错详情）在「解析」页；
-    // 这里只放一张紧凑开关卡，把右栏高度补齐到与左栏齐平
-    const right = h("div", {}, [
+    // 常用开关与最近记录放在同一列，诊断信息单独按需展开。
+    const right = h("div", { class: "card-stack" }, [
       renderPlatformCard(),
       renderCustomParserMini(),
       renderRecentCard(),
     ]);
 
     container.appendChild(h("div", { class: "two-col" }, [left, right]));
+    container.appendChild(diagnostics);
   }
 
   /* ---------------- B站登录 ---------------- */

@@ -37,7 +37,11 @@ class KuaiShouParser(BaseParser):
     @handle("chenzhongtech", r"(?:v\.m\.)?chenzhongtech\.com/fw/[A-Za-z\d._?%&+\-=/#]+")
     async def _parse_v_kuaishou(self, searched: re.Match[str]):
         url = f"https://{searched.group(0)}"
-        real_url = await self.get_redirect_url(url, headers=self.ios_headers)
+        # 这一跳是短链 302，必须显式带代理：get_redirect_url 是 staticmethod，
+        # 内部按 BaseParser 自己解析（没有平台上下文），拿不到快手的开关结果
+        real_url = await self.get_redirect_url(
+            url, headers=self.ios_headers, proxy=self.proxies
+        )
         if len(real_url) <= 0:
             raise ParseException("failed to get location url from url")
 

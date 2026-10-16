@@ -31,26 +31,49 @@ export function createCacheView(ctx) {
   let data = null;
   const query = { keyword: "", platform: "", via: "", limit: 20, offset: 0 };
   let searchTimer = null;
+  let requestId = 0;
+  const elements = {};
 
   async function load(showBusy = true) {
+    const currentRequest = ++requestId;
     if (showBusy) ctx.setHead("加载中…");
-    data = await ctx.api.get("cache", {
-      keyword: query.keyword,
-      platform: query.platform,
-      via: query.via,
-      limit: query.limit,
-      offset: query.offset,
-    });
+    let nextData;
+    try {
+      nextData = await ctx.api.get("cache", {
+        keyword: query.keyword,
+        platform: query.platform,
+        via: query.via,
+        limit: query.limit,
+        offset: query.offset,
+      });
+    } catch (error) {
+      if (currentRequest !== requestId) return false;
+      throw error;
+    }
+    if (currentRequest !== requestId) return false;
+    data = nextData;
     ctx.setBadge(data.total || 0);
     ctx.setHead(`${data.total || 0} 条记录`);
+    return true;
   }
 
   function render() {
     if (!container || !data) return;
-    clear(container);
-    container.appendChild(renderToolbar());
-    container.appendChild(renderList());
-    container.appendChild(renderFooterActions());
+    if (!elements.toolbar) {
+      elements.toolbar = renderToolbar();
+      elements.results = h("div", { class: "card-stack" });
+      container.appendChild(elements.toolbar);
+      container.appendChild(elements.results);
+    }
+    const subtitle = elements.toolbar.querySelector(".sub");
+    if (subtitle) {
+      const cache = data.cache || {};
+      const stats = data.stats || {};
+      subtitle.textContent = `共 ${data.total} 条 · 记录文件 ${fmtBytes(stats.size_bytes || 0)} · 缓存文件 ${cache.files || 0} 个 / ${cache.size_text || fmtBytes(cache.size_bytes || 0)}`;
+    }
+    clear(elements.results);
+    elements.results.appendChild(renderList());
+    elements.results.appendChild(renderFooterActions());
   }
 
   /* ---------------- 工具条 ---------------- */
@@ -64,6 +87,8 @@ export function createCacheView(ctx) {
       onInput: (event) => {
         query.keyword = event.target.value;
         query.offset = 0;
+        // 用户一输入就让在途的旧查询失效，即使新请求还在 debounce 等待期。
+        requestId++;
         if (searchTimer) clearTimeout(searchTimer);
         searchTimer = setTimeout(() => reload(), 320);
       },
@@ -273,8 +298,7 @@ export function createCacheView(ctx) {
 
   async function reload() {
     try {
-      await load(false);
-      render();
+      if (await load(false)) render();
     } catch (error) {
       toast(`加载失败：${error.message}`, "err");
     }
@@ -471,6 +495,7 @@ export function createCacheView(ctx) {
     unmount() {
       if (searchTimer) clearTimeout(searchTimer);
       searchTimer = null;
+      requestId++;
     },
   };
 }

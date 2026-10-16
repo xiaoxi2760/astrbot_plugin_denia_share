@@ -31,6 +31,10 @@ from httpx import AsyncClient
 
 from astrbot.api import logger
 
+# 本模块自建 AsyncClient，且 client_kwargs 是**外部注入**的（不 import
+# base_parser），所以兜底必须自己 import 一次 —— 否则它自己不保证环境已就绪。
+from ... import http_env  # noqa: F401  (import for side effect)
+
 ROUTER_RE = re.compile(r"window\._ROUTER_DATA\s*=\s*(.*?)</script>", re.DOTALL)
 CHALLENGE_RE = re.compile(r'cs="([A-Za-z0-9+/=]+)"')
 
