@@ -8,7 +8,7 @@
 
 - **rika 原实现**：短链重定向 + ``window.INIT_STATE`` + msgspec 结构化解码，
   并做了 ``/fw/long-video/`` → ``/fw/photo/`` 的长视频改写。
-- **娅娅版增强**：新版分享页把 ``photo`` 序列化成了 **JSON 字符串**（rika 的
+- **新版页面兼容**：新版分享页把 ``photo`` 序列化成了 **JSON 字符串**（rika 的
   严格结构体解码在这里会直接失败），图集还额外依赖 ``single.cdnList``。
   这里改为「dict / JSON 字符串都兼容」后再提取，图集与视频都能覆盖。
 """

@@ -23,8 +23,7 @@
 并非 nonebot-plugin-parser 的移植件——后者虽然也有 ``renders/``，但走的是
 Jinja2 HTML 模板 + 浏览器截图，与本模块的 Pillow 实现是两回事。
 
-娅娅版（astrbot_plugin_media_parser）拷贝本模块后把水印常量化为
-``WATERMARK_TAG``，这里沿用同一做法并改为「希望解析」。
+水印文字统一由 ``WATERMARK_TAG`` 定义，默认显示「希望解析」。
 """
 
 from __future__ import annotations
@@ -55,7 +54,7 @@ try:
 except AttributeError:  # Pillow < 9.1
     _LANCZOS = Image.LANCZOS  # type: ignore[attr-defined]
 
-# 卡片右下角水印文字。娅娅版也是这样把它抽成常量的，改品牌只动这一处。
+# 卡片右下角的默认水印文字。
 WATERMARK_TAG = "希望解析"
 
 

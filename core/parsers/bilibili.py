@@ -547,7 +547,6 @@ class BilibiliParser(BaseParser):
         # 回退 html5 单文件 MP4。
         # 实测（2026-09-17，匿名）：DASH 只给到 480P，html5 durl 却是 720P——
         # 同一个 5 分钟视频 35.3MB，而 DASH 360P 只有 11.2MB。
-        # 娅娅版正是靠这条回退，在未登录时拿到比纯 DASH 更高的清晰度。
         need_mp4_fallback = video_stream is None or self._below_target(video_stream, target_quality)
         if need_mp4_fallback:
             # 只在 html5 档位确实高于 DASH 时才替换，避免登录后反而被降级

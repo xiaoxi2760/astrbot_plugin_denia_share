@@ -1,8 +1,8 @@
 {
   "metadata": {
     "display_name": "Hope Parser",
-    "short_desc": "Auto-parse shared links from Bilibili, Douyin, Kuaishou, Weibo, Xiaohongshu, Twitter, AcFun, NGA, GitHub, Pixiv and Steam",
-    "desc": "Auto-parse shared links from 11 platforms and render them as share cards, with a built-in Dashboard page.\n\n- Just send a link in chat; no command needed\n- Cards: 4 layouts x light/dark themes, adjustable accent color, gradient and watermark\n- Dashboard: overview, manual parsing, parse cache, UI and card appearance, all settings\n- When videos can't be sent across Docker containers, use a shared cache dir or the media relay\n\nSee the repository README for details. MIT licensed; parts of the parser framework and card renderer are based on astrbot_plugin_rika_share (MIT) and Johnserf-Seed/f2 (Apache-2.0)."
+    "short_desc": "Turn shared links into content cards, videos and image galleries, with webpage screenshots and a built-in management page.",
+    "desc": "Send a link or a share message in chat to receive a content card and available videos or images.\n\nSupports Bilibili, Douyin, Kuaishou, Weibo, Xiaohongshu, Twitter / X, AcFun, NGA, GitHub, Pixiv and Steam.\n\n- Four card layouts, light and dark themes, and adjustable colors, covers and watermarks\n- A built-in management page for testing links, browsing records, clearing cache and editing settings\n- Webpage screenshots, all-ages Pixiv search, Bilibili QR login and per-platform proxy settings\n- Duplicate-link control for groups; media relay or shared storage for Docker deployments\n\nOpen Plugin WebUI → Hope Parser and use the Settings page to configure the plugin.\nRequires AstrBot 4.25.3 or later and ffmpeg in the AstrBot environment.\n\nSee the [README](https://github.com/xiaoxi2760/astrbot_plugin_denia_share#readme) for usage and supported content."
   },
   "pages": {
     "denia": {

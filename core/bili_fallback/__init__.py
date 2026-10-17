@@ -10,7 +10,7 @@
 - :mod:`.streams` —— 从已有 DASH 数据里挑流。**纯函数，零网络。**
 - :mod:`.fetch` —— 网络层，把上面两者串起来。
 
-来源：从 ``yaya``（娅娅解析 v7.6.0，Apache-2.0）抽出，改为 httpx 实现。
+本包由项目作者维护，沿用 Apache-2.0 许可，网络请求使用 httpx。
 """
 
 from .fetch import build_playurl_params, fetch_streams

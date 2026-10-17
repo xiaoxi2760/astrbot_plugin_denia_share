@@ -8,8 +8,6 @@ Steam 历史最低价需配置 ITAD_API_KEY（免费申请），未配置时只�
 代码来源（涉及第三方许可的都标在各自源文件里）：
 - astrbot_plugin_rika_share（MIT）：解析框架 / 卡片渲染 / B站 / 微博 / 小红书 / AcFun / NGA
 - Johnserf-Seed/f2（Apache-2.0）：抖音 a_bogus 签名，见 core/parsers/douyin/sign.py
-- 作者自己的 astrbot_plugin_media_parser（娅娅版）：抖音签名 Web API 路径、
-  快手新版页面兼容、Twitter GraphQL 兜底、媒体发送机制
 
 有意不实现的能力：LLM 文本翻译、视频仅发送封面。
 """
@@ -162,9 +160,7 @@ class DeniaSharePlugin(Star):
         留空用插件数据目录；填了「共享缓存目录」就用它，让协议端容器也能按
         同一个容器内路径读到下载下来的视频。
 
-        与 yaya 的差别：那边在容器里会把默认值切成自己约定的
-        ``/app/sharedFolder/...``；这里在目录不可用时**回退**插件数据目录而不是
-        拒绝下载 —— 用户没挂载却被切到不可写路径时，至少功能还是通的。
+        共享目录不可用时回退到插件数据目录，避免下载因路径不可写而中断。
 
         **安全约束**：缓存清理是递归删除（``clear_cache_dir`` / ``cleanup_cache_dir``），
         所以这里必须先把危险路径挡掉，而不是等清理时再补救。三类被拒：

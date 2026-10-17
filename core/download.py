@@ -21,7 +21,7 @@ from .media_utils import (
 )
 from .media_verify import HEAD_PROBE_BYTES, classify_media_response, sniff_image_ext
 from .constants import COMMON_HEADER, DOWNLOAD_TIMEOUT
-from .exception import IgnoreException, DownloadException
+from .exception import IgnoreException, DownloadException, MediaSizeExceeded
 
 # 导入即修一次 NO_PROXY：httpx 0.28 解析不了 ``[::1]`` 这种方括号写法，
 # 而下载器也走 trust_env。详见 core/http_env.py。
@@ -54,8 +54,7 @@ MAX_M3U8_SEGMENTS = 3000
 # 直链、一张解压炸弹图就能把磁盘吃光。下面两条是**最后一道闸**：
 # 生效值 = min(用户配置, 硬上限)，用户配置为 0 时硬上限仍然生效。
 #
-# 数值沿用 yaya（作者自己的另一个插件）：对一个群聊机器人来说，单条媒体
-# 没有理由超过 2GB，单张图片没有理由超过 64MB。
+# 单条媒体的硬上限为 2GB，单张图片为 64MB，避免异常下载耗尽磁盘。
 HARD_MAX_MEDIA_BYTES = 2 * 1024 * 1024 * 1024  # 视频 / 音频 2GB
 HARD_MAX_IMAGE_BYTES = 64 * 1024 * 1024  # 图片 64MB
 
@@ -161,14 +160,16 @@ class StreamDownloader:
             logger.warning(f"媒体 url: {response.url}, 大小为 0, 取消下载")
             raise IgnoreException
 
-        # 体积上限：超过限制的媒体直接放弃，避免下载完才发现发不出去
+        # 体积上限：超过限制的媒体直接放弃，避免下载完才发现发不出去。
+        # 抛 MediaSizeExceeded（而非普通 IgnoreException）：只有这一类「跳过」需要
+        # 告诉用户确切原因，审计靠异常类型认它，见 core/exception.py 的说明。
         if max_bytes > 0 and content_length > max_bytes:
             size_mb = content_length / 1024 / 1024
             limit_mb = max_bytes // 1024 // 1024
             logger.warning(
                 f"媒体大小 {size_mb:.1f}MB 超过上限 {limit_mb}MB，取消下载: {response.url}"
             )
-            raise IgnoreException(f"媒体大小({size_mb:.1f}MB)超过上限({limit_mb}MB)")
+            raise MediaSizeExceeded(received_bytes=content_length, limit_bytes=max_bytes)
         return content_length
 
     @staticmethod
@@ -183,7 +184,7 @@ class StreamDownloader:
             await safe_unlink(file_path)
             mb = received_bytes / 1024 / 1024
             logger.warning(f"媒体 url: {url}, 实际下载 {mb:.1f}MB 超过上限, 已丢弃")
-            raise IgnoreException(f"媒体大小({mb:.1f}MB)超过上限({max_bytes // 1024 // 1024}MB)")
+            raise MediaSizeExceeded(received_bytes=received_bytes, limit_bytes=max_bytes)
 
     @property
     def _max_bytes(self) -> int:
@@ -271,9 +272,7 @@ class StreamDownloader:
                             # 把它吞成一条日志 —— 文件反而留了下来。抛出去，由下面的
                             # except 在句柄关闭后统一删（对照 _validate_downloaded_bytes：
                             # 它在句柄外，删得掉）。
-                            raise IgnoreException(
-                                f"媒体大小超过上限({limit // 1024 // 1024}MB)"
-                            )
+                            raise MediaSizeExceeded(received_bytes=received_bytes, limit_bytes=limit)
             except BaseException:
                 # 句柄已关闭，这里删得掉。必须写 BaseException：CancelledError 不是
                 # Exception 的子类，只捕 Exception 时「任务被取消」留下的半截 .part
@@ -331,9 +330,7 @@ class StreamDownloader:
                             # 同 httpx 通道：**不能在句柄内删**（Windows 上
                             # unlink 会 PermissionError(WinError 32) 并被 safe_unlink
                             # 吞掉），抛出去交给下面的 except 在句柄关闭后删。
-                            raise IgnoreException(
-                                f"媒体大小超过上限({limit // 1024 // 1024}MB)"
-                            )
+                            raise MediaSizeExceeded(received_bytes=received_bytes, limit_bytes=limit)
             except BaseException:
                 # 与 httpx 通道保持一致：必须捕 BaseException，
                 # CancelledError 不是 Exception 的子类，取消时的半截 .part 也要清。
@@ -506,8 +503,8 @@ class StreamDownloader:
                                 f"m3u8 视频下载到 {mb:.1f}MB 超过上限 "
                                 f"{self.max_size_mb}MB，中断: {m3u8_url}"
                             )
-                            raise IgnoreException(
-                                f"媒体大小超过上限({self.max_size_mb}MB)"
+                            raise MediaSizeExceeded(
+                                received_bytes=received_bytes, limit_bytes=self._max_bytes
                             )
                 finally:
                     # **必须在清理之前关掉句柄。** Windows 上文件被占用时 unlink

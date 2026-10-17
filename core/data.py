@@ -15,7 +15,7 @@ from collections.abc import Iterator, Awaitable
 
 from .task import PathTask
 from .constants import PlatformEnum, platform_meta
-from .exception import IgnoreException
+from .exception import IgnoreException, MediaSizeExceeded
 
 
 @dataclass(repr=False, slots=True)
@@ -217,6 +217,10 @@ class ParseResult:
     # 有了它才能做到「重复审计不叠加」——见 audit_missing_media。
     _AUDIT_WARNING_KEY: ClassVar[str] = "_missing_media_warning"
 
+    # 同上，但记的是审计自己写的**体积超限提示**（可能不止一条，如视频+封面）。
+    # 与缺料那条分开存：两者来源不同、条数不同，撤回时不能互相干扰。
+    _SIZE_WARNING_KEY: ClassVar[str] = "_media_size_warnings"
+
     def _iter_media_tasks(self) -> Iterator[tuple[str, PathTask]]:
         """遍历所有需要落盘的媒体任务，附带用途标签（供缺料审计用）。
 
@@ -240,7 +244,7 @@ class ParseResult:
             yield from self.repost._iter_media_tasks()
 
     async def audit_missing_media(self) -> dict[str, int]:
-        """结算所有媒体下载，把**真失败**按用途计数写进 ``extra["limit_warnings"]``。
+        """结算媒体下载，将体积超限原因与真实下载失败写入 ``extra["limit_warnings"]``。
 
         **为什么要有这个方法**：下载失败原先只在日志里留痕，产出物本身却在撒谎
         —— 少了 3 张图的消息和图一张不缺的消息长得一模一样，用户没法判断该不该
@@ -248,10 +252,9 @@ class ParseResult:
         （``limit_warnings`` 已被卡片与聊天消息两处消费），让产物如实反映它缺了什么。
 
         **为什么要把 ``IgnoreException`` 排除在外**：那是本仓「**故意不下载**」的信号
-        （视频时长超限、媒体体积超限、0 字节响应、m3u8 分片超限）。这些情况各自已经
-        有专门且准确的提示（如 ``_add_limit_warning`` 的「视频时长…不会下载视频」），
-        再叠一条「下载失败」就是自相矛盾的两条警告。所以这里把 gather 的返回值与
-        任务配对，按异常类型区分「策略跳过」与「真失败」。
+        （视频时长超限、媒体体积超限、0 字节响应、m3u8 分片超限），不能算成下载失败。
+        时长超限由解析器添加提示；体积超限通过 ``MediaSizeExceeded`` 单独补充原因。
+        这里把 gather 的返回值与任务配对，按异常类型区分这两类提示与真实失败。
 
         只在确有失败时才追加，成功路径零开销（一次 gather，本来也要等这些任务）。
 
@@ -270,11 +273,13 @@ class ParseResult:
         tasks = list(self._iter_media_tasks())
         warnings = self.extra.setdefault("limit_warnings", [])
 
-        # 撤回上一次审计留下的那条（只撤回自己写的，别误删别的来源）
+        # 撤回上一次审计留下的那些（只撤回自己写的，别误删别的来源）
         previous = self.extra.pop(self._AUDIT_WARNING_KEY, None)
-        if previous is not None:
+        for own in ([previous] if previous is not None else []) + list(
+            self.extra.pop(self._SIZE_WARNING_KEY, None) or []
+        ):
             try:
-                warnings.remove(previous)
+                warnings.remove(own)
             except ValueError:
                 pass  # 被外部清理过，忽略
 
@@ -287,13 +292,29 @@ class ParseResult:
         )
 
         missing: dict[str, int] = {}
+        size_messages: list[str] = []
         for (kind, task), result in zip(tasks, results):
+            if isinstance(result, MediaSizeExceeded):
+                # **必须排在 IgnoreException 之前**：它是子类，写反了就是一条
+                # 永远不执行的分支（且类型检查也看不出来）。体积超限是「按策略
+                # 跳过」，所以**不计入 missing**，但要如实告诉用户为什么少了它。
+                message = result.user_message
+                if message not in size_messages:
+                    size_messages.append(message)
+                continue
             if isinstance(result, IgnoreException):
-                # 按策略跳过（超时长 / 超体积 / 空响应 / 分片超限），已有专门提示
+                # 其余策略跳过不计为下载失败；已有的时长等提示由原路径保留。
                 continue
             # get() 失败时不会缓存 _path，所以 resolved 为 None 就等于「没落盘」
             if task.resolved is None:
                 missing[kind] = missing.get(kind, 0) + 1
+
+        # 体积超限的提示：写在缺料汇总**之前**，这样「为什么少了这个视频」紧挨着
+        # 上下文（缺料汇总只统计真失败，两者几乎不会同时出现，但顺序固定下来
+        # 比按插入顺序碰运气可靠）。记下原文，供下一次调用撤回（幂等的关键）。
+        if size_messages:
+            warnings.extend(size_messages)
+            self.extra[self._SIZE_WARNING_KEY] = list(size_messages)
 
         if missing:
             parts = [

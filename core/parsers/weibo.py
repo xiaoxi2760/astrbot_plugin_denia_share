@@ -25,8 +25,7 @@ from ..data import Platform, ImageContent, platform_of
 #
 # 微博对**完全没有 Cookie** 的请求会返回 403/418（风控），带一份「访客身份」
 # 就能正常拿到数据。本仓原先在 parse_weibo_id 里显式传 cookies=Cookies()
-# （主动不带），匿名时很容易被拦 —— 前身插件 yaya 的做法是先去 genvisitor2
-# 取一份访客身份再请求。
+# （主动不带），匿名时很容易被拦；现在先去 genvisitor2 取访客身份再请求。
 #
 # 访客身份由 visitor.passport.weibo.cn 下发，取一次就够（但会过期），所以：
 # 拿到就缓存 → 请求被风控时清掉 → 下一次自动重取。

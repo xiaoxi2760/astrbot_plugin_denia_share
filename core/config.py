@@ -6,7 +6,6 @@
 由 :func:`verify_schema_alignment` 在启动时自检并告警）。
 
 相比 rika 原版移除了 Cloudflare 截图 Fallback（20+ 配置项）与 B站 Cookie 监控轮询。
-相比娅娅版移除了 LLM 文本翻译（10 语言 × 10 厂商接口）与「视频仅发送封面」。
 
 明确**不包含**的能力（有意不做，勿再引入）：
 - LLM 文本翻译
@@ -433,7 +432,7 @@ CONFIG_META: tuple[dict[str, Any], ...] = (
         "label": "封面播放按钮",
         "type": "bool",
         "default": True,
-        "hint": "视频封面中央的毛玻璃播放按钮。关闭后封面更干净（yaya 那边默认是关的，这里默认开以保持现有观感）",
+        "hint": "显示视频封面中央的播放按钮，关闭后仅保留封面图片。",
     },
     {
         "key": "RENDER_GRADIENT_TOP",
@@ -1315,9 +1314,7 @@ class ParserConfig:
     def CACHE_DIR(self) -> str:
         """Docker 共享缓存目录，留空表示用插件数据目录（默认行为）。
 
-        与 yaya 的差别：那边在容器里会把默认值切成自己约定的
-        ``/app/sharedFolder/...``；这里保守一些 —— 留空始终用插件数据目录，
-        免得用户没挂载却被切到一个不可写路径上，把下载整个搞坏。
+        留空始终使用插件数据目录，不自动切换到可能未挂载的共享路径。
         """
         return str(self._cfg_get("CACHE_DIR", "") or "").strip()
 

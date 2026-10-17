@@ -10,7 +10,7 @@
    ``window._ROUTER_DATA``。零签名成本，是首选路径。抖音只在请求带有效
    ``ttwid`` 时才把作品数据放进 SSR，所以抓取必须走 :mod:`.session` 里的会话
    （保持 cookie + 重试），不能每次新建 client 只发一次请求。
-2. **签名 Web API 路径**（娅娅版移植）：``/aweme/v1/web/aweme/detail/`` 配合
+2. **签名 Web API 路径**：``/aweme/v1/web/aweme/detail/`` 配合
    a_bogus 签名 + ttwid 会话，稳定性更好，是 HTML 路径失败后的兜底。
 """
 
@@ -179,7 +179,7 @@ class DouyinParser(BaseParser):
         return result
 
     # ------------------------------------------------------------------ #
-    # 路径二：签名 Web API（娅娅版移植）
+    # 路径二：签名 Web API
     # ------------------------------------------------------------------ #
 
     def _get_web_client(self):

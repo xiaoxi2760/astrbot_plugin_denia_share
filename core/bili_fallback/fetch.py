@@ -3,8 +3,8 @@
 ``streams.py`` 负责「从已有数据里挑流」（纯函数、可离线测），本模块负责
 「把流取回来」。两者分开，测试不必碰网络。
 
-来源：从 ``yaya``（娅娅解析 v7.6.0，Apache-2.0）抽出并改为 httpx
-（yaya 原版用 aiohttp；本插件全站用 httpx，见 ``core/base_parser.py``）。
+本模块由项目作者维护，沿用 Apache-2.0 许可。网络请求使用 httpx，
+代理与超时由调用方控制。
 """
 
 from __future__ import annotations

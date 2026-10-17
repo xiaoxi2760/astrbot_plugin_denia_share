@@ -293,7 +293,7 @@
         "type": "bool",
         "default": true,
         "invisible": true,
-        "hint": "视频封面中央的毛玻璃播放按钮。关闭后封面更干净（yaya 那边默认是关的，这里默认开以保持现有观感）"
+        "hint": "显示视频封面中央的播放按钮，关闭后仅保留封面图片。"
       },
       "RENDER_GRADIENT_TOP": {
         "description": "背景渐变·顶部色",

@@ -209,7 +209,7 @@ class XiaoHongShuParser(BaseParser):
         （``notes_pre_post/``、``spectrum/``、``oss-sg/notes_pre_post/``、
         ``note_pre_post_uhdr/``…）—— 少带一段就是 404。
 
-        来源：娅娅版 astrbot_plugin_media_parser，实测（2026-08-23）fileId 需保留
+        实测（2026-08-23）fileId 需保留
         命名空间前缀。旧实现用正则只识别 ``notes_pre_post/``、``spectrum/``
         两个写死的前缀，其余前缀会被吞掉；2026-10-15 实测笔记
         xhslink.cn/o/raJQGfoLlq（``oss-sg/notes_pre_post/…`` 与

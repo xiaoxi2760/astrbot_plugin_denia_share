@@ -34,6 +34,44 @@ class IgnoreException(ParseException):
         super().__init__(message or "可忽略异常")
 
 
+def _format_mb(byte_count: int) -> str:
+    """把字节数写成人类看得懂的体积（不足 1MB 时退化成 KB）。"""
+    if byte_count >= 1024 * 1024:
+        return f"{byte_count / 1024 / 1024:.1f}MB"
+    if byte_count >= 1024:
+        return f"{byte_count // 1024}KB"
+    return f"{byte_count}B"
+
+
+class MediaSizeExceeded(IgnoreException):
+    """媒体体积超过上限 —— 是「**故意不下载**」，但用户有权知道是哪一条。
+
+    为什么不直接用普通 ``IgnoreException``：那在本仓是「按策略跳过」的通用信号，
+    而审计（``ParseResult.audit_missing_media``）正是靠**异常类型**区分「跳过」
+    与「真失败」—— 靠匹配异常字符串认体积超限，等于把这条判定钉死在文案上，
+    改一次措辞就静默失效。所以单独成类：**判定靠类型，展示才靠文案**。
+
+    时长超限、0 字节响应、m3u8 分片超限不属于体积超限，不能归入本类型。
+    时长等已有提示由原路径保留，避免重复或错误归类。
+
+    ``received_bytes`` 在流式中断时是「已经下到的字节数」（不是文件真实大小），
+    ``limit_bytes`` 是生效上限（``min(用户配置, 硬上限)``）。
+    """
+
+    def __init__(self, *, received_bytes: int, limit_bytes: int):
+        self.received_bytes = received_bytes
+        self.limit_bytes = limit_bytes
+        super().__init__(self.user_message)
+
+    @property
+    def user_message(self) -> str:
+        """给用户看的一句话（进 ``limit_warnings``，卡片与纯文字链路共用）。"""
+        return (
+            f"⚠️ 媒体大小({_format_mb(self.received_bytes)})"
+            f"超过上限({_format_mb(self.limit_bytes)})，跳过下载"
+        )
+
+
 class MediaProcessException(ParseException):
     """本机媒体处理失败 —— 是本机环境问题，不是网络 / CDN 故障。
 

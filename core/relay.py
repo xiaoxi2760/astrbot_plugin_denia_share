@@ -18,8 +18,7 @@ AstrBot 把插件发出去的媒体交给协议端时，各类消息段处理方
    拿到 ``{回调地址}/api/file/<token>``，用 ``Video.fromURL`` 发送 —— 协议端只要能
    访问到那个地址就行，不需要共享挂载。
 
-本模块移植自作者自己的 yaya（astrbot_plugin_media_parser）里的
-``core/storage/file_token.py``，去掉了元数据回填，改成直接返回 URL 列表。
+本模块直接返回临时媒体 URL 列表。
 """
 
 from __future__ import annotations
