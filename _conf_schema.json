@@ -11,18 +11,24 @@
         "hint": "勾选=禁用该平台，都不勾=全部启用。「总览」页的平台开关改的是同一份（那边点一下立即生效）"
       },
       "VIDEO_DURATION_MAXIMUM": {
-        "description": "视频最大时长",
+        "description": "视频/音频最大时长",
         "type": "int",
         "default": 480,
         "invisible": true,
-        "hint": "超过此时长不下载视频，但仍会返回标题、作者和封面"
+        "hint": "超过此时长不下载视频或音频；已选文本和卡片仍可显示内容与原因。",
+        "min": 0,
+        "max": 86400,
+        "unit": "秒"
       },
       "VIDEO_SIZE_MAXIMUM_MB": {
-        "description": "单个视频体积上限",
+        "description": "单个视频/音频体积上限",
         "type": "int",
         "default": 100,
         "invisible": true,
-        "hint": "下载前按 Content-Length 判断，边下边判。QQ 大文件上传容易失败，建议不超过 60"
+        "hint": "下载前按 Content-Length 判断，边下边判。QQ 大文件上传容易失败，建议不超过 60",
+        "min": 1,
+        "max": 4096,
+        "unit": "MB"
       },
       "SEND_ERROR_MESSAGES": {
         "description": "解析失败时发送错误提示",
@@ -90,7 +96,7 @@
         "type": "text",
         "default": "",
         "invisible": true,
-        "hint": "推荐用「总览」页的扫码登录自动写入；配了才能下 1080P 及以上",
+        "hint": "可在「配置 → 账号凭据 → B站」或总览页扫码登录；画质按账号权限获取",
         "secret": true
       },
       "BILI_QUALITY": {
@@ -114,7 +120,7 @@
         "type": "string",
         "default": "H.264 优先",
         "invisible": true,
-        "hint": "同一个视频 B站提供多种压缩格式，这里决定优先下哪一种。H.264 任何客户端都能播；AV1 体积最小但老客户端（如电脑版 QQ）放出来会花屏。H.265 介于两者之间。4K/8K 档往往只有 H.265/AV1 可选，这时会自动退而求其次，不会下载失败。",
+        "hint": "同一个视频 B站提供多种压缩格式，这里决定优先下哪一种。H.264 任何客户端都能播；AV1 体积最小但老客户端（如电脑版 QQ）放出来会花屏；H.265 介于两者之间。4K/8K 往往只有 H.265/AV1 可选，此时会自动退而求其次，不会下载失败——所以切到 H.264 优先不会让 4K 视频下不下来，只会拿不到该档的 H.264 版本",
         "options": [
           "H.264 优先",
           "H.265 优先",
@@ -144,6 +150,131 @@
       }
     }
   },
+  "音乐设置": {
+    "type": "object",
+    "description": "QQ音乐、网易云的登录与搜歌点歌。⚠️ 请到插件 WebUI 的「配置」页修改「音乐设置」",
+    "items": {
+      "MUSIC_COMMANDS_ENABLED": {
+        "description": "启用搜歌与点歌",
+        "type": "bool",
+        "default": true,
+        "invisible": true,
+        "hint": "搜歌发送带编号的结果卡片，点歌或选歌后按当前语音/文件设置发送。分享链接解析由平台开关单独控制。"
+      },
+      "MUSIC_DEFAULT_PLATFORM": {
+        "description": "默认搜歌平台",
+        "type": "string",
+        "default": "both",
+        "invisible": true,
+        "hint": "也可以在指令里指定，例如：搜歌 QQ 晴天。",
+        "options": [
+          "both",
+          "netease",
+          "qqmusic"
+        ],
+        "labels": [
+          "两家一起搜",
+          "网易云音乐",
+          "QQ音乐"
+        ]
+      },
+      "MUSIC_SEARCH_LIMIT": {
+        "description": "搜歌结果数量",
+        "type": "int",
+        "default": 5,
+        "invisible": true,
+        "hint": "结果卡片最多显示这些候选；两家一起搜时交错排列，编号连续。",
+        "min": 1,
+        "max": 10
+      },
+      "MUSIC_SESSION_TTL_SECONDS": {
+        "description": "选歌列表有效期",
+        "type": "int",
+        "default": 300,
+        "invisible": true,
+        "hint": "每个会话、每个用户分别保存搜索列表，过期后需要重新搜歌。",
+        "min": 30,
+        "max": 1800,
+        "unit": "秒"
+      },
+      "MUSIC_SEARCH_COMMANDS": {
+        "description": "搜歌指令",
+        "type": "string",
+        "default": "点歌",
+        "invisible": true,
+        "hint": "点歌 歌名显示本插件的搜歌卡片；可用逗号配置其他别名，不包含空格或斜杠。"
+      },
+      "MUSIC_PLAY_COMMANDS": {
+        "description": "点歌与选歌指令",
+        "type": "string",
+        "default": "听",
+        "invisible": true,
+        "hint": "听1 或听 1 发送列表第1首音频，不附带解析卡片。可用逗号配置其他选歌别名。"
+      },
+      "NETEASE_CK": {
+        "description": "网易云 Cookie",
+        "type": "text",
+        "default": "",
+        "invisible": true,
+        "hint": "在上方账号凭据导入 MUSIC_U 或完整 Cookie，会员歌曲按账号实际权限获取。扫码不可用时可直接导入。",
+        "secret": true
+      },
+      "QQMUSIC_CK": {
+        "description": "QQ音乐 Cookie",
+        "type": "text",
+        "default": "",
+        "invisible": true,
+        "hint": "在上方账号凭据扫码或导入包含 uin 与音乐密钥的 Cookie；可检查、续期与清除。",
+        "secret": true
+      }
+    }
+  },
+  "CookieCloud": {
+    "type": "object",
+    "description": "从自建服务同步选定平台的浏览器登录态。⚠️ 请到插件 WebUI 的「配置」页修改「CookieCloud」",
+    "items": {
+      "COOKIECLOUD_URL": {
+        "description": "服务地址",
+        "type": "string",
+        "default": "",
+        "invisible": true,
+        "hint": "填写你自建的 CookieCloud 地址，可包含子目录。"
+      },
+      "COOKIECLOUD_UUID": {
+        "description": "用户密钥 UUID",
+        "type": "string",
+        "default": "",
+        "invisible": true,
+        "hint": "与浏览器 CookieCloud 扩展中的用户密钥一致。",
+        "secret": true
+      },
+      "COOKIECLOUD_PASSWORD": {
+        "description": "端到端加密密码",
+        "type": "string",
+        "default": "",
+        "invisible": true,
+        "hint": "仅在机器人本地解密，不会发送给同步服务器。",
+        "secret": true
+      },
+      "COOKIECLOUD_PLATFORMS": {
+        "description": "同步平台",
+        "type": "string",
+        "default": "",
+        "invisible": true,
+        "hint": "填写平台名：bilibili、xiaohongshu、pixiv、netease、qqmusic、xiaoheihe；留空不导入。GitHub Token 不参与同步。"
+      },
+      "COOKIECLOUD_INTERVAL_MINUTES": {
+        "description": "自动同步间隔",
+        "type": "int",
+        "default": 0,
+        "invisible": true,
+        "hint": "0 为仅手动；自动同步只更新尚未配置或仍由 CookieCloud 管理的登录态，不覆盖手动修改。",
+        "min": 0,
+        "max": 1440,
+        "unit": "分钟"
+      }
+    }
+  },
   "网页截图": {
     "type": "object",
     "description": "把任意网页截成图片发送。⚠️ 请到插件 WebUI 的「配置」页修改「网页截图」",
@@ -168,7 +299,7 @@
         "type": "bool",
         "default": true,
         "invisible": true,
-        "hint": "开启=截整页（长文章能看全），关闭=只截首屏视窗。实测差别很大：同一个维基长文，关闭只有 900×900 的方图（约 0.3 MB，只看到顶部一小块），开启整页约 4.4 MB、高度按页面内容走（thum 上限 16000px，触顶时底部会缺）。代价是长图可能几 MB、群里发出去客户端会压缩，所以默认开启但可关。两个后端都支持整页（thum 走 /fullpage，cloudflare 走 fullPage）"
+        "hint": "开启=截整页（长文章能看全），关闭=只截首屏视窗。实测差别很大：同一个维基长文关掉只有 900×900 的方图（约 0.3 MB，只看到顶部一小块），开完整页约 4.4 MB、高度按页面内容走（thum 上限 16000px，触顶时底部会缺）。代价是长图可能几 MB、群里发出去客户端会压缩，所以默认开启但可关。两个后端都支持整页（thum 走 /fullpage，cloudflare 走 fullPage）"
       },
       "SCREENSHOT_FALLBACK": {
         "description": "匹配不到平台的链接自动截图",
@@ -194,6 +325,62 @@
       }
     }
   },
+  "输出模式": {
+    "type": "object",
+    "description": "选择文本、卡片与富媒体，可任意组合。⚠️ 请到插件 WebUI 的「配置」页修改「输出模式」",
+    "items": {
+      "OUTPUT_TEXT_ENABLED": {
+        "description": "文本",
+        "type": "bool",
+        "default": false,
+        "invisible": true,
+        "hint": "一条普通文字消息，包含标题、链接、简洁播放信息与必要提示。可与卡片、富媒体同时发送。"
+      },
+      "OUTPUT_CARD_ENABLED": {
+        "description": "卡片",
+        "type": "bool",
+        "default": true,
+        "invisible": true,
+        "hint": "需同时开启「启用卡片渲染」。渲染失败时只跳过卡片，不改变其他输出选项。"
+      },
+      "OUTPUT_MEDIA_ENABLED": {
+        "description": "富媒体",
+        "type": "bool",
+        "default": true,
+        "invisible": true,
+        "hint": "发送原图、视频、动图和音频。关闭后不下载视频本体，卡片仅获取需要的图片。"
+      },
+      "AUDIO_SEND_MODE": {
+        "description": "音频发送方式",
+        "type": "string",
+        "default": "voice",
+        "invisible": true,
+        "hint": "仅在富媒体开启时生效。语音条由宿主和协议端处理；音频文件保留原格式。每段音频只发送一种形式。",
+        "options": [
+          "voice",
+          "file"
+        ],
+        "labels": [
+          "语音条",
+          "音频文件"
+        ]
+      },
+      "SEND_BACKGROUND_MUSIC": {
+        "description": "发送图文配乐",
+        "type": "bool",
+        "default": false,
+        "invisible": true,
+        "hint": "图文作品自带背景音乐时，是否把配乐也一并发出。目前抖音图文支持；默认关闭，避免普通图文突然多发一段音乐。"
+      },
+      "OUTPUT_MODES_INITIALIZED": {
+        "description": "输出模式迁移标记",
+        "type": "bool",
+        "default": false,
+        "invisible": true,
+        "hint": "由插件维护，避免宿主补齐默认值后重复迁移用户选择。"
+      }
+    }
+  },
   "卡片外观": {
     "type": "object",
     "description": "把解析结果渲染成分享卡片图片。⚠️ 请到插件 WebUI 的「配置」页修改「卡片外观」",
@@ -203,7 +390,7 @@
         "type": "bool",
         "default": true,
         "invisible": true,
-        "hint": "关闭则回退为纯文本输出"
+        "hint": "仅控制卡片渲染。关闭后不发送卡片，不影响已选文本和富媒体。"
       },
       "RENDER_THEME": {
         "description": "卡片主题",
@@ -244,7 +431,10 @@
         "type": "int",
         "default": 800,
         "invisible": true,
-        "hint": "520~1080，越宽信息越舒展，但在聊天软件里显示会更小"
+        "hint": "520~1080，越宽信息越舒展，但在聊天软件里显示会更小",
+        "min": 520,
+        "max": 1080,
+        "unit": "px"
       },
       "RENDER_COVER_FULL_SIZE": {
         "description": "封面按原始尺寸展示",
@@ -272,14 +462,18 @@
         "type": "string",
         "default": "希望解析",
         "invisible": true,
-        "hint": "卡片右下角的水印文字，留空则不显示水印，最长 12 个字符"
+        "hint": "卡片右下角的水印文字，留空则不显示水印，最长 12 个字符",
+        "max_length": 12
       },
       "RENDER_DESC_MAX_LINES": {
         "description": "正文最大行数",
         "type": "int",
         "default": 0,
         "invisible": true,
-        "hint": "0=按布局默认（4~6 行）。简介超长时按此行数截断，卡片更紧凑"
+        "hint": "0=按布局默认（4~6 行）。简介超长时按此行数截断，卡片更紧凑",
+        "min": 0,
+        "max": 12,
+        "unit": "行"
       },
       "RENDER_SHOW_AVATAR": {
         "description": "显示作者头像",
@@ -294,6 +488,13 @@
         "default": true,
         "invisible": true,
         "hint": "显示视频封面中央的播放按钮，关闭后仅保留封面图片。"
+      },
+      "RENDER_SHOW_AI_SUMMARY": {
+        "description": "显示 B站 AI 总结",
+        "type": "bool",
+        "default": false,
+        "invisible": true,
+        "hint": "标准、杂志、信息流布局可显示；沉浸式不显示。无可用总结时隐藏。"
       },
       "RENDER_GRADIENT_TOP": {
         "description": "背景渐变·顶部色",
@@ -341,7 +542,63 @@
         "type": "int",
         "default": 300,
         "invisible": true,
-        "hint": "到期后链接失效。视频越大、链路越慢越要留足时间，建议不低于 120 秒"
+        "hint": "到期后链接失效。视频越大、链路越慢越要留足时间，建议不低于 120 秒",
+        "min": 30,
+        "max": 86400,
+        "unit": "秒"
+      }
+    }
+  },
+  "合并转发": {
+    "type": "object",
+    "description": "选中的媒体要不要打包成一条合并转发消息。⚠️ 请到插件 WebUI 的「配置」页修改「合并转发」",
+    "items": {
+      "AGGREGATION_MODE": {
+        "description": "聚合方式",
+        "type": "string",
+        "default": "none",
+        "invisible": true,
+        "hint": "仅 OneBot 启用。将选中的图片、视频逐条发送，或合并成一条转发消息。按条件聚合时，命中下面任一阈值才合并。语音条、音频文件独立发送，简短文字和卡片不受影响；转发明确失败时改为逐条发送。",
+        "options": [
+          "none",
+          "all",
+          "conditional"
+        ],
+        "labels": [
+          "不聚合",
+          "全部聚合",
+          "按条件聚合"
+        ]
+      },
+      "AGGREGATION_IMAGE_THRESHOLD": {
+        "description": "图片数量阈值",
+        "type": "int",
+        "default": 3,
+        "invisible": true,
+        "hint": "仅「按条件聚合」生效：图片数达到该值就合并。0=这一项不触发",
+        "min": 0,
+        "max": 99,
+        "unit": "张"
+      },
+      "AGGREGATION_VIDEO_THRESHOLD": {
+        "description": "视频数量阈值",
+        "type": "int",
+        "default": 2,
+        "invisible": true,
+        "hint": "仅「按条件聚合」生效：视频数达到该值就合并。0=这一项不触发",
+        "min": 0,
+        "max": 99,
+        "unit": "个"
+      },
+      "AGGREGATION_NODE_THRESHOLD": {
+        "description": "总节点阈值",
+        "type": "int",
+        "default": 5,
+        "invisible": true,
+        "hint": "仅「按条件聚合」生效：本次待发送的图片与视频节点总数达到该值时合并。语音、文件、精简文字和卡片不计入。0=这一项不触发",
+        "min": 0,
+        "max": 999,
+        "unit": "个"
       }
     }
   },
@@ -349,6 +606,14 @@
     "type": "object",
     "description": "一般用不到，按需开启。⚠️ 请到插件 WebUI 的「配置」页修改「高级设置」",
     "items": {
+      "XIAOHEIHE_CK": {
+        "description": "小黑盒 Cookie",
+        "type": "text",
+        "default": "",
+        "invisible": true,
+        "hint": "在上方「账号凭据 → 小黑盒」导入浏览器 Cookie。需要登录的帖子按账号权限获取，平台仍要求验证时请先在网页完成。",
+        "secret": true
+      },
       "XHS_CK": {
         "description": "小红书 Cookie",
         "type": "text",
@@ -378,87 +643,108 @@
         "type": "string",
         "default": "",
         "invisible": true,
-        "hint": "留空不使用。填运行 AstrBot 那台机器上的地址；具体哪些解析器走它由下面各平台的「走代理」开关决定，全部默认关闭"
+        "hint": "留空 = 不使用插件代理，环境变量代理仍可能生效。填运行 AstrBot 那台机器上的地址；具体哪些平台走它由下面各平台的「走代理」开关决定，开关默认全关。Docker 分容器部署时这里填宿主地址（如 http://172.18.0.1:7890），不要填 127.0.0.1 —— 那是容器自己"
       },
       "PROXY_BILIBILI": {
-        "description": "B站走代理",
+        "description": "B站",
         "type": "bool",
         "default": false,
         "invisible": true,
         "hint": "开启后「B站」的接口请求与媒体下载才走上面的代理地址；关闭时不使用插件代理，环境变量代理仍可能生效。代理地址留空时本开关无效"
       },
       "PROXY_DOUYIN": {
-        "description": "抖音走代理",
+        "description": "抖音",
         "type": "bool",
         "default": false,
         "invisible": true,
         "hint": "开启后「抖音」的接口请求与媒体下载才走上面的代理地址；关闭时不使用插件代理，环境变量代理仍可能生效。代理地址留空时本开关无效"
       },
       "PROXY_KUAISHOU": {
-        "description": "快手走代理",
+        "description": "快手",
         "type": "bool",
         "default": false,
         "invisible": true,
         "hint": "开启后「快手」的接口请求与媒体下载才走上面的代理地址；关闭时不使用插件代理，环境变量代理仍可能生效。代理地址留空时本开关无效"
       },
       "PROXY_WEIBO": {
-        "description": "微博走代理",
+        "description": "微博",
         "type": "bool",
         "default": false,
         "invisible": true,
         "hint": "开启后「微博」的接口请求与媒体下载才走上面的代理地址；关闭时不使用插件代理，环境变量代理仍可能生效。代理地址留空时本开关无效"
       },
       "PROXY_XIAOHONGSHU": {
-        "description": "小红书走代理",
+        "description": "小红书",
         "type": "bool",
         "default": false,
         "invisible": true,
         "hint": "开启后「小红书」的接口请求与媒体下载才走上面的代理地址；关闭时不使用插件代理，环境变量代理仍可能生效。代理地址留空时本开关无效"
       },
       "PROXY_TWITTER": {
-        "description": "Twitter / X 走代理",
+        "description": "Twitter / X",
         "type": "bool",
         "default": false,
         "invisible": true,
         "hint": "开启后「Twitter / X」的接口请求与媒体下载才走上面的代理地址；关闭时不使用插件代理，环境变量代理仍可能生效。代理地址留空时本开关无效"
       },
       "PROXY_NGA": {
-        "description": "NGA走代理",
+        "description": "NGA",
         "type": "bool",
         "default": false,
         "invisible": true,
         "hint": "开启后「NGA」的接口请求与媒体下载才走上面的代理地址；关闭时不使用插件代理，环境变量代理仍可能生效。代理地址留空时本开关无效"
       },
       "PROXY_ACFUN": {
-        "description": "AcFun走代理",
+        "description": "AcFun",
         "type": "bool",
         "default": false,
         "invisible": true,
         "hint": "开启后「AcFun」的接口请求与媒体下载才走上面的代理地址；关闭时不使用插件代理，环境变量代理仍可能生效。代理地址留空时本开关无效"
       },
       "PROXY_GITHUB": {
-        "description": "GitHub走代理",
+        "description": "GitHub",
         "type": "bool",
         "default": false,
         "invisible": true,
         "hint": "开启后「GitHub」的接口请求与媒体下载才走上面的代理地址；关闭时不使用插件代理，环境变量代理仍可能生效。代理地址留空时本开关无效"
       },
       "PROXY_PIXIV": {
-        "description": "Pixiv走代理",
+        "description": "Pixiv",
         "type": "bool",
         "default": false,
         "invisible": true,
         "hint": "开启后「Pixiv」的接口请求与媒体下载才走上面的代理地址；关闭时不使用插件代理，环境变量代理仍可能生效。代理地址留空时本开关无效"
       },
       "PROXY_STEAM": {
-        "description": "Steam走代理",
+        "description": "Steam",
         "type": "bool",
         "default": false,
         "invisible": true,
         "hint": "开启后「Steam」的接口请求与媒体下载才走上面的代理地址；关闭时不使用插件代理，环境变量代理仍可能生效。代理地址留空时本开关无效"
       },
+      "PROXY_XIAOHEIHE": {
+        "description": "小黑盒",
+        "type": "bool",
+        "default": false,
+        "invisible": true,
+        "hint": "开启后「小黑盒」的接口请求与媒体下载才走上面的代理地址；关闭时不使用插件代理，环境变量代理仍可能生效。代理地址留空时本开关无效"
+      },
+      "PROXY_NETEASE": {
+        "description": "网易云音乐",
+        "type": "bool",
+        "default": false,
+        "invisible": true,
+        "hint": "开启后「网易云音乐」的接口请求与媒体下载才走上面的代理地址；关闭时不使用插件代理，环境变量代理仍可能生效。代理地址留空时本开关无效"
+      },
+      "PROXY_QQMUSIC": {
+        "description": "QQ音乐",
+        "type": "bool",
+        "default": false,
+        "invisible": true,
+        "hint": "开启后「QQ音乐」的接口请求与媒体下载才走上面的代理地址；关闭时不使用插件代理，环境变量代理仍可能生效。代理地址留空时本开关无效"
+      },
       "PROXY_SCREENSHOT": {
-        "description": "网页截图走代理",
+        "description": "网页截图",
         "type": "bool",
         "default": false,
         "invisible": true,
@@ -489,32 +775,40 @@
         "type": "int",
         "default": 24,
         "invisible": true,
-        "hint": "超过此时间未使用的缓存会被自动清理，设为 0 禁用自动清理"
+        "hint": "超过此时间未使用的缓存会被自动清理，设为 0 禁用自动清理",
+        "min": 0,
+        "max": 8760,
+        "unit": "小时"
       },
       "RESULT_CACHE_TTL_SECONDS": {
         "description": "重复解析间隔",
         "type": "int",
         "default": 600,
+        "invisible": true,
+        "hint": "同一条链接在此时长内再次发来时，直接用上一次的结果，不重新请求 B站/抖音等平台。设为 0 表示每次都重新解析。间隔别设得比「缓存保留时长」长：磁盘上的媒体文件先被清掉时，卡片还能发但视频会发不出来（插件会自动重新解析，只是白费一次请求）",
         "min": 0,
         "max": 86400,
-        "invisible": true,
-        "hint": "同一条链接在此时长内再次发来时，直接用上一次的结果，不重新请求平台接口。设为 0 表示每次都重新解析。间隔别设得比「缓存保留时长」长：磁盘上的媒体文件先被清掉时，卡片还能发但视频会发不出来（插件会自动重新解析，只是白费一次请求）"
+        "unit": "秒"
       },
       "DUPLICATE_LINK_WINDOW_SECONDS": {
         "description": "同群重复链接去重",
         "type": "int",
         "default": 60,
+        "invisible": true,
+        "hint": "**只在群聊里生效**：同一个群里，第一个人发某链接后的此时长内，其他人再发同一条链接就**不再解析、也不再发卡片**，只回一句「这个链接刚刚已经解析过了哦」，且这句提示也只发一次。私聊不去重。设为 0 关闭。与「重复解析间隔」的区别：那个是复用上次结果**照发卡片**，这个是**不响应**——后者是为了止住群里一条热链被连着转发时刷屏",
         "min": 0,
         "max": 3600,
-        "invisible": true,
-        "hint": "**只在群聊里生效**：同一个群里，第一个人发某链接后的此时长内，其他人再发同一条链接就**不再解析、也不再发卡片**，只回一句「这个链接刚刚已经解析过了哦」，且这句提示也只发一次。私聊不去重。设为 0 关闭。与「重复解析间隔」的区别：那个是复用上次结果**照发卡片**，这个是**不响应**——后者是为了止住群里一条热链被连着转发时刷屏"
+        "unit": "秒"
       },
       "CACHE_CLEANUP_INTERVAL_MINUTES": {
         "description": "缓存清理间隔",
         "type": "int",
         "default": 60,
         "invisible": true,
-        "hint": "后台清理任务多久跑一次，改动需重载插件后才生效"
+        "hint": "后台清理任务多久跑一次，改动需重载插件后才生效",
+        "min": 1,
+        "max": 1440,
+        "unit": "分钟"
       },
       "DEBUG_LOG_ENABLED": {
         "description": "输出调试日志",

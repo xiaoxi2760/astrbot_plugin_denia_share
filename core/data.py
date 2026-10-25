@@ -34,6 +34,7 @@ class MediaContent:
 class AudioContent(MediaContent):
     """音频内容"""
     duration: float | None = None
+    cover: PathTask | None = None
 
 
 @dataclass(repr=False, slots=True)
@@ -108,6 +109,11 @@ class ParseResult:
     extra: dict[str, Any] = field(default_factory=dict)
     repost: ParseResult | None = None
     render_image: Path | None = None
+    #: 可选的**惰性**卡片附加信息加载入口（例如 B站在线人数 / AI 摘要）。
+    #: 只存可调用对象，绝不放进 ``extra``（extra 会被序列化、做历史详情）；
+    #: 只有真正渲染卡片时，renderer 才会按需 ``await card_info_loader.load(...)``。
+    #: 缺省 ``None``，因此所有既有构造方式保持兼容。
+    card_info_loader: Any = None
 
     @property
     def header(self) -> str | None:
@@ -172,7 +178,7 @@ class ParseResult:
     def all_grid_images(self):
         covers: list[PathTask] = []
         for cont in self.contents:
-            if isinstance(cont, VideoContent):
+            if isinstance(cont, (VideoContent, AudioContent)):
                 if cont.cover is not None:
                     covers.append(cont.cover)
             elif isinstance(cont, ImageContent):
@@ -197,7 +203,7 @@ class ParseResult:
         for cont in self.contents:
             if not img_only or isinstance(cont, ImageContent):
                 yield cont.path_task.get()
-            if isinstance(cont, VideoContent) and cont.cover:
+            if isinstance(cont, (VideoContent, AudioContent)) and cont.cover and (not img_only or not cont.cover.needs_media):
                 yield cont.cover.get()
         for gra in self.graphics:
             if isinstance(gra, ImageContent):
@@ -235,6 +241,8 @@ class ParseResult:
                     yield "封面", cont.cover
             elif isinstance(cont, AudioContent):
                 yield "音频", cont.path_task
+                if cont.cover is not None:
+                    yield "封面", cont.cover
             else:
                 yield "图片", cont.path_task
         for gra in self.graphics:
@@ -243,7 +251,28 @@ class ParseResult:
         if self.repost is not None:
             yield from self.repost._iter_media_tasks()
 
-    async def audit_missing_media(self) -> dict[str, int]:
+    def _iter_card_tasks(self) -> Iterator[tuple[str, PathTask]]:
+        """仅卡片需要审计的内容图片：封面 / 图集 / 转发里的图。
+
+        **刻意不含视频与音频本体**：卡片只用封面渲染，为一张卡片去下载整段
+        视频（或音频）是纯粹的浪费。同理排除 ``needs_media`` 的派生封面
+        （抽帧封面必须先有视频本体）。
+        """
+        for cont in self.contents:
+            if isinstance(cont, (VideoContent, AudioContent)):
+                if cont.cover is not None:
+                    yield "封面", cont.cover
+            elif isinstance(cont, ImageContent):
+                yield "图片", cont.path_task
+        for gra in self.graphics:
+            if isinstance(gra, ImageContent):
+                yield "图片", gra.path_task
+        if self.repost is not None:
+            yield from self.repost._iter_card_tasks()
+
+    async def audit_missing_media(
+        self, *, img_only: bool = False
+    ) -> dict[str, int]:
         """结算媒体下载，将体积超限原因与真实下载失败写入 ``extra["limit_warnings"]``。
 
         **为什么要有这个方法**：下载失败原先只在日志里留痕，产出物本身却在撒谎
@@ -258,6 +287,12 @@ class ParseResult:
 
         只在确有失败时才追加，成功路径零开销（一次 gather，本来也要等这些任务）。
 
+        ``img_only=True`` 用于「仅卡片」：只审计**卡片渲染真正会取的图**
+        （封面 / 头像 / 图集），**不含视频与音频本体**，也不含 ``needs_media``
+        的派生封面。审计里的 ``get()`` 就是触发下载的动作，所以清单里出现视频
+        就等于把整段视频拉了下来 —— 这正是「仅卡片不下载视频」要防的。
+        被排除的项**不计入 missing**：它们属于「本来就没打算要」，不是下载失败。
+
         **本方法是幂等的**：同一个 ``ParseResult`` 会被结算多次 —— 聊天链路
         （``main._deliver``）每次交付都调一次，而 ``_result_cache`` 命中的结果会被
         再交付一次（同一条链接在群里发两遍）；WebUI 的「按当前外观重渲染」也会对
@@ -270,7 +305,13 @@ class ParseResult:
         Returns:
             各用途的失败数量，如 ``{"图片": 3, "视频": 1}``；全部成功时为空字典。
         """
-        tasks = list(self._iter_media_tasks())
+        tasks = list(self._iter_card_tasks() if img_only else self._iter_media_tasks())
+        if img_only:
+            # 派生封面（抽帧）必须先有视频本体，仅卡片一律不碰
+            tasks = [
+                (kind, task) for kind, task in tasks
+                if not getattr(task, "needs_media", False)
+            ]
         warnings = self.extra.setdefault("limit_warnings", [])
 
         # 撤回上一次审计留下的那些（只撤回自己写的，别误删别的来源）
@@ -338,6 +379,8 @@ class ParseResult:
             # 卡片头把一条图集标成「动态」，是另一种「产物在撒谎」。
             if self.img_contents or self.graphics:
                 return "图文"
+            if self.audio_contents:
+                return "音频"
             return "动态"
         return content_type
 
@@ -368,3 +411,125 @@ class ParseResultKwargs(TypedDict, total=False):
     author: Author | None
     extra: dict[str, Any]
     repost: ParseResult | None
+    card_info_loader: Any
+
+
+#: 按**主机**分组的跟踪参数白名单：只对认得的平台删，且只删明确已知的键。
+#:
+#: **为什么不能全局黑名单**：``ts`` / ``timestamp`` / ``ref`` 看着像统计参数，
+#: 却是很多站点签名（sign/timestamp/nonce 三件套）与自定义 ``ref`` 的组成部分，
+#: 删掉等于把签名链接改坏 —— 用户点开是 403/失效，且症状极具迷惑性（看着
+#: 只是「链接短了一点」）。所以规则**按 host 收敛**：不认识的主机一律**原样返回**。
+_HOST_TRACKING_PARAMS: dict[str, frozenset[str]] = {
+    "bilibili.com": frozenset({
+        "spm_id_from", "vd_source", "unique_k", "from_source",
+        "from_spmid", "share_source", "share_medium", "share_plat",
+        "share_tag", "share_from", "share_times", "share_record",
+    }),
+    "xiaohongshu.com": frozenset({
+        "xhsshare", "appuid", "apptime", "share_id", "shareredid",
+        "share_from", "xsec_source",
+    }),
+    "douyin.com": frozenset({
+        "previous_page", "share_token", "enter_from",
+    }),
+    "weibo.com": frozenset({"from", "weibo_id"}),
+}
+
+
+def _tracking_params_for(host: str) -> frozenset[str] | None:
+    """取该主机适用的跟踪参数集合；**认不得的主机返回 None**（⇒ 原样不动）。"""
+    host = host.lower()
+    for domain, params in _HOST_TRACKING_PARAMS.items():
+        if host == domain or host.endswith("." + domain):
+            return params
+    return None
+
+
+def clean_url(url: str | None) -> str | None:
+    """去掉**认得的平台**链接里的跟踪参数，其余一律原样返回。
+
+    三条硬约束：
+
+    1. **只对白名单主机生效**：B站去 ``vd_source``/``spm_id_from``，小红书去
+       ``xhsshare``。未知站点**一个字都不动** —— 签名链接最怕被"顺手清理"。
+    2. **必留参数**永不删除：B站 ``p``（分P）、小红书 ``xsec_token``（新链接
+       没有它就 404）、以及任何 ``access_key`` / ``sign`` / ``token``。
+    3. **不重新编码查询串**：删完参数后直接做**字符串级**切除，保留其余部分
+       的原始字节。``urlencode`` 会把 ``%2F`` 变 ``%2F`` 之外的形态、重排顺序、
+       改写空格，签名串一旦被改写就失效了。
+    """
+    if not url:
+        return url
+    try:
+        from urllib.parse import urlsplit
+
+        parts = urlsplit(url)
+        if not parts.query:
+            return url
+
+        removable = _tracking_params_for(parts.hostname or "")
+        if not removable:
+            return url  # 认不出的主机：一律不动
+
+        # 逐段扫描原始查询串，只切除「键名在白名单里」的整段。
+        # 不 decode/re-encode：sign=%2B%3D 这类签名必须逐字节保持原样。
+        kept: list[str] = []
+        for segment in parts.query.split("&"):
+            if not segment:
+                continue
+            key = segment.split("=", 1)[0]
+            # 只认 ASCII 字母数字下划线开头的键；含百分号编码的键不敢动
+            if key.lower() in removable and key.isascii() and key.replace("_", "").isalnum():
+                continue
+            kept.append(segment)
+
+        if len(kept) == len([s for s in parts.query.split("&") if s]):
+            return url  # 没删掉任何东西就不重组，省掉一切改写风险
+        query = "&".join(kept)
+        from urllib.parse import urlunsplit
+
+        return urlunsplit((parts.scheme, parts.netloc, parts.path, query, parts.fragment))
+    except Exception:
+        # 静默失败即保留原样：坏链接比长链接糟糕得多
+        return url
+
+
+def build_concise_text(result: ParseResult) -> list[str]:
+    """构建精简文本的行列表（标题 / 干净地址 / 播放信息 / 必要提示）。
+
+    **只发一条普通消息**，不含长简介、AI 总结或转发节点。字段缺失就省略，
+    不为了凑格式联网取数。
+    """
+    lines: list[str] = []
+
+    if result.title:
+        lines.append(str(result.title).strip())
+
+    url = clean_url(result.url)
+    if url:
+        lines.append(str(url))
+
+    # 播放信息：优先结构化字段，缺省即省略。**刻意不读 extra["info"]** ——
+    # 那是 B站 AI 总结（core/parsers/bilibili/parser.py 写入），正是要排除的长内容。
+    info_parts: list[str] = []
+    duration = result.extra.get("duration")
+    if duration:
+        info_parts.append(f"时长 {duration}")
+    stats = result.extra.get("stats_line")
+    if stats:
+        info_parts.append(str(stats))
+    online = result.extra.get("online")
+    if online and not stats:
+        info_parts.append(str(online))
+    if info_parts:
+        lines.append(" · ".join(info_parts))
+
+    # 有意义的限制提示照旧保留（体积/时长超限、解析能力不足），
+    # 否则用户只看到标题却不知道媒体为什么没发。
+    for warning in result.extra.get("limit_warnings") or []:
+        text = str(warning).strip()
+        if text and text not in lines:
+            lines.append(text)
+
+    return lines

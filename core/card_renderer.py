@@ -41,6 +41,7 @@ from astrbot.api import logger
 
 from .data import ParseResult, ImageContent
 from .task import PathTask
+from .platform_icons import load_platform_icon
 
 try:
     from PIL import Image, ImageDraw, ImageFilter, ImageFont
@@ -56,6 +57,7 @@ except AttributeError:  # Pillow < 9.1
 
 # 卡片右下角的默认水印文字。
 WATERMARK_TAG = "希望解析"
+_CARD_STYLE_VERSION = '20261021-platform-badges'
 
 
 # ============================ 文本与统计处理 ============================
@@ -262,6 +264,7 @@ PLATFORM_COLORS = {
     "twitter": "#55ACEE",
     "acfun": "#FD4C5D",
     "nga": "#66C0F4",
+    "xiaoheihe": "#E6A73A",
     "youtube": "#FF4E45",
     "tiktok": "#2EF2EE",
     "website": "#8B7CF6",
@@ -490,6 +493,7 @@ class ShareCardRenderer:
         show_play_button: bool = True,
         gradient_top: str | None = None,
         gradient_bottom: str | None = None,
+        show_ai_summary: bool = False,
     ):
         self.cache_dir = cache_dir
         self.enabled = enabled and Image is not None
@@ -508,6 +512,8 @@ class ShareCardRenderer:
         self.show_play_button = bool(show_play_button)
         self.gradient_top = normalize_hex_color(gradient_top)
         self.gradient_bottom = normalize_hex_color(gradient_bottom)
+        # B站 AI 摘要开关。immersive 永远不显示（由 render/_ai_summary_* 兜底）。
+        self.show_ai_summary = bool(show_ai_summary)
         self._regular_font: str | None = None
         self._bold_font: str | None = None
         self._fonts_loaded = False
@@ -777,19 +783,30 @@ class ShareCardRenderer:
         cache_key: str | None = None,
         existing: Path | None = None,
     ) -> Path | None:
-        """异步渲染卡片，失败时返回 None（由调用方回退到文本输出）。"""
+        """异步渲染卡片，失败时返回 None，由调用方决定其他已选输出。"""
         if not self.enabled:
             return None
         try:
-            if existing is not None and existing.exists():
-                return existing
+            # 惰性附加信息必须在算 digest / 查 PNG 缓存之前加载：摘要开关与
+            # 有效内容都会进 digest，加载完再算路径才能命中正确缓存。
+            loader = getattr(result, "card_info_loader", None)
+            if loader is not None:
+                include_ai = self.show_ai_summary and self.layout_name != "immersive"
+                try:
+                    await loader.load(include_ai=include_ai)
+                except asyncio.CancelledError:
+                    raise
+                except Exception:
+                    logger.debug("卡片附加信息加载失败，继续渲染", exc_info=True)
             out_path = self._output_path(cache_key, result)
+            if existing == out_path and existing.exists():
+                return existing
             if out_path.exists():
                 return out_path
             images = await self._collect_images(result)
             return await asyncio.to_thread(self._render_sync, result, images, out_path)
         except Exception:
-            logger.exception("解析卡片渲染失败，已回退到文本输出")
+            logger.exception("解析卡片渲染失败，跳过卡片输出")
             return None
 
     def _output_path(self, cache_key: str | None, result: ParseResult) -> Path:
@@ -800,10 +817,13 @@ class ShareCardRenderer:
         )
         digest = hashlib.md5(
             (
-                f"{self.theme_name}|{self.width}|{self.layout_name}|{self.cover_full_size}"
+                f"{_CARD_STYLE_VERSION}|{self.theme_name}|{self.width}|{self.layout_name}|{self.cover_full_size}"
                 f"|{self.accent_color or ''}|{self.watermark}|{self.desc_max_lines}"
                 f"|{int(self.show_avatar)}|{int(self.show_play_button)}"
                 f"|{self.gradient_top or ''}|{self.gradient_bottom or ''}"
+                f"|{int(self.show_ai_summary)}"
+                f"|{result.extra.get('ai_summary') or ''}"
+                f"|{result.extra.get('ai_summary_status') or ''}"
                 f"|{payload}|{warnings_str}"
             ).encode("utf-8")
         ).hexdigest()[:16]
@@ -821,6 +841,9 @@ class ShareCardRenderer:
         hero_task: PathTask | None = None
         if video is not None and video.cover is not None:
             hero_task = video.cover
+            tasks.append(("hero", hero_task))
+        elif result.audio_contents and result.audio_contents[0].cover is not None:
+            hero_task = result.audio_contents[0].cover
             tasks.append(("hero", hero_task))
 
         grid_tasks: list[PathTask] = []
@@ -844,6 +867,10 @@ class ShareCardRenderer:
         if not tasks:
             return images
 
+        # 自动抽帧会下载视频本体。卡片预览和仅卡片输出不启动这类任务；
+        # 富媒体审计已经启动过的封面任务仍可复用。
+        tasks = [(kind, task) for kind, task in tasks
+                 if not task.needs_media or task.started]
         results = await asyncio.gather(
             *[t.safe_get() for _, t in tasks], return_exceptions=True
         )
@@ -924,7 +951,8 @@ class ShareCardRenderer:
     def _platform_pill_width(self, text: str) -> int:
         """平台徽标（accent 圆点 + 平台名）宽度。"""
         font = self._font(_L.F_PLATFORM, bold=True)
-        return 18 + 12 + 8 + self._text_width(text, font) + 18
+        icon_width = 24 if load_platform_icon(text, 24) is not None else 12
+        return 18 + icon_width + 8 + self._text_width(text, font) + 18
 
     # ---------- 同步绘制 ----------
 
@@ -943,6 +971,75 @@ class ShareCardRenderer:
             return self._render_feed(result, images, out_path)
         return self._render_standard(result, images, out_path)
 
+    # ---------- AI 摘要块（仅 B站；沉浸式永不显示） ---------- #
+
+    def _ai_summary_text(self, result: ParseResult) -> str:
+        """有效摘要正文；开关关 / 非 B站 / 状态非成功 / 空内容都返回空串。"""
+        if not self.show_ai_summary:
+            return ""
+        if self.layout_name == "immersive":
+            return ""
+        if getattr(result.platform, "name", "") != "bilibili":
+            return ""
+        status = str(result.extra.get("ai_summary_status") or "")
+        if status != "ok":
+            return ""
+        return strip_emoji(str(result.extra.get("ai_summary") or "")).strip()
+
+    def _ai_summary_lines(self, result: ParseResult, width: int) -> list[str]:
+        text = self._ai_summary_text(result)
+        if not text or self.layout_name == "immersive":
+            return []
+        # 摘要与简介高度重合时只保留一份，避免同一段话画两遍（简单归一化包含判断）。
+        desc = strip_emoji(result.text or "")
+        if desc:
+            norm = lambda value: re.sub(r"\s+", "", value)
+            n_text, n_desc = norm(text), norm(desc)
+            if n_text and (n_text in n_desc or n_desc in n_text):
+                return []
+        size = 20 if self.layout_name == "feed" else 22
+        cap = 2 if self.layout_name == "feed" else 3
+        return self._fit_lines(text, self._font(size), width - 40, cap)
+
+    def _ai_summary_height(self, result: ParseResult, width: int) -> int:
+        lines = self._ai_summary_lines(result, width)
+        if not lines:
+            return 0
+        return 56 + len(lines) * 32 + 18 + 16
+
+    def _ai_summary_block(self, canvas, theme: _Theme, result: ParseResult, y: int, width: int) -> int:
+        lines = self._ai_summary_lines(result, width)
+        if not lines:
+            return y
+        height = self._ai_summary_height(result, width) - 16
+        pad = _L.PAD
+        self._glass(
+            canvas, (pad, y, pad + width, y + height), 18,
+            theme.quote_bg, 18 if self.theme_name == "dark" else 12,
+            theme.border, 38, blur=8,
+        )
+        draw = ImageDraw.Draw(canvas)
+        accent = self._accent(result)[0]
+        # 独立标签，明确来源，和简介区分开。
+        draw.rounded_rectangle((pad + 18, y + 19, pad + 22, y + 39), radius=2, fill=accent)
+        self._draw_text(
+            draw, (pad + 34, y + 16), "AI 内容摘要 · 来自B站", 20,
+            theme.text_secondary, bold=True,
+        )
+        size = 20 if self.layout_name == "feed" else 22
+        for index, line in enumerate(lines):
+            self._draw_text(
+                draw, (pad + 20, y + 53 + index * 32), line, size, theme.text_primary,
+            )
+        return y + height + 16
+
+    def _ai_desc_cap(self, result: ParseResult, default: int) -> int:
+        """有有效摘要时简介最多 2 行，且不超过用户设置的上限。"""
+        cap = self._desc_line_cap(default)
+        if self._ai_summary_lines(result, self.width - _L.PAD * 2):
+            cap = min(2, cap) if cap > 0 else 2
+        return cap
+
     def _render_standard(
         self,
         result: ParseResult,
@@ -958,7 +1055,7 @@ class ShareCardRenderer:
         gap = _L.GRID_GAP
 
         # ================= 数据准备 =================
-        is_video_hero = images.get("hero") is not None
+        is_video_hero = result.video is not None and images.get("hero") is not None
         hero = images.get("hero")
         grid = list(images.get("grid") or [])
         if hero is None and grid:
@@ -995,7 +1092,7 @@ class ShareCardRenderer:
         text = strip_emoji(result.text)
         desc_lines: list[str] = []
         if text:
-            desc_lines = self._fit_lines(text, desc_font, inner_w, self._desc_line_cap(6))
+            desc_lines = self._fit_lines(text, desc_font, inner_w, self._ai_desc_cap(result, 6))
 
         # 作者
         author = result.author
@@ -1029,6 +1126,7 @@ class ShareCardRenderer:
             y += len(title_lines) * _L.F_TITLE_LINE_H + 14
         if desc_lines:
             y += len(desc_lines) * _L.F_DESC_LINE_H + 16
+        y += self._ai_summary_height(result, inner_w)
         if stat_rows:
             y += len(stat_rows) * (_L.STAT_H + _L.STAT_ROW_GAP) - _L.STAT_ROW_GAP + 18
         if online_text:
@@ -1315,6 +1413,9 @@ class ShareCardRenderer:
                 y += _L.F_DESC_LINE_H
             y += 16
 
+        # ============ AI 摘要（简介之后 / 统计之前；沉浸式不显示） ============
+        y = self._ai_summary_block(canvas, theme, result, y, inner_w)
+
         # ============ 统计徽章（毛玻璃药丸：标签弱化 + 数值强调） ============
         if stat_rows:
             label_font = self._font(_L.F_STAT_LABEL)
@@ -1512,13 +1613,18 @@ class ShareCardRenderer:
         font = self._font(font_size, bold)
         tx = x + 18
         if dot:
-            dot_r = 6
-            dot_cy = y + h // 2
-            draw.ellipse(
-                (tx, dot_cy - dot_r, tx + dot_r * 2, dot_cy + dot_r),
-                fill=(*accent_rgb, 255),
-            )
-            tx += dot_r * 2 + 8
+            icon = load_platform_icon(text, 24)
+            if icon is not None:
+                canvas.alpha_composite(icon, (tx, y + (h - icon.height) // 2))
+                tx += icon.width + 8
+            else:
+                dot_r = 6
+                dot_cy = y + h // 2
+                draw.ellipse(
+                    (tx, dot_cy - dot_r, tx + dot_r * 2, dot_cy + dot_r),
+                    fill=(*accent_rgb, 255),
+                )
+                tx += dot_r * 2 + 8
         self._draw_text(
             draw, (tx, y + (h - self._line_height(font)) // 2),
             text, font_size, "#FFFFFF", bold=bold,
@@ -1551,13 +1657,18 @@ class ShareCardRenderer:
         font = self._font(font_size, bold)
         tx = x + 18
         if dot:
-            dot_r = 6
-            dot_cy = y + h // 2
-            draw.ellipse(
-                (tx, dot_cy - dot_r, tx + dot_r * 2, dot_cy + dot_r),
-                fill=(*accent_rgb, 255),
-            )
-            tx += dot_r * 2 + 8
+            icon = load_platform_icon(text, 24)
+            if icon is not None:
+                canvas.alpha_composite(icon, (tx, y + (h - icon.height) // 2))
+                tx += icon.width + 8
+            else:
+                dot_r = 6
+                dot_cy = y + h // 2
+                draw.ellipse(
+                    (tx, dot_cy - dot_r, tx + dot_r * 2, dot_cy + dot_r),
+                    fill=(*accent_rgb, 255),
+                )
+                tx += dot_r * 2 + 8
         self._draw_text(
             draw, (tx, y + (h - self._line_height(font)) // 2),
             text, font_size, text_rgb, bold=bold,
@@ -1610,7 +1721,7 @@ class ShareCardRenderer:
         if dur := result.extra.get("duration"):
             stats.insert(0, ("时长", str(dur)))
         return {
-            "is_video_hero": images.get("hero") is not None,
+            "is_video_hero": result.video is not None and images.get("hero") is not None,
             "hero": hero,
             "grid": grid,
             "platform_text": result.platform.display_name,
@@ -1994,7 +2105,7 @@ class ShareCardRenderer:
             if d["title"] else []
         )
         desc_font = self._font(_L.F_DESC)
-        desc_lines = self._fit_lines(d["text"], desc_font, inner_w, self._desc_line_cap(4)) if d["text"] else []
+        desc_lines = self._fit_lines(d["text"], desc_font, inner_w, self._ai_desc_cap(result, 4)) if d["text"] else []
         stats_h, stat_rows = self._stat_rows_height(d, inner_w)
         warnings_h = self._warning_block_height(d["warnings"], inner_w)
         grid_h = self._grid_metrics(len(d["grid"]), inner_w, gap)[0]
@@ -2011,6 +2122,7 @@ class ShareCardRenderer:
                 y += _L.AVATAR + 20
         if desc_lines:
             y += len(desc_lines) * _L.F_DESC_LINE_H + 16
+        y += self._ai_summary_height(result, inner_w)
         if stats_h:
             y += stats_h + 18
         if d["online_text"]:
@@ -2081,6 +2193,7 @@ class ShareCardRenderer:
                 self._draw_text(draw, (pad, y), line, _L.F_DESC, theme.text_secondary)
                 y += _L.F_DESC_LINE_H
             y += 16
+        y = self._ai_summary_block(canvas, theme, result, y, inner_w)
         if stat_rows:
             y = self._draw_stat_rows(canvas, theme, stat_rows, pad, y) + 18
             draw = ImageDraw.Draw(canvas)
@@ -2295,7 +2408,7 @@ class ShareCardRenderer:
         title_font = self._font(34, bold=True)
         title_lines = self._fit_lines(d["title"], title_font, inner_w, 3) if d["title"] else []
         desc_font = self._font(_L.F_DESC)
-        desc_lines = self._fit_lines(d["text"], desc_font, inner_w, self._desc_line_cap(5)) if d["text"] else []
+        desc_lines = self._fit_lines(d["text"], desc_font, inner_w, self._ai_desc_cap(result, 5)) if d["text"] else []
         media_h = round(inner_w * 9 / 16) if d["hero"] else 0
         if d["hero"] and self.cover_full_size:
             media_h = self._hero_aspect_height(d["hero"], inner_w, media_h)
@@ -2313,6 +2426,7 @@ class ShareCardRenderer:
             y += len(desc_lines) * _L.F_DESC_LINE_H + 16
         if media_h:
             y += media_h + 20
+        y += self._ai_summary_height(result, inner_w)
         if stats_h:
             y += stats_h + 18
         if d["online_text"]:
@@ -2339,7 +2453,9 @@ class ShareCardRenderer:
             self._draw_text(draw, (name_x, y + 8), d["name"], 26, theme.text_primary, bold=True)
             # 平台小药丸跟在昵称后
             pill_font = self._font(17, bold=True)
-            pill_w = 12 + 8 + 6 + self._text_width(d["platform_text"], pill_font) + 12
+            platform_icon = load_platform_icon(d['platform_text'], 18)
+            icon_width = 18 if platform_icon is not None else 8
+            pill_w = 12 + icon_width + 6 + self._text_width(d["platform_text"], pill_font) + 12
             pill_h = 30
             pill_y = y + 8 + (self._line_height(name_font) - pill_h) // 2
             self._glass(canvas, (name_x + name_w + 12, pill_y,
@@ -2348,9 +2464,12 @@ class ShareCardRenderer:
                         theme.pill_bg, theme.frost_border_alpha, blur=6)
             draw = ImageDraw.Draw(canvas)
             dot_cy = pill_y + pill_h // 2
-            draw.ellipse((name_x + name_w + 24, dot_cy - 4, name_x + name_w + 32, dot_cy + 4),
-                         fill=(*accent_rgb, 255))
-            self._draw_text(draw, (name_x + name_w + 24 + 14,
+            if platform_icon is not None:
+                canvas.alpha_composite(platform_icon, (name_x + name_w + 24, dot_cy - 9))
+            else:
+                draw.ellipse((name_x + name_w + 24, dot_cy - 4, name_x + name_w + 32, dot_cy + 4),
+                             fill=(*accent_rgb, 255))
+            self._draw_text(draw, (name_x + name_w + 24 + icon_width + 6,
                                    pill_y + (pill_h - self._line_height(pill_font)) // 2),
                             d["platform_text"], 17, theme.text_secondary, bold=True)
             if d["author_desc"]:
@@ -2403,6 +2522,8 @@ class ShareCardRenderer:
             y += media_h + 20
             draw = ImageDraw.Draw(canvas)
 
+        # AI 摘要（媒体之后 / 统计之前；feed 最多 2 行）
+        y = self._ai_summary_block(canvas, theme, result, y, inner_w)
         if stat_rows:
             y = self._draw_stat_rows(canvas, theme, stat_rows, pad, y) + 18
             draw = ImageDraw.Draw(canvas)

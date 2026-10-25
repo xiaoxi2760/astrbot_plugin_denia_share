@@ -282,8 +282,87 @@ class BaseParser:
         raise SilentException(f"无法匹配 {url}")
 
     @classmethod
+    def dedup_identity(cls, searched: Match[str]) -> str | None:
+        """本次匹配到的链接的「规范身份」，供同群去重跨输入形式识别同一条资源。
+
+        默认 ``None`` —— 表示按解析器匹配到的原文（``searched.group(0)``）去重，
+        与旧行为完全一致。需要跨形式去重的平台在自己的解析器里覆写本方法，例如
+        B站：裸 ``BV1xx``、``bilibili.com/video/BV1xx?share_source=…`` 与
+        ``bilibili.com/BV1xx`` 指向同一个视频，应当算一条。
+
+        三条硬约束（写新实现前先读）：
+
+        1. **纯本地、同步、不联网**。去重判定排在真正的解析**之前**，三条入口
+           （内置平台处理器 / 自定义解析器 / JSON 分享卡片）都会走到这里；一旦
+           在这里发请求，等于把「去重」变成一次隐式网络调用。
+        2. **认不出就返回 ``None``**（或空串）。调用方会回落到原文键 —— 宁可少
+           去重一次，也不能把两条不同的资源归一成同一条、让后一条再也发不出来。
+        3. **稳定且与输入形式无关**：同一个资源换个说法（带不带跟踪参数、裸号还是
+           链接）必须得到同一个字符串；分集 / 分P 这类**确实不同**的资源必须得到
+           不同的字符串，不能一并了事。
+        """
+        return None
+
+    async def dedup_expand(self, keyword: str, searched: Match[str]) -> tuple[str, Match[str]] | None:
+        """异步去重预处理：BV 藏在跳转后面时（短链）先把它展开出来。
+
+        默认 ``None`` —— 表示「本次匹配无需展开」，调用方原样拿 ``search_url``
+        的结果去去重 / 解析，与旧行为完全一致。只有确实要做一跳的平台才覆写，
+        例如 B站 ``b23.tv`` / ``bili2233.cn``。
+
+        返回值约定：``(展开后的 keyword, 展开后的 searched)``。调用方会**直接用它
+        取代原来的匹配**去 ``parse`` —— 所以这里的跳转就是原本 ``parse_short``
+        要跳的那一次，整个请求仍然只跳一次，不会「为拿身份跳一次、parse 又跳一次」。
+
+        两条硬约束：
+
+        1. **只有需要展开时才联网**：不是短链、或已经能从本地认出身份时直接返回
+           ``None``，别把它变成「每条链接都先发一次请求」。
+        2. **失败按现有解析失败策略抛异常**（如 :class:`ParseException`）。调用方
+           会撤销去重占位，让下一个人能重试；不同短链各自失败、各自回落原文键，
+           绝不互相合并。
+        """
+        return None
+
+    @classmethod
     def result(cls, **kwargs: Unpack[ParseResultKwargs]) -> ParseResult:
         return ParseResult(platform=cls.platform, **kwargs)
+
+    @staticmethod
+    def _permanent_network_error(exc: BaseException) -> bool:
+        """瞬断重试的唯一「不重试」判据：明确的永久性 DNS / TLS 证书错误。
+
+        短链只是一跳 302，扛不住的是抖动（连接被拒、超时、EAI_AGAIN），
+        而 EAI_NONAME（域名不存在）/ EAI_FAIL 与证书校验失败**重试多少次都
+        一样**：只会把一条必然失败的链接拖慢 2 秒，还白占连接。所以这两类
+        直接放行给调用方，由现有失败策略（ParseException / 撤销去重占位）处理。
+
+        异常可能被 httpcore / anyio 逐层包成 ``ConnectError``，所以同时看
+        异常链与 str()（httpx 会把底层 OSError 的文本带进自己的 message）。
+        """
+        import socket
+        import ssl
+
+        permanent_errnos = {socket.EAI_NONAME, socket.EAI_FAIL}
+        permanent_names = (
+            "nodename nor servname",  # macOS/BSD 的 EAI_NONAME 文案
+            "name or service not known",  # Linux 的 EAI_NONAME 文案
+            "certificate verify failed",  # 证书链/主机名校验失败
+        )
+        current: BaseException | None = exc
+        seen: set[int] = set()
+        while current is not None and id(current) not in seen:
+            seen.add(id(current))
+            if isinstance(current, socket.gaierror) and current.errno in permanent_errnos:
+                return True
+            # 只认证书校验失败，别把 SSLError 其它子类（握手中断，可重试）算进来
+            if isinstance(current, ssl.SSLCertVerificationError):
+                return True
+            text = str(current).lower()
+            if any(name in text for name in permanent_names):
+                return True
+            current = current.__cause__ or current.__context__
+        return False
 
     @staticmethod
     async def get_redirect_url(
@@ -291,7 +370,7 @@ class BaseParser:
         headers: dict[str, str] | None = None,
         proxy: str | None = None,
     ) -> str:
-        from httpx import AsyncClient
+        from httpx import AsyncClient, ConnectError, RequestError, TimeoutException
         headers = headers or COMMON_HEADER.copy()
         # proxy 由调用方（实例方法）显式传入：BaseParser 自身没有平台上下文，
         # client_kwargs 解析不出代理，只能靠这里补上调用方的开关结果
@@ -304,7 +383,29 @@ class BaseParser:
         async with AsyncClient(
             **BaseParser.client_kwargs(**overrides)
         ) as client:
-            response = await client.get(url)
+            # 短链这一跳是纯网络瞬时故障（连接被重置 / 超时 / 临时 DNS）就重试：
+            # 复用同一个 client，退避 0.5s / 1.5s，总共最多 3 次。
+            # 只包 client.get —— raise_for_status 在循环外，HTTPStatusError
+            # 与 HTTP 状态错误沿用现有处理，不在这一跳自动重试。
+            attempts = 3
+            response = None
+            last_error: RequestError | None = None
+            for attempt in range(attempts):
+                try:
+                    response = await client.get(url)
+                    break
+                except (ConnectError, TimeoutException) as exc:
+                    if BaseParser._permanent_network_error(exc):
+                        raise
+                    last_error = exc
+                    if attempt + 1 < attempts:
+                        await asyncio.sleep(0.5 if attempt == 0 else 1.5)
+            if response is None:
+                # 原样抛最后一次的异常实例：异常类型与身份都不变，
+                # 调用方的失败策略（含 ConnectError 判定）照旧。取消（CancelledError
+                # 非 RequestError）在 sleep/请求处直接穿透，不做任何处理。
+                assert last_error is not None
+                raise last_error
             if response.status_code >= 400:
                 response.raise_for_status()
             return response.headers.get("Location", url)
@@ -334,7 +435,12 @@ class BaseParser:
     def create_author(self, name: str, avatar_url: str | None = None, description: str | None = None):
         author = Author(name=name, description=description)
         if avatar_url:
-            author.avatar = PathTask(self.downloader.download_img(avatar_url, ext_headers=self.headers))
+            # 惰性：仅文本模式下头像一次都不会下载
+            author.avatar = PathTask.lazy(
+                lambda url=avatar_url: self.downloader.download_img(
+                    url, ext_headers=self.headers
+                )
+            )
         return author
 
     def create_video(self, url_or_task: str | asyncio.Task[Path] | PathTask, cover_url: str | None = None, duration: float | None = None, is_gif: bool = False):
@@ -357,24 +463,41 @@ class BaseParser:
                     raise IgnoreException(
                         f"视频时长({fmt_duration(duration)})超过限制({fmt_duration(pconfig.VIDEO_DURATION_MAXIMUM)})，跳过下载"
                     )
-                # 包成 Task 并**立刻取回一次异常**：这是「按策略跳过」的**信号**，
-                # 不是故障。结果若在交付前就被丢掉（解析器随后抛了别的异常、
-                # 三级兜底换了路径），就没有人 await 它，asyncio 会把这个设计好的
-                # 信号打成「Task exception was never retrieved」+ 整段堆栈
-                # （自检里已现过一次）。取回不影响语义：后面 await 它照样抛。
-                path_task = asyncio.create_task(_skip_video_download())
-                path_task.add_done_callback(_retrieve_task_exception)
-                video_content = VideoContent(PathTask(path_task), duration=duration, is_gif=is_gif)
+                # 惰性 + 立刻取回一次异常：这个 Task 一旦被 get() 就会失败，而
+                # 失败信息若无人取回会被 asyncio 打成「Task exception was never
+                # retrieved」+ 整段堆栈（自检里已现过一次）。done_callback 只是
+                # 把异常**读出来**（不影响后续 await 照样抛），所以它不会提前
+                # 让跳过信号丢失。
+                def _make_skip_task() -> "asyncio.Task[Path]":
+                    task = asyncio.create_task(_skip_video_download())
+                    task.add_done_callback(_retrieve_task_exception)
+                    return task
+
+                # 惰性：跳过分支里本来就没有任何东西要下载，唯一代价是那个
+                # IgnoreException 信号，构造时就 create_task 属于纯浪费
+                video_content = VideoContent(
+                    PathTask.lazy(_make_skip_task), duration=duration, is_gif=is_gif
+                )
                 if cover_url:
-                    video_content.cover = PathTask(
-                        self.downloader.download_img(cover_url, ext_headers=self.headers)
+                    video_content.cover = PathTask.lazy(
+                        lambda url=cover_url: self.downloader.download_img(
+                            url, ext_headers=self.headers
+                        )
                     )
                 return video_content
 
         # 统一先包成 PathTask：抽封面 / 转 GIF 与内容本体都要 await 同一个任务，
         # 直接 await 裸协程会导致重复 await 报错（上游 rika 2026-09 修复）
+        #
+        # URL 形态走**惰性**工厂：仅文本/仅卡片模式下根本不会有人 get 它，
+        # 构造那一刻就不该有下载跑起来。外部传进来的 Task / PathTask 保持原样
+        # （那是别人已经调度好的，不归我们管，也没法再变惰性）。
         if isinstance(url_or_task, str):
-            path_task = PathTask(self.downloader.download_video(url_or_task, ext_headers=self.headers))
+            path_task = PathTask.lazy(
+                lambda url=url_or_task: self.downloader.download_video(
+                    url, ext_headers=self.headers
+                )
+            )
         elif isinstance(url_or_task, PathTask):
             path_task = url_or_task
         else:
@@ -383,7 +506,12 @@ class BaseParser:
         video_content = VideoContent(path_task, duration=duration, is_gif=is_gif)
 
         if cover_url:
-            cover_task = self.downloader.download_img(cover_url, ext_headers=self.headers)
+            cover_task = PathTask.lazy(
+                lambda url=cover_url: self.downloader.download_img(
+                    url, ext_headers=self.headers
+                )
+            )
+            video_content.cover = cover_task
         else:
             async def extract_cover():
                 """从视频里抽第一帧当封面；失败返回 ``None``，**不向上抛**。
@@ -410,9 +538,11 @@ class BaseParser:
                 except Exception as exc:  # noqa: BLE001 —— ffmpeg 失败/未安装
                     logger.warning(f"抽取视频封面失败: {type(exc).__name__}: {exc}")
                     return None
-            cover_task = extract_cover()
 
-        video_content.cover = PathTask(cover_task)
+            # needs_media=True：**必须先下载整段视频**才能抽帧。仅卡片模式下
+            # 这一步被跳过，卡片用占位背景 —— 为一张封面下整段视频不划算。
+            # 它内部会 await path_task，也就是顺带把视频本体拉下来。
+            video_content.cover = PathTask.lazy(extract_cover, needs_media=True)
 
         # 这里原有一段 `if is_gif: 生成 gif_path` 的自动转换，已删除：
         # 全仓没有任何地方读 gif_path，ffmpeg 每次都白跑一遍、产物没人取用，
@@ -420,8 +550,14 @@ class BaseParser:
         # is_gif 标记本身保留 —— Twitter 用它表达「这是动图，不算视频作品」。
         return video_content
 
-    def _add_limit_warning(self, result: ParseResult, duration: float | None):
-        """检查视频时长，超限时添加 limit_warnings 到 result.extra（参考 B站实现）"""
+    def _add_limit_warning(
+        self, result: ParseResult, duration: float | None, media_type: str = "视频"
+    ):
+        """检查时长，超限时添加 limit_warnings 到 result.extra。
+
+        ``media_type`` 让音频复用同一条文案路径：超限原因要出现在用户**已经选了**
+        的文本/卡片里，而不是靠插件擅自改发别的形式。
+        """
         if duration is not None:
             from .config import get_config
             from .media_utils import fmt_duration
@@ -429,22 +565,30 @@ class BaseParser:
             if duration > pconfig.VIDEO_DURATION_MAXIMUM:
                 from astrbot.api import logger
                 msg = (
-                    f"⚠️ 视频时长({fmt_duration(duration)})"
-                    f"超过限制({fmt_duration(pconfig.VIDEO_DURATION_MAXIMUM)})，不会下载视频"
+                    f"⚠️ {media_type}时长({fmt_duration(duration)})"
+                    f"超过限制({fmt_duration(pconfig.VIDEO_DURATION_MAXIMUM)})，不会下载{media_type}"
                 )
                 logger.warning(msg)
                 result.extra.setdefault("limit_warnings", []).append(msg)
 
     def create_images(self, image_urls: list[str]):
-        """把一批图片 URL 转成 ImageContent（每个 URL 会立刻起一条下载任务）。
+        """把一批图片 URL 转成 ImageContent（每个 URL 一条**惰性**下载任务）。
 
-        超过 :data:`MAX_IMAGES_PER_RESULT` 的部分直接丢弃 —— 远端列表长度不可控，
-        不截断的话并发下载数与磁盘占用都跟着远端走。
+        惰性是「仅文本」不下载图片的前提：图片归富媒体一路，文本不该顺手
+        把它们拉下来。超过 :data:`MAX_IMAGES_PER_RESULT` 的部分直接丢弃 ——
+        远端列表长度不可控，不截断的话并发下载数与磁盘占用都跟着远端走。
         """
         contents: list[ImageContent] = []
         for url in self.cap_image_urls(image_urls):
-            task = self.downloader.download_img(url, ext_headers=self.headers)
-            contents.append(ImageContent(PathTask(task)))
+            contents.append(
+                ImageContent(
+                    PathTask.lazy(
+                        lambda u=url: self.downloader.download_img(
+                            u, ext_headers=self.headers
+                        )
+                    )
+                )
+            )
         return contents
 
     @staticmethod
@@ -461,14 +605,61 @@ class BaseParser:
 
     def create_image(self, url_or_task: str | asyncio.Task[Path], alt: str | None = None):
         if isinstance(url_or_task, str):
-            path_task = self.downloader.download_img(url_or_task, ext_headers=self.headers)
+            path_task = PathTask.lazy(
+                lambda url=url_or_task: self.downloader.download_img(
+                    url, ext_headers=self.headers
+                )
+            )
         else:
-            path_task = url_or_task
-        return ImageContent(PathTask(path_task), alt=alt)
+            # 外部已调度好的 Task：保持急式语义（不归我们管，也没法再变惰性）
+            path_task = (
+                url_or_task if isinstance(url_or_task, PathTask) else PathTask(url_or_task)
+            )
+        return ImageContent(path_task, alt=alt)
 
     def create_audio(self, url_or_task: str | asyncio.Task[Path], duration: float = 0.0):
+        """把音频 URL / 任务包成 :class:`AudioContent`（**URL 形态是惰性的**）。
+
+        时长上限复用 :attr:`VIDEO_DURATION_MAXIMUM` —— 同一个「媒体时长」旋钮，
+        音频用**秒**（与 ``AudioContent.duration``、``VideoContent.duration`` 一致）。
+        超限时返回的内容在 ``get()`` 时抛 ``IgnoreException``：解析结果照常返回
+        （标题/作者/封面仍在），只是不下载音频本体。
+        """
+        from .config import get_config
+        from .media_utils import fmt_duration
+
+        maximum = get_config().VIDEO_DURATION_MAXIMUM
+        if duration and duration > maximum:
+            from astrbot.api import logger
+            logger.warning(
+                f"音频时长 {fmt_duration(duration)} 超过限制 {fmt_duration(maximum)}, 跳过下载"
+            )
+            if isinstance(url_or_task, asyncio.Task):
+                # 外部传进来的是已经调度好的急式任务：策略已决定不下载，
+                # 必须取消，否则它会在后台把整个音频白下完。
+                url_or_task.cancel()
+
+            async def _skip_audio_download():
+                raise IgnoreException(
+                    f"音频时长({fmt_duration(duration)})超过限制({fmt_duration(maximum)})，跳过下载"
+                )
+
+            def _make_skip_task() -> "asyncio.Task[Path]":
+                task = asyncio.create_task(_skip_audio_download())
+                task.add_done_callback(_retrieve_task_exception)
+                return task
+
+            # 跳过分支里没有任何东西要下载，构造时就 create_task 属于纯浪费。
+            return AudioContent(PathTask.lazy(_make_skip_task), duration)
+
         if isinstance(url_or_task, str):
-            path_task = self.downloader.download_audio(url_or_task, ext_headers=self.headers)
+            path_task = PathTask.lazy(
+                lambda url=url_or_task: self.downloader.download_audio(
+                    url, ext_headers=self.headers
+                )
+            )
         else:
-            path_task = url_or_task
-        return AudioContent(PathTask(path_task), duration)
+            path_task = (
+                url_or_task if isinstance(url_or_task, PathTask) else PathTask(url_or_task)
+            )
+        return AudioContent(path_task, duration)

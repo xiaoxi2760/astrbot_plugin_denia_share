@@ -15,3 +15,13 @@ Thumbs.db
 
 # 开发向文档（目录结构 / 平台实测结论 / 配置项契约 / 网页界面实现机制）：留本地，不进仓库
 DEVELOPMENT.md
+
+# 本地维护资产不再入库（测试与文档统一放在仓库外）
+# tests   -> D:/Plugin/build/plugin_maintenance/astrbot_plugin_denia_share/tests
+# docs    -> 仓库外文档目录
+/tests
+/docs
+/_cleanup_logs
+
+# 打包脚本只在维护者本地用，发布产物是 zip，不需要进仓库
+/package.py

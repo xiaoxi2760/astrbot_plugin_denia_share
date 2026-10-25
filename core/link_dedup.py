@@ -63,6 +63,7 @@ class LinkDedup:
         self._window = window_provider
         # (会话, 链接) -> (首次出现时刻, 提示是否已发)
         self._entries: Dict[str, Tuple[float, bool]] = {}
+        self._uncertain: set[str] = set()
 
     @staticmethod
     def key(scope: str, cache_key: str) -> str:
@@ -99,19 +100,32 @@ class LinkDedup:
     def forget(self, scope: str, cache_key: str) -> None:
         """撤销占位 —— 首次处理失败时调用，好让下一个人能重试。"""
         self._entries.pop(self.key(scope, cache_key), None)
+        self._uncertain.discard(self.key(scope, cache_key))
+
+    def mark_uncertain(self, scope: str, cache_key: str) -> None:
+        key = self.key(scope, cache_key)
+        if key in self._entries:
+            self._uncertain.add(key)
+
+    def is_uncertain(self, scope: str, cache_key: str) -> bool:
+        return self.key(scope, cache_key) in self._uncertain
 
     def clear(self) -> None:
         self._entries.clear()
+        self._uncertain.clear()
 
     def _prune(self, window: int) -> None:
         now = time.monotonic()
         stale = [k for k, (t, _) in self._entries.items() if (now - t) >= window]
         for k in stale:
             self._entries.pop(k, None)
+            self._uncertain.discard(k)
 
     def _enforce_cap(self) -> None:
         while len(self._entries) > MAX_ENTRIES:
-            self._entries.pop(next(iter(self._entries)), None)
+            key = next(iter(self._entries))
+            self._entries.pop(key, None)
+            self._uncertain.discard(key)
 
     def __len__(self) -> int:
         return len(self._entries)

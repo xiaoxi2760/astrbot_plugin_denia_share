@@ -44,6 +44,9 @@ class PlatformEnum(str, Enum):
     TWITTER = "twitter"
     WEIBO = "weibo"
     XIAOHONGSHU = "xiaohongshu"
+    XIAOHEIHE = "xiaoheihe"
+    NETEASE = "netease"
+    QQMUSIC = "qqmusic"
 
     def __str__(self) -> str:
         return self.value
@@ -90,6 +93,9 @@ PLATFORMS: Final[dict[str, PlatformMeta]] = {
     "github": PlatformMeta("github", "GitHub"),
     "pixiv": PlatformMeta("pixiv", "Pixiv"),
     "steam": PlatformMeta("steam", "Steam"),
+    "xiaoheihe": PlatformMeta("xiaoheihe", "小黑盒"),
+    "netease": PlatformMeta("netease", "网易云音乐"),
+    "qqmusic": PlatformMeta("qqmusic", "QQ音乐"),
 }
 
 # 平台的正式名，供 WebUI 的平台开关与筛选下拉使用。键必须与 main.py 里

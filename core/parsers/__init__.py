@@ -1,38 +1,49 @@
 """解析器包 - 导出所有平台解析器。
 
-平台实现概览：
-- bilibili / xiaohongshu / weibo / acfun / nga —— rika_share 原实现
-- douyin —— HTML 页面解析 + a_bogus 签名接口（双路径）
-- kuaishou —— 分享页解析，兼容 photo 为 JSON 字符串的新版页面
-- twitter —— vxtwitter / fxtwitter 两级兜底
-- github / pixiv / steam —— 本仓库新增
+平台实现概览（复杂平台收进独立包目录，简单平台保持单文件）：
+
+- bilibili —— 包：``parser.py`` 主力 + ``models/`` 数据模型 + ``fallback/`` 自建备用
+  + ``access.py`` 试看判定
+- xiaohongshu / weibo / acfun / kuaishou —— 包：``parser.py`` + ``models/``
+- douyin —— 包：``parser.py`` + ``session.py`` + ``sign.py`` + ``web.py`` + ``models/``
+- twitter —— vxtwitter / fxtwitter 两级兜底（单文件）
+- github / pixiv / steam —— 本仓库新增（单文件）
   （github 走官方 API；pixiv 走 Ajax 接口并强制过滤 R18；
    steam 走官方 appdetails + CheapShark 折扣 + ITAD 史低）
+- nga —— 单文件
+
+复杂平台在这里从 ``.<platform>.parser`` 导入。B站包的 ``__init__.py``
+保持为纯文档，确保缺少主解析器依赖时仍能进入备用实现。
 """
 
-from .douyin import DouyinParser
-from .kuaishou import KuaiShouParser
-from .weibo import WeiBoParser
-from .xiaohongshu import XiaoHongShuParser
+from .douyin.parser import DouyinParser
+from .kuaishou.parser import KuaiShouParser
+from .weibo.parser import WeiBoParser
+from .xiaohongshu.parser import XiaoHongShuParser
 from .twitter import TwitterParser
 from .nga import NGAParser
-from .acfun import AcfunParser
+from .acfun.parser import AcfunParser
 from .github import GitHubParser
 from .pixiv import PixivParser
 from .steam import SteamParser
+from .xiaoheihe.parser import XiaoheiheParser
 
 # bilibili 单独兜底：它是本包唯一带第三方强依赖的解析器（bilibili-api-python，
 # GPL-3.0-or-later）。原先它在顶层裸 import，一旦这个依赖装不上、版本不兼容或
-# 被 yank，异常会顺着 .bilibili → 本模块 → main.py 一路冒泡，
+# 被 yank，异常会顺着 .bilibili.parser → 本模块 → main.py 一路冒泡，
 # 最终让**抖音 / 快手 / 微博 / 小红书 / Twitter / NGA / AcFun / GitHub / Pixiv /
 # Steam 这 10 个与 B站毫无关系的平台一起起不来** —— 一个边缘平台的可选依赖
 # 拥有整个插件的爆炸半径。
 #
 # 现在收在两级：
-#   1. 主力解析器导入失败 → 换**自建替补**（core/bili_fallback），B站视频仍可用，
-#      代价是动态 / 直播 / 收藏夹 / 专栏这些只有主力才有的功能不可用；
+#   1. 主力解析器导入失败 → 换**自建替补**（core/parsers/bilibili/fallback），
+#      B站视频仍可用，代价是动态 / 直播 / 收藏夹 / 专栏这些只有主力才有的功能不可用；
 #   2. 替补也起不来（比如 httpx 都没了）→ 才真的把 BilibiliParser 置为 None，
 #      由 main.py 跳过注册并打日志，其余十个平台照常。
+#
+# 这里刻意写 ``.bilibili.parser`` / ``.bilibili.fallback.parser`` 而不是
+# ``.bilibili``：平台的 ``__init__.py`` 是纯文档，如果让它 import 主力解析器，
+# 那么退到 fallback 时会先在父包上撞上同一个 bilibili_api 缺失异常。
 #
 # ⚠️ 三个标志必须在**每条分支**上都绑定，包括主力成功那条。否则
 # `from .core.parsers import *` 会因为 FALLBACK_ERROR 只在 except 里赋值而
@@ -43,18 +54,21 @@ BILIBILI_FALLBACK_ERROR: Exception | None = None
 BILIBILI_IS_FALLBACK = False
 
 try:
-    from .bilibili import BilibiliParser
+    from .bilibili.parser import BilibiliParser
 except Exception as exc:  # noqa: BLE001 —— 依赖缺失/版本不兼容都在此收口
     BILIBILI_IMPORT_ERROR = exc
     try:
-        from ..bili_fallback.parser import FallbackBilibiliParser as BilibiliParser
+        from .bilibili.fallback.parser import FallbackBilibiliParser as BilibiliParser
 
         BILIBILI_IS_FALLBACK = True
     except Exception as fallback_exc:  # noqa: BLE001 —— 连 httpx 都没了
         BilibiliParser = None
         BILIBILI_FALLBACK_ERROR = fallback_exc
 
+from .music import NeteaseMusicParser, QQMusicParser
+
 __all__ = [
+    "NeteaseMusicParser", "QQMusicParser",
     "BilibiliParser",
     "BILIBILI_IMPORT_ERROR",
     "BILIBILI_IS_FALLBACK",
@@ -69,4 +83,5 @@ __all__ = [
     "GitHubParser",
     "PixivParser",
     "SteamParser",
+    "XiaoheiheParser",
 ]

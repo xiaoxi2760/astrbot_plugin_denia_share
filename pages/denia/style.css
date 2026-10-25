@@ -771,6 +771,14 @@ textarea.input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--
   transition: border-color var(--dur) var(--ease), background var(--dur) var(--ease);
 }
 .cfg-switch-tile:hover { border-color: var(--accent); }
+.cfg-output-choices { display: flex; flex-wrap: wrap; gap: 12px; }
+.cfg-output-choice {
+  display: flex; align-items: center; gap: 8px;
+  padding: 12px 16px; border: 1px solid var(--border); border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+.cfg-output-choice:has(input:checked) { border-color: var(--accent); }
+.cfg-output-choice input { accent-color: var(--accent); width: 16px; height: 16px; }
 .cfg-switch-tile .switch { margin-left: auto; }
 .cfg-switch-tile .switch-text { font-size: 11px; color: var(--text-3); }
 .cfg-switch-tile .switch input:checked ~ .switch-text { color: var(--accent); }
@@ -1084,7 +1092,86 @@ textarea.input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--
   .head-banner { display: none; }
 }
 
+/* ---------------- 统一凭据卡片（views/config.js 顶部） ---------------- */
+.cfg-credentials .card-head {
+  flex-wrap: wrap;
+}
 
+.cfg-credentials .card-head .sub {
+  flex-basis: 100%;
+}
 
+.music-login { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line); }
+.music-login .inline { display: flex; flex-wrap: wrap; }
+.music-login-qr { display: block; width: 180px; max-width: 100%; margin: 12px 0; border-radius: 12px; background: white; }
 
+/* 平台切换条：沿用 .seg 的分段控件形态，选中项靠 is-active 高亮 */
+.cfg-credentials .cred-tabs {
+  margin-bottom: 10px;
+  flex-wrap: wrap;
+}
 
+/* 状态行：状态徽标 + 已配置/最近检查/生效来源，一行放不下就换行 */
+.cred-status-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.cred-meta {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+/* 粘贴区独占一行，不然和「从文件导入」抢宽度，输入长 Cookie 时框太窄 */
+.cred-paste-field .field-body {
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.cred-paste {
+  width: 100%;
+  min-height: 76px;
+  resize: vertical;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 12px;
+}
+
+.cred-file {
+  display: none;
+}
+
+.cred-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+/* 失败提示常驻在同一位置：报错后不用重新找按钮就能改内容重试 */
+.cred-error {
+  margin-top: 10px;
+  padding: 8px 10px;
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--err) 12%, transparent);
+  color: var(--err);
+  font-size: 12px;
+}
+
+.cred-error[hidden] {
+  display: none !important;
+}
+
+/* 已被凭据管理器接管的配置项：不再给输入框，只说明去哪配 */
+.cred-managed {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.cred-managed-note {
+  font-size: 12px;
+}

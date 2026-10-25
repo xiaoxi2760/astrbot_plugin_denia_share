@@ -5,6 +5,7 @@ import os
 from uuid import uuid4
 from pathlib import Path
 from functools import partial
+from urllib.parse import urlparse
 from contextlib import contextmanager
 
 import httpx
@@ -19,7 +20,12 @@ from .media_utils import (
     safe_unlink,
     generate_file_name,
 )
-from .media_verify import HEAD_PROBE_BYTES, classify_media_response, sniff_image_ext
+from .media_verify import (
+    HEAD_PROBE_BYTES,
+    classify_media_response,
+    sniff_audio_ext,
+    sniff_image_ext,
+)
 from .constants import COMMON_HEADER, DOWNLOAD_TIMEOUT
 from .exception import IgnoreException, DownloadException, MediaSizeExceeded
 
@@ -43,6 +49,13 @@ MAX_CONCURRENT_DOWNLOADS = 8
 # 取 3 是因为 B站走 ``download_av_and_merge`` 时一次占 2 槽（视频 + 音频），
 # 留 1 槽给「同时有人发了另一条视频链接」，不至于第二条链接完全排队。
 MAX_CONCURRENT_MEDIA_DOWNLOADS = 3
+
+
+def validate_cached_media(path: Path, maximum_mb: int) -> Path:
+    """平台直接复用完整媒体缓存时，同样执行当前体积上限。"""
+    configured = maximum_mb * 1024 * 1024
+    limit = min(configured, HARD_MAX_MEDIA_BYTES) if configured > 0 else HARD_MAX_MEDIA_BYTES
+    return StreamDownloader._cached_within_limit(path, limit)
 
 # m3u8 分片数上限：字节上限之外再兜一层，防止「超多超小分片」把循环拖死
 MAX_M3U8_SEGMENTS = 3000
@@ -193,7 +206,8 @@ class StreamDownloader:
         用户配置为 0（不限制）时**硬上限仍然生效** —— 否则「不限制」等于没闸，
         而媒体体积由远端决定（见 ``HARD_MAX_MEDIA_BYTES`` 处的说明）。
         """
-        configured = self.max_size_mb * 1024 * 1024 if self.max_size_mb > 0 else 0
+        maximum_mb = getattr(self, "max_size_mb", 0)
+        configured = maximum_mb * 1024 * 1024 if maximum_mb > 0 else 0
         if configured <= 0:
             return HARD_MAX_MEDIA_BYTES
         return min(configured, HARD_MAX_MEDIA_BYTES)
@@ -340,6 +354,35 @@ class StreamDownloader:
         os.replace(part, file_path)
         return file_path
 
+    def _media_limit(self) -> int | None:
+        """当前媒体上限；未指定用户上限时仍保留硬上限。"""
+        return self._max_bytes
+
+    @staticmethod
+    def _cached_within_limit(path: Path, limit: int | None) -> Path:
+        """命中已有磁盘缓存时，**按当前上限复核体积**。
+
+        为什么要复核：缓存文件可能是在「上限还调得很大」时下载的。用户后来把
+        媒体体积上限调小，旧文件仍会被 ``exists()`` 直接返回 —— 于是新上限对
+        已缓存的媒体**完全无效**，用户只会看到「我明明调小了却还是发不出去 /
+        发出来这么大」。
+
+        超限时抛 :class:`MediaSizeExceeded` 走既有提示通道，与流式下载时超限
+        的表现一致；**不删缓存、也不重新下载**：文件本身是合法的，删掉等于让
+        用户再花一次流量重新下载一遍明知不该发的东西。
+        """
+        if not path.exists():
+            raise FileNotFoundError(str(path))
+        if limit:
+            size = path.stat().st_size
+            if size > limit:
+                logger.info(
+                    f"[denia_share] 缓存文件超过当前上限，跳过使用: "
+                    f"{path.name} ({size} > {limit})"
+                )
+                raise MediaSizeExceeded(received_bytes=size, limit_bytes=limit)
+        return path
+
     async def _download_file(
         self,
         url: str,
@@ -353,19 +396,20 @@ class StreamDownloader:
         if not file_name:
             file_name = generate_file_name(url)
         file_path = self.cache_dir / file_name
-        if file_path.exists():
-            return file_path
-
         headers = {**self.headers, **(ext_headers or {})}
         # 不传就是「媒体上限」（视频 / 音频）；图片由 download_img 传图片上限。
         # 两者都由 `min(用户配置, 硬上限)` 算出 —— 见 HARD_MAX_* 的说明。
         limit = self._max_bytes if max_bytes is None else max_bytes
 
+        # 缓存命中也要复核体积（见 _cached_within_limit）。
+        if file_path.exists():
+            return self._cached_within_limit(file_path, limit)
+
         # 并发闸门：图集场景下每个条目都会走到这里，远端给多少就并发多少。
         # 视频 / 音频走单独的池（见 MAX_CONCURRENT_MEDIA_DOWNLOADS 的说明）。
         async with (slots or self._image_slots):
             if file_path.exists():
-                return file_path
+                return self._cached_within_limit(file_path, limit)
             try:
                 return await self._download_file_with_httpx(
                     url, file_path=file_path, headers=headers,
@@ -393,7 +437,7 @@ class StreamDownloader:
                         f"curl_cffi: {type(fallback_error).__name__}: {fallback_error}",
                         exc_info=get_config().DEBUG_LOG_ENABLED,
                     )
-                    raise DownloadException("媒体下载失败")
+                    raise DownloadException("媒体下载失败") from fallback_error
 
     async def download_video(
         self,
@@ -425,7 +469,8 @@ class StreamDownloader:
 
         video_path = self.cache_dir / video_name
         if video_path.exists():
-            return video_path
+            # 合并产物同样按当前上限复核：上限调小后旧合并文件不能直接复用。
+            return self._cached_within_limit(video_path, self._media_limit())
 
         headers = {**self.headers, **(ext_headers or {})}
         part = self._part_path(video_path)
@@ -434,6 +479,8 @@ class StreamDownloader:
         # 不限流的话同时来几条就又是一次资源上溢。整段（含最后 rename）都占槽，
         # 避免「文件还没落盘但槽已释放」。
         async with self._media_slots:
+            if video_path.exists():
+                return self._cached_within_limit(video_path, self._media_limit())
             try:
                 # 1. 解析清单。可能是主播放列表（里面每行是**子清单**而不是分片），
                 #    所以要跟着最高变体再解析一层，深度封顶防死循环。
@@ -501,7 +548,7 @@ class StreamDownloader:
                             mb = received_bytes / 1024 / 1024
                             logger.warning(
                                 f"m3u8 视频下载到 {mb:.1f}MB 超过上限 "
-                                f"{self.max_size_mb}MB，中断: {m3u8_url}"
+                                f"{self._max_bytes / 1024 / 1024:g}MB，中断: {m3u8_url}"
                             )
                             raise MediaSizeExceeded(
                                 received_bytes=received_bytes, limit_bytes=self._max_bytes
@@ -543,7 +590,7 @@ class StreamDownloader:
                 else:
                     # 写盘失败等意外异常：同样要留痕，避免留下坏缓存被后续命中
                     logger.warning(f"m3u8 视频下载异常 | url: {m3u8_url}", exc_info=True)
-                raise DownloadException("m3u8 视频下载失败")
+                raise DownloadException("m3u8 视频下载失败") from exc
 
             # 3. 提交。分片拼出来的只是**字节流**，扩展名叫 .mp4 不会让它变成
             #    MP4：宽松的播放器能猜着播，严格的（尤其电脑版 QQ）会直接拒绝，
@@ -563,12 +610,95 @@ class StreamDownloader:
         audio_name: str | None = None,
         ext_headers: dict[str, str] | None = None,
     ) -> Path:
+        """下载音频**原文件**。这里不做任何转码，也不需要 ffmpeg。
+
+        ``.mp3`` 只是「URL 路径里没有后缀」时的**命名回退**，不是格式结论：
+        B站 DASH 音轨落盘本就是 ``.m4s``。所以下载完成后会用文件头校正一次
+        后缀（``_align_audio_suffix``），免得把 M4A 当成 MP3 交出去 ——
+        下游按错的容器解码，用户看到的是「播放失败」而不是「这是个音频」。
+
+        校正的判据是「URL 路径里到底有没有后缀」，**不是**「调用方有没有显式传名字」：
+        ``generate_file_name(url, ".mp3")`` 在 URL 带 ``.m4s`` 时会用 ``.m4s``，
+        那仍然是上游给的真实信息，不能被我们自己的魔数判断改掉。
+        """
+        url_has_suffix = bool(Path(urlparse(url).path).suffix)
+        invented_default = audio_name is None and not url_has_suffix
         if audio_name is None:
             audio_name = generate_file_name(url, ".mp3")
-        return await self._download_file(
+
+        # 缓存命中要**在下载之前**判一次：上一轮可能已经把 ``<hash>.mp3``
+        # 校正成了 ``<hash>.flac``，那 ``<hash>.mp3`` 就不存在了。此时若直接
+        # 去下，等于同一个 URL 每来一次就重下一次（还可能因为改名撞名而
+        # 返回一个后缀不对的副本）。所以先按同名族找已校正过的那一份。
+        if invented_default:
+            cached = self._find_aligned_audio(self.cache_dir / audio_name)
+            if cached is not None:
+                # 校正过的旧缓存同样按当前音频上限复核。
+                return await self._align_audio_suffix(
+                    self._cached_within_limit(cached, self._media_limit()),
+                    rename_default=True,
+                )
+
+        path = await self._download_file(
             url, file_name=audio_name, ext_headers=ext_headers,
             slots=self._media_slots,
         )
+        return await self._align_audio_suffix(path, rename_default=invented_default)
+
+    #: 校正后可能出现的音频后缀。用于「按同名族找已校正的缓存」。
+    _ALIGNED_AUDIO_EXTS: tuple[str, ...] = (
+        ".mp3", ".m4a", ".m4s", ".flac", ".ogg", ".wav", ".aiff", ".amr", ".silk", ".mp4",
+    )
+
+    @classmethod
+    def _find_aligned_audio(cls, path: Path) -> Path | None:
+        """按同名族找**已校正后缀**的缓存文件；没有就返回 ``None``。
+
+        只在「原始名是我们编的默认名」时调用 —— 这种情况下后缀是我们猜的，
+        才需要认这个族。URL 自带 ``.m4s`` 的路径不进这里：那个后缀是上游给的
+        事实，不该被「同名族」规则影响。
+        """
+        if path.exists():
+            return path
+        stem = path.with_suffix("")
+        for ext in cls._ALIGNED_AUDIO_EXTS:
+            candidate = stem.with_suffix(ext)
+            if candidate.exists():
+                return candidate
+        return None
+
+    async def _align_audio_suffix(self, path: Path, *, rename_default: bool) -> Path:
+        """按实际字节校正音频后缀，**只在默认命名不成立时才动**。
+
+        ``rename_default=False``（调用方自己给了文件名，或 URL 本身带真实后缀）
+        时一律原样返回：那个后缀是上游给的真实信息，比我们的猜测更可信，
+        凭魔数把它改掉反而是在制造「已确认的格式结论」。
+        """
+        if not rename_default:
+            return path
+        try:
+            with path.open("rb") as fp:
+                head = fp.read(HEAD_PROBE_BYTES)
+        except OSError:
+            return path
+        real = sniff_audio_ext(head)
+        if not real or path.suffix.lower() == real:
+            return path
+        target = path.with_suffix(real)
+        if target.exists():
+            # 校正后的文件**已经存在**（并发调用 / 上一轮改过名）：
+            # 它才是那个「后缀正确」的产物。返回 `path` 等于把一个仍然叫
+            # .mp3 的副本交出去，下游会按错的容器去解。
+            await safe_unlink(path)
+            return target
+        try:
+            path.rename(target)
+        except OSError:
+            # 改名失败不该让整条下载失败：原文件还在，只是后缀不准
+            logger.debug(f"音频后缀校正失败: {path}", exc_info=True)
+            return path
+        logger.debug(f"音频后缀校正: {path.name} -> {target.name}")
+        return target
 
     async def download_img(
         self,
@@ -620,9 +750,11 @@ class StreamDownloader:
         output_path: Path,
         ext_headers: dict[str, str] | None = None,
     ) -> Path:
+        if output_path.exists():
+            return self._cached_within_limit(output_path, self._max_bytes)
         v_path, a_path = await asyncio.gather(
             self._download_file(v_url, ext_headers=ext_headers, slots=self._media_slots),
             self._download_file(a_url, ext_headers=ext_headers, slots=self._media_slots),
         )
         await merge_av(v_path=v_path, a_path=a_path, output_path=output_path)
-        return output_path
+        return self._cached_within_limit(output_path, self._max_bytes)

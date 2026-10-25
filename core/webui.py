@@ -26,6 +26,7 @@ import base64
 import io
 import time
 import uuid
+import httpx
 from collections import OrderedDict
 from pathlib import Path
 from typing import Any, Callable, Iterable
@@ -53,6 +54,24 @@ from .web_compat import (
     get_json_body,
     query_arg,
 )
+
+
+def _renderer_kwargs(opts: dict[str, Any]) -> dict[str, Any]:
+    """只保留当前 ShareCardRenderer 构造器认识的参数。
+
+    外观项是一个个加进来的：配置项可能先于渲染器落地，这时多出来的键
+    会把构造器直接炸成 TypeError。按签名过滤掉渲染器还不认识的键，
+    缺的那项功能先不显示，其余预览照常出图。
+    """
+    from inspect import Parameter, signature
+
+    try:
+        params = signature(ShareCardRenderer.__init__).parameters
+    except (TypeError, ValueError):
+        return dict(opts)
+    if any(p.kind is Parameter.VAR_KEYWORD for p in params.values()):
+        return dict(opts)
+    return {key: value for key, value in opts.items() if key in params}
 
 
 def _astrbot_callback_base() -> str:
@@ -252,6 +271,7 @@ class WebUIApi:
 
     def __init__(self, plugin: Any):
         self.plugin = plugin
+        self._credentials_manager = None
 
     # ==================== 注册 ==================== #
 
@@ -262,6 +282,17 @@ class WebUIApi:
             ("/config", self.get_config, ("GET",), "读取全部配置项"),
             ("/config", self.save_config, ("POST",), "保存配置项"),
             ("/config/reset", self.reset_config, ("POST",), "恢复默认配置"),
+            ("/credentials", self.credentials, ("GET",), "凭据状态"),
+            ("/credentials/import", self.import_credential, ("POST",), "导入并保存凭据"),
+            ("/credentials/check", self.check_credential, ("POST",), "检查凭据"),
+            ("/credentials/clear", self.clear_credential, ("POST",), "清除凭据"),
+            ("/cookiecloud", self.cookiecloud_status, ("GET",), "CookieCloud 同步状态"),
+            ("/cookiecloud/sync", self.cookiecloud_sync, ("POST",), "同步选定平台登录态"),
+            ("/diagnostics", self.diagnostics, ("GET",), "最近解析诊断"),
+            ("/diagnostics/export", self.export_diagnostic, ("POST",), "导出脱敏诊断"),
+            ("/music/login/start", self.music_login_start, ("POST",), "获取音乐登录二维码"),
+            ("/music/login/poll", self.music_login_poll, ("POST",), "音乐扫码状态"),
+            ("/music/login/refresh", self.music_login_refresh, ("POST",), "续期音乐登录态"),
             ("/platforms", self.toggle_platform, ("POST",), "启用/禁用平台"),
             ("/custom_parsers", self.custom_parsers, ("GET",), "自定义解析器列表"),
             ("/custom_parsers/reload", self.reload_custom_parsers, ("POST",), "重新加载自定义解析器"),
@@ -280,6 +311,7 @@ class WebUIApi:
             ("/bili/status", self.bili_status, ("GET",), "B站登录状态"),
             ("/bili/qrcode", self.bili_qrcode, ("POST",), "获取B站登录二维码"),
             ("/bili/qrcode/status", self.bili_qrcode_status, ("GET",), "B站扫码状态"),
+            ("/bili/qrcode/cancel", self.bili_qrcode_cancel, ("POST",), "取消B站扫码登录"),
             ("/bili/logout", self.bili_logout, ("POST",), "清除B站 Cookie"),
         )
         for suffix, handler, methods, desc in routes:
@@ -410,13 +442,128 @@ class WebUIApi:
     async def get_config(self):
         pconfig = get_config()
         payload = config_meta_payload()
-        payload["values"] = pconfig.current_values()
+        payload["values"], payload["secret_status"] = self._public_config(pconfig)
         payload["platforms"] = [
             {"name": name, "label": PLATFORM_DISPLAY_NAMES.get(name, name)}
             for name in platform_order()
         ]
         payload["problems"] = self._schema_problems()
         return _json_response(payload)
+
+    @staticmethod
+    def _public_config(pconfig):
+        from .credentials import public_config_values
+        return public_config_values(pconfig)
+
+    def _credential_manager(self):
+        from .credentials import CredentialManager
+        if self._credentials_manager is None:
+            self._credentials_manager = getattr(self.plugin, '_credentials_manager', None) or CredentialManager(self.plugin)
+            self.plugin._credentials_manager = self._credentials_manager
+        return self._credentials_manager
+
+    def _cookiecloud_service(self):
+        from .credentials.sync import service_for
+        self._credential_manager()
+        return service_for(self.plugin)
+
+    async def cookiecloud_status(self):
+        return _json_response(self._cookiecloud_service().snapshot())
+
+    async def cookiecloud_sync(self):
+        from .credentials.cookiecloud import CookieCloudError
+        body = await get_json_body()
+        if not isinstance(body, dict) or not isinstance(body.get('overwrite', False), bool):
+            return _error('同步参数无效')
+        try:
+            payload = await self._cookiecloud_service().sync(overwrite=body.get('overwrite', False))
+        except CookieCloudError as error:
+            return _error(str(error), 422)
+        return _json_response(payload)
+
+    async def diagnostics(self):
+        from .diagnostics import store_for
+        return _json_response(store_for(self.plugin).snapshot())
+
+    async def export_diagnostic(self):
+        from .diagnostics import store_for
+        body = await get_json_body()
+        identifier = body.get('id') if isinstance(body, dict) else None
+        if not isinstance(identifier, str) or len(identifier) > 64:
+            return _error('请选择一条诊断记录')
+        report = store_for(self.plugin).export(identifier)
+        if report is None:
+            return _error('诊断记录已过期，请重新解析', 404)
+        return _json_response({'report': report})
+
+    async def credentials(self):
+        return _json_response(self._credential_manager().snapshot())
+
+    async def _credential_action(self, action):
+        from .credentials import CredentialError, CredentialImportError
+        body = await get_json_body()
+        if not isinstance(body, dict) or not isinstance(body.get("platform"), str):
+            return _error("请选择凭据平台")
+        try:
+            manager = self._credential_manager()
+            if action == "import":
+                content = body.get("content")
+                fmt = body.get("format", "auto")
+                if not isinstance(content, str) or not isinstance(fmt, str):
+                    return _error("导入内容必须是文本")
+                result = await manager.import_and_save(body["platform"], content, fmt)
+            elif action == "check":
+                result = await manager.check(body["platform"])
+            else:
+                result = await manager.clear(body["platform"])
+            return _json_response(result)
+        except (CredentialError, CredentialImportError) as exc:
+            return _error(str(exc))
+        except Exception:
+            # 不回显第三方异常，避免其中的 Cookie、Token 或请求头进入页面。
+            logger.warning("[denia_share] 凭据操作未完成")
+            return _error("凭据操作未完成，请检查配置存储或稍后重试", 500)
+
+    async def import_credential(self):
+        return await self._credential_action("import")
+
+    async def check_credential(self):
+        return await self._credential_action("check")
+
+    async def clear_credential(self):
+        return await self._credential_action("clear")
+
+    async def _music_login_action(self, action):
+        body = await get_json_body()
+        if not isinstance(body, dict):
+            return _error("请求格式不正确")
+        if action == "poll":
+            value = body.get("task_id")
+            if not isinstance(value, str) or not 1 <= len(value) <= 100:
+                return _error("扫码会话无效，请重新获取二维码")
+        else:
+            value = body.get("platform")
+            if value not in {"netease", "qqmusic"}:
+                return _error("请选择 QQ音乐或网易云音乐")
+        try:
+            manager = self.plugin._get_music_controller().login
+            result = await getattr(manager, action)(value)
+            # No private credential or session signature is returned by the manager.
+            allowed = {"task_id", "state", "message", "qr_data_url", "nickname"}
+            public = {key: val for key, val in result.items() if key in allowed}
+            return _json_response(public)
+        except Exception as exc:
+            logger.warning("[denia_share] 音乐登录操作失败: action=%s error=%s", action, type(exc).__name__)
+            return _error("音乐登录操作未完成，请重试或使用 Cookie 导入", 400)
+
+    async def music_login_start(self):
+        return await self._music_login_action("start")
+
+    async def music_login_poll(self):
+        return await self._music_login_action("poll")
+
+    async def music_login_refresh(self):
+        return await self._music_login_action("refresh")
 
     async def save_config(self):
         body = await get_json_body()
@@ -434,44 +581,74 @@ class WebUIApi:
             except Exception as exc:
                 runtime_ok = False
                 logger.warning("[denia_share] 应用新配置失败", exc_info=True)
-                errors.append(f"配置已保存，但运行时热更新失败：{str(exc)[:120]}")
+                errors.append("配置已保存，但运行时热更新失败，请检查 AstrBot 日志")
         return _json_response(
             {
                 "changed": changed,
                 "errors": errors,
                 "runtime_ok": runtime_ok,
                 "runtime": runtime,
-                "values": pconfig.current_values(),
+                "values": self._public_config(pconfig)[0],
+                "secret_status": self._public_config(pconfig)[1],
             }
         )
 
     async def reset_config(self):
         pconfig = get_config()
         changed = pconfig.reset_to_defaults()
+        errors: list[str] = []
+        # reset_to_defaults 只返回变更键；显式保存以检查落盘失败，也支持原值重试。
+        if not pconfig.save():
+            errors.append("默认配置未能写入磁盘，请检查存储后重试")
         # 「恢复默认」的确认文案承诺了「包括 Cookie、Token」—— 而 B站扫码登录态
         # 不在配置项里（它有自己的 bili_cookie.json），只重置配置清不掉它。
         # bili_logout 本来就会把三处一起清，只是一直没人调它。
         try:
-            await self.plugin.bili_logout()
+            if await self.plugin.bili_logout() is False:
+                errors.append("B站登录态未完全清除，请重试")
         except Exception:
             logger.warning("[denia_share] 恢复默认时清除 B站登录态失败", exc_info=True)
+            errors.append("B站登录态未完全清除，请重试")
+        if hasattr(self.plugin, "_get_music_controller"):
+            # 两个平台各自独立清理：任一平台失败都不能跳过另一个平台，
+            # 也不能提前 return 掉后面的运行时热更新（否则配置已重置但内存里还是旧值）。
+            for platform in ("netease", "qqmusic"):
+                try:
+                    login = self.plugin._get_music_controller().login
+                    await login.clear(platform)
+                except Exception:
+                    logger.warning(
+                        "[denia_share] 恢复默认时清除音乐登录态失败: %s",
+                        platform,
+                        exc_info=True,
+                    )
+                    label = "网易云音乐" if platform == "netease" else "QQ音乐"
+                    errors.append(f"{label}登录态未能清除，请重试")
         runtime: dict[str, Any] = {}
-        errors: list[str] = []
         runtime_ok = True
-        if changed:
-            try:
-                runtime = await self.plugin.apply_runtime_config()
-            except Exception as exc:
+        # 无论本次是否真的有配置项变化都要应用运行时配置：
+        # 重试请求（changed 为空）也可能带着上一次失败留下的待生效状态。
+        try:
+            applied = await self.plugin.apply_runtime_config()
+            if isinstance(applied, dict):
+                runtime = applied
+            if applied is False or (
+                isinstance(applied, dict) and applied.get("runtime_ok") is False
+            ):
                 runtime_ok = False
-                logger.warning("[denia_share] 恢复默认配置后热更新失败", exc_info=True)
-                errors.append(f"已恢复默认，但运行时热更新失败：{str(exc)[:120]}")
+                errors.append("已恢复默认，但运行时热更新失败，请检查 AstrBot 日志")
+        except Exception:
+            runtime_ok = False
+            logger.warning("[denia_share] 恢复默认配置后热更新失败", exc_info=True)
+            errors.append("已恢复默认，但运行时热更新失败，请检查 AstrBot 日志")
         return _json_response(
             {
                 "changed": changed,
                 "errors": errors,
                 "runtime_ok": runtime_ok,
                 "runtime": runtime,
-                "values": pconfig.current_values(),
+                "values": self._public_config(pconfig)[0],
+                "secret_status": self._public_config(pconfig)[1],
             }
         )
 
@@ -576,7 +753,25 @@ class WebUIApi:
     # ==================== 手动解析 ==================== #
 
     async def parse_url(self):
+        from .diagnostics import store_for
+        diagnostic = store_for(self.plugin).start('webui')
+        try:
+            return await self._parse_url(diagnostic)
+        except Exception:
+            diagnostic.stage('parse', 'error', 'parse_failed')
+            diagnostic.finish('error')
+            logger.warning('[denia_share] 手动解析未完成', exc_info=True)
+            return _error('解析未完成，请查看解析诊断或稍后重试', 500)
+        finally:
+            if diagnostic.status == 'running':
+                diagnostic.finish('unknown')
+
+    async def _parse_url(self, diagnostic):
         body = await get_json_body()
+        if not isinstance(body, dict):
+            diagnostic.stage('match', 'error', 'invalid_link')
+            diagnostic.finish('error')
+            return _error('请填写要解析的链接或分享口令')
         # 与聊天链路对齐：口令 / 整段分享文本直接整段交给解析器匹配，不再要求
         # http(s) 开头。聊天侧 _process_url 就是把整条 message_str 传给
         # parser.search_url（各解析器自己的 pattern 负责从文本里摘链接），所以
@@ -588,29 +783,46 @@ class WebUIApi:
         # 否则同一条分享在网页里解析一次、群里再解析一次，各存一份缓存。
         url = str(body.get("url") or "").strip()
         if not url:
+            diagnostic.stage('match', 'error', 'invalid_link')
+            diagnostic.finish('error')
             return _error("请填写要解析的链接或分享口令")
         if len(url) > MAX_URL_LENGTH:
+            diagnostic.stage('match', 'error', 'invalid_link')
+            diagnostic.finish('error')
             return _error("内容过长")
 
         plugin = self.plugin
         name = plugin._match_parser(url)
         if name is None:
+            diagnostic.stage('match', 'error', 'not_supported')
+            diagnostic.finish('error')
             return _error("没有平台规则能匹配这段内容；可以改用「网页截图」试试", 422)
+        from .diagnostics import _safe_platform
+        diagnostic.platform = _safe_platform(name)
+        diagnostic.stage('match', 'ok')
         parser = plugin.parsers.get(name)
         if parser is None:
             return _error(f"{PLATFORM_DISPLAY_NAMES.get(name, name)} 平台当前是禁用状态", 409)
 
         started = time.perf_counter()
         try:
+            diagnostic.stage('parse', 'running')
             keyword, searched = parser.search_url(url)
             result = await parser.parse(keyword, searched)
+            diagnostic.stage('parse', 'ok')
         except IgnoreException as exc:
+            diagnostic.stage('parse', 'skipped', 'skipped')
+            diagnostic.finish('skipped')
             return _error(f"已忽略：{exc.message}", 422)
         except ParseException as exc:
+            diagnostic.stage('parse', 'error', 'parse_failed')
+            diagnostic.finish('error')
             return _error(f"解析失败：{exc.message}", 422)
         except Exception as exc:
+            diagnostic.stage('parse', 'error', 'network' if isinstance(exc, httpx.RequestError) else 'parse_failed')
+            diagnostic.finish('error')
             logger.exception("[denia_share] WebUI 手动解析出错")
-            return _error(f"解析出错：{str(exc)[:160]}", 500)
+            return _error('解析出错，请查看解析诊断或稍后重试', 500)
 
         elapsed_ms = int((time.perf_counter() - started) * 1000)
         # 与聊天链路用**同一个键算法**：解析器匹配到的那一段，而不是整段文本。
@@ -625,7 +837,9 @@ class WebUIApi:
             elapsed_ms=elapsed_ms,
             overrides=body.get("preview"),
             record=True,
+            diagnostic=diagnostic,
         )
+        payload['diagnostic_id'] = diagnostic.id
         return _json_response(payload)
 
     async def render_cached(self):
@@ -663,18 +877,28 @@ class WebUIApi:
         elapsed_ms: int | None,
         overrides: Any = None,
         record: bool,
+        diagnostic=None,
     ) -> dict[str, Any]:
         """把 ParseResult 整理成页面需要的预览结构。"""
-        # 与聊天链路的 _deliver 同一个顺序：**先结算媒体、再渲染卡片**。
-        # 少了这一步，WebUI 手动解析的记录里 media_files 与缺料警告会恒为空
-        # （视频/音频任务还没结算 → resolved 是 None；审计从未跑过 → warnings 空）；
-        # 而且卡片渲染会把 warnings 算进产物缓存 key，晚于渲染就等于卡片永远不带缺料信息。
+        if diagnostic is None:
+            from .diagnostics import store_for
+            diagnostic = store_for(self.plugin).start('webui', result.platform.name)
+            diagnostic.stage('parse', 'ok', 'cached')
+        # 手动预览只获取卡片用图，与聊天输出选项独立；不下载视频或音频本体。
+        # 先审计再渲染，让本轮图片限制提示进入卡片缓存键。
         try:
-            await result.audit_missing_media()
+            missing = await result.audit_missing_media(img_only=True)
+            diagnostic.stage('media', 'error' if missing else 'ok', 'media_missing' if missing else '')
         except Exception:
+            diagnostic.stage('media', 'error', 'media_missing')
             logger.warning("[denia_share] WebUI 媒体结算失败", exc_info=True)
 
         card = await self._render_card(result, cache_key, overrides)
+        enabled = bool(getattr(self.plugin._renderer, 'enabled', False))
+        diagnostic.stage('render', 'ok' if card else 'error' if enabled else 'skipped',
+            '' if card else 'render_failed' if enabled else 'skipped')
+        diagnostic.stage('send', 'skipped', 'preview_only')
+        diagnostic.finish('error' if any(s['state'] == 'error' for s in diagnostic.to_dict()['stages']) else 'ok')
 
         record_id = ""
         if record:
@@ -740,7 +964,7 @@ class WebUIApi:
         if path is None:
             return None
         if not temporary:
-            self.plugin._render_cache[cache_key] = path
+            self.plugin._remember_render(cache_key, path)
 
         data_url = await asyncio.to_thread(_image_data_url_cached, path)
         if data_url is None:
@@ -791,6 +1015,8 @@ class WebUIApi:
             opts["show_avatar"] = overrides["show_avatar"]
         if isinstance(overrides.get("show_play_button"), bool):
             opts["show_play_button"] = overrides["show_play_button"]
+        if isinstance(overrides.get("show_ai_summary"), bool):
+            opts["show_ai_summary"] = overrides["show_ai_summary"]
         if overrides.get("desc_max_lines") is not None:
             try:
                 opts["desc_max_lines"] = max(0, min(12, int(overrides.get("desc_max_lines"))))
@@ -816,7 +1042,7 @@ class WebUIApi:
             opts["watermark"] = str(overrides.get("watermark") or "").strip()[:12]
 
         try:
-            return ShareCardRenderer(self.plugin.cache_dir, **opts)
+            return ShareCardRenderer(self.plugin.cache_dir, **_renderer_kwargs(opts))
         except Exception:
             logger.warning("[denia_share] 构造临时渲染器失败", exc_info=True)
             raise PreviewOverridesError("这些外观参数无法生成渲染器") from None
@@ -848,7 +1074,7 @@ class WebUIApi:
             if renderer is None or not renderer.enabled:
                 opts = get_config().renderer_options()
                 opts["enabled"] = True
-                renderer = ShareCardRenderer(self.plugin.cache_dir, **opts)
+                renderer = ShareCardRenderer(self.plugin.cache_dir, **_renderer_kwargs(opts))
 
         result = self.plugin.build_sample_result()
         # 示例渲染不进入渲染缓存，也不污染记录；文件名带外观指纹自然去重
@@ -1282,6 +1508,21 @@ class WebUIApi:
         if state.get("state") == "success":
             state["configured"] = True
         return _json_response(state)
+
+    async def bili_qrcode_cancel(self):
+        """取消指定的 B站扫码登录任务；幂等，不登出、不清除已保存的 Cookie。
+
+        只接受不透明的 ``task_id``，不回显也不记录 ``qrcode_key`` 或 Cookie。
+        """
+        body = await get_json_body()
+        raw = body.get("task_id") if isinstance(body, dict) else None
+        if not isinstance(raw, str) or not 1 <= len(raw.strip()) <= 100:
+            return _error("扫码会话无效，请重新获取二维码")
+        task_id = raw.strip()
+        cancel = getattr(self.plugin, "bili_login_cancel", None)
+        if cancel is not None:
+            await cancel(task_id)
+        return _json_response({"task_id": task_id, "cancelled": True})
 
     async def bili_logout(self):
         ok = await self.plugin.bili_logout()

@@ -90,7 +90,7 @@ export function createOverviewView(ctx) {
           data.render.enabled ? "已开启" : "已关闭",
           data.render.enabled
             ? `${data.render.theme === "dark" ? "深色" : "浅色"} · ${data.render.layout} · ${data.render.width}px`
-            : "当前回退为纯文本输出",
+            : "仅停止卡片，文本与富媒体按输出选项发送",
         ),
       ]),
     );

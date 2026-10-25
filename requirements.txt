@@ -8,3 +8,4 @@ aiohttp>=3.8.0
 Pillow>=9.5.0
 qrcode>=7.4.0
 bilibili-api-python>=16.0.0
+pycryptodome>=3.20.0

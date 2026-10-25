@@ -1,8 +1,8 @@
 {
   "metadata": {
     "display_name": "希望解析器",
-    "short_desc": "发送分享链接，自动解析视频、图集与内容卡片；支持网页截图和可视化管理。",
-    "desc": "在聊天中发送链接或分享口令，即可自动解析内容，并发送分享卡片及可用的视频、图片。\n\n支持 B站、抖音、快手、微博、小红书、Twitter / X、AcFun、NGA、GitHub、Pixiv、Steam。\n\n- 卡片提供 4 种布局与深浅主题，可调整配色、封面和水印\n- 自带管理页面，可测试链接、查看记录、清理缓存和调整全部配置\n- 支持网页截图、Pixiv 全年龄搜索、B站扫码登录与分平台代理\n- 支持同群重复链接去重，Docker 部署可选媒体中转或共享目录\n\n启用后打开「插件 WebUI → 希望解析器」，在「配置」页完成设置。\n安装需 AstrBot 4.25.3 或更新版本，并在运行环境中安装 ffmpeg。\n\n使用说明与支持范围见 [README](https://github.com/xiaoxi2760/astrbot_plugin_denia_share#readme)。"
+    "short_desc": "解析分享链接、视频图集与音乐，支持搜歌卡片、点歌和网页管理。",
+    "desc": "在聊天中发送链接或分享口令，即可自动解析内容，并发送分享卡片及可用的视频、图片或音频。\n\n支持 B站、抖音、快手、微博、小红书、Twitter / X、AcFun、NGA、GitHub、Pixiv、Steam、小黑盒、QQ音乐、网易云音乐。\n\n- 支持音乐单曲分享、带编号的搜歌卡片与点歌，可管理音乐账号登录\n- 卡片提供 4 种布局与深浅主题，可调整配色、封面和水印\n- 自带管理页面，可测试链接、查看记录、清理缓存和调整全部配置\n- 支持网页截图、Pixiv 全年龄搜索、B站扫码登录与分平台代理\n- 支持同群重复链接去重，Docker 部署可选媒体中转或共享目录\n\n启用后打开「插件 WebUI → 希望解析器」，在「配置」页完成设置。\n需要 AstrBot 4.25.3 或更新版本；推荐安装 ffmpeg，未安装时 B站会尝试可直接发送的画质。\n\n使用说明与支持范围见 [README](https://github.com/xiaoxi2760/astrbot_plugin_denia_share#readme)。\n"
   },
   "pages": {
     "denia": {

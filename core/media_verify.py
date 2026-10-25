@@ -143,3 +143,72 @@ def sniff_image_ext(head: bytes) -> str | None:
     if head[4:8] == b"ftyp":
         return _FTYP_BRANDS.get(head[8:12])
     return None
+
+
+# 音频容器的魔数 → 后缀。同样**只列有把握的**：
+# - MP3 的裸帧同步是 0xFF Ex/Fx，误判成别的容器会平白改坏一个好文件，所以要求
+#   前两字节同时满足同步位与合法版本/层位。
+# - M4A / MP4 / M4S 共用 ISO-BMFF 的 ftyp 盒子，光看魔数**分不开**它们
+#   （M4S 是 DASH 的分片容器，brand 常常就是 isom）。所以这里对整个 ftyp 家族
+#   一律不认 —— 宁可沿用 URL 后缀，也不把 M4A 谎报成 MP3。
+# - OGG / FLAC / WAV / AMR / SILK 的签名足够长且唯一，可以放心认。
+_AUDIO_SIGNATURES: tuple[tuple[bytes, str], ...] = (
+    (b"ID3", ".mp3"),
+    (b"OggS", ".ogg"),
+    (b"fLaC", ".flac"),
+    (b"#!AMR", ".amr"),
+    (b"#!SILK_V3", ".silk"),
+)
+
+#: ftyp 盒子里的**音频专属** brand。只有这些能证明「这是个音频容器」——
+#: 通用 isom / mp42 既是纯视频也是 DASH 分片的容器，证明不了任何音频结论。
+_FTYP_AUDIO_BRANDS: dict[bytes, str] = {
+    b"M4A ": ".m4a",
+    b"M4B ": ".m4a",
+    b"M4P ": ".m4a",
+}
+
+#: MP3 裸帧同步：0xFF 之后的 3 个同步位也必须齐全（见下方说明）。
+def _is_mp3_frame_sync(head: bytes) -> bool:
+    if len(head) < 2 or head[0] != 0xFF:
+        return False
+    # **同步位**：第二字节高 3 位必须全 1。只查 head[0]==0xFF 的话，
+    # ``\xff\x12`` 这类碰巧落在合法版本/层区间的任意二进制都会被误判成 MP3。
+    if (head[1] & 0xE0) != 0xE0:
+        return False
+    # E=1（实验位不重要），版本 01 与层位 00 是保留值。
+    version = (head[1] >> 3) & 0b11
+    layer = (head[1] >> 1) & 0b11
+    return version != 0b01 and layer != 0b00
+
+
+def sniff_audio_ext(head: bytes) -> str | None:
+    """按开头字节判断音频真实容器，返回建议后缀；认不出返回 ``None``。
+
+    存在的理由：``download_audio`` 的默认名是 ``.mp3``，那**只是命名回退**，
+    不是转码。B站 DASH 音轨落盘就是 ``.m4s``，若再被改名成 ``.mp3``，
+    下游按错的容器去解，用户看到的是「播放失败」。所以这里宁可认不出、
+    沿用真实后缀，也不制造一个「看起来统一」的假后缀。
+    """
+    if not head:
+        return None
+    for signature, ext in _AUDIO_SIGNATURES:
+        if head.startswith(signature):
+            return ext
+    if head[:4] == b"RIFF" and head[8:12] == b"WAVE":
+        return ".wav"
+    # AIFF / AIFC：光有 FORM 不够，后面还得是 AIFF / AIFC（IFF 还有别的分支）。
+    if head[:4] == b"FORM" and head[8:12] in (b"AIFF", b"AIFC"):
+        return ".aiff"
+    if _is_mp3_frame_sync(head):
+        return ".mp3"
+    # ISO-BMFF 家族（M4A / M4S）：魔数**只能证明「它不是 MP3」**，分不清具体子格式。
+    # 这里返回 ``.m4a`` 是**兜底命名**，不是格式转换的结论 —— 调用方
+    # （``download.py``）只在「URL 没给后缀、我们刚编了个 .mp3 默认名」时才用它改名，
+    # URL 已经带了 ``.m4s`` 之类真实后缀的，一律保留原样。
+    # ftyp（M4A / M4S / MP4 共用这个盒子）：只有音频专属 brand（M4A/M4B/M4P）才能断定「这是音频」；
+    # isom / mp42 这类通用 brand 纯视频与 DASH 分片都在用，所以回落成 .mp4 ——
+    # 报一个我们确实证实的容器事实，而不是编一个我们没证实的音频格式。
+    if head[4:8] == b"ftyp":
+        return _FTYP_AUDIO_BRANDS.get(head[8:12], ".mp4")
+    return None

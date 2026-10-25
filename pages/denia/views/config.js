@@ -20,11 +20,15 @@ import {
   secretInput,
 } from "../ui.js";
 
+import { createCredentialsPanel } from "../credentials.js";
+import { createCookieCloudPanel } from "../cookiecloud.js";
+
 /* 列表型配置（黑白名单 / 禁用平台）在存储层仍是逗号分隔字符串 ——
    _conf_schema.json 只有 string 类型，契约不能动；这里只改编辑体验。
    拆分规则与后端 core/permissions.py 的 _ID_SPLIT_RE 对齐：
    逗号 / 中文逗号 / 顿号 / 任意空白都当分隔符。 */
 const LIST_SPLIT_RE = /[,，、\s]+/;
+const OUTPUT_KEYS = new Set(["OUTPUT_TEXT_ENABLED", "OUTPUT_CARD_ENABLED", "OUTPUT_MEDIA_ENABLED"]);
 
 /** 把逗号 / 空白分隔的串解析成去重后的条目数组（保序）。 */
 function parseListValue(raw) {
@@ -41,7 +45,24 @@ export function createConfigView(ctx) {
   let meta = { sections: [], groups: [], items: [], platforms: [], problems: [] };
   let values = {};
   let draft = {};
+  /** GET config 的 secret_status：{KEY: {configured}}。旧后端没有这个字段，
+   *  缺了就按「状态未知」处理，不能因此崩，也不能当成「未配置」。 */
+  let secretStatus = {};
+  const pendingSecretClears = new Set();
+  /** 统一凭据卡片。后端未实现时 supported=false，整块不渲染，
+   *  页面继续用下面各配置项自己的 secret 输入框。 */
+  const credentials = createCredentialsPanel(ctx, {
+    onChange: () => {
+      // 凭据状态就地更新即可：这里**不**触发整页 render —— 用户很可能正填着别的
+      // 配置项的草稿，重绘会把输入焦点和未保存改动一起冲掉。
+      if (container) syncSecretHints();
+    },
+  });
   let filter = "";
+  const cookiecloud = createCookieCloudPanel(ctx, async () => {
+    await credentials.load();
+    syncSecretHints();
+  });
   let activeSection = null;
   let collapsed = new Set();
   /** 底部保存栏里几个需要跟着改动数走的节点，见 syncSaveBar。 */
@@ -58,8 +79,13 @@ export function createConfigView(ctx) {
       problems: payload.problems || [],
     };
     values = payload.values || {};
+    secretStatus = payload.secret_status || {};
     draft = {};
+    pendingSecretClears.clear();
     if (activeSection === null) activeSection = meta.sections[0]?.key || "all";
+    // 凭据状态拿不到就走回退路径，绝不让配置页整体加载失败
+    await credentials.load().catch(() => false);
+    await cookiecloud.load();
     const overview = await ctx.api.get("overview").catch(() => null);
     if (overview && overview.version) ctx.setVersion(`v${overview.version}`);
     ctx.setHead("");
@@ -82,7 +108,7 @@ export function createConfigView(ctx) {
   }
 
   function setDraft(key, value) {
-    if (value === values[key]) {
+    if (value === values[key] && !pendingSecretClears.has(key)) {
       delete draft[key];
     } else {
       draft[key] = value;
@@ -106,6 +132,7 @@ export function createConfigView(ctx) {
 
      所以同步只做「改文本 / 改 hidden / 改 disabled」，一个节点都不重建。 */
   function onValueChanged(key, value) {
+    if (value) pendingSecretClears.delete(key);
     setDraft(key, value);
     syncDirtyUI();
   }
@@ -143,7 +170,47 @@ export function createConfigView(ctx) {
     for (const node of container.querySelectorAll("[data-dirty-mark]")) {
       node.hidden = !hasDraft(node.dataset.dirtyMark);
     }
+    for (const button of container.querySelectorAll("[data-secret-clear]")) {
+      const pending = pendingSecretClears.has(button.dataset.secretClear);
+      button.textContent = pending ? "取消清除" : "清除已保存值";
+      button.disabled = !pending && secretConfigured(button.dataset.secretClear) !== true;
+    }
     syncSaveBar();
+  }
+
+  /** 某个 secret 配置键是否已配置。
+   *
+   * GET config 现在把 secret 字段的值一律返回空串（明文不再下发），改由
+   * secret_status 告知「配没配」。没有这个字段的旧后端只能拿 values 里的空串
+   * 推断 —— 宁可显示「状态未知」也不要谎报「未配置」。 */
+  function secretConfigured(key) {
+    const entry = secretStatus[key];
+    if (entry && typeof entry.configured === "boolean") return entry.configured;
+    const raw = values[key];
+    return typeof raw === "string" && raw.length > 0 ? true : null;
+  }
+
+  /** 就地刷新各 secret 字段旁的「已配置 / 留空保持」提示，不重建任何输入框。 */
+  function syncSecretHints() {
+    if (!container) return;
+    for (const node of container.querySelectorAll("[data-secret-hint]")) {
+      const key = node.dataset.secretHint;
+      const platform = credentials.platformOfKey(key);
+      if (credentials.supported && platform) {
+        const state = credentials.platforms().find((item) => item.id === platform);
+        const label = state
+          ? state.configured
+            ? "已由凭据管理配置"
+            : "尚未配置"
+          : "尚未配置";
+        node.textContent = label;
+        node.hidden = false;
+        continue;
+      }
+      const configured = secretConfigured(key);
+      node.textContent = configured === true ? "已配置，留空则保持不变" : "";
+      node.hidden = configured !== true;
+    }
   }
 
   function matchesFilter(item) {
@@ -188,6 +255,12 @@ export function createConfigView(ctx) {
       );
     }
 
+    if (credentials.supported) {
+      // 凭据卡片节点是常驻的：整页重绘时重新挂同一个节点，内部状态不丢
+      container.appendChild(credentials.node);
+    }
+    if (cookiecloud.supported) container.appendChild(cookiecloud.node);
+
     container.appendChild(renderToolbar());
 
     let rendered = 0;
@@ -207,6 +280,7 @@ export function createConfigView(ctx) {
     }
 
     container.appendChild(renderSaveBar());
+    syncSecretHints();
   }
 
   /* ---------------- 工具条（搜索 + 折叠 + 大类导航） ---------------- */
@@ -395,6 +469,13 @@ export function createConfigView(ctx) {
   function appendFieldSequence(host, items) {
     let index = 0;
     while (index < items.length) {
+      if (OUTPUT_KEYS.has(items[index].key)) {
+        let end = index;
+        while (end < items.length && OUTPUT_KEYS.has(items[end].key)) end += 1;
+        host.appendChild(renderOutputChoices(items.slice(index, end)));
+        index = end;
+        continue;
+      }
       if (items[index].widget !== "switch-grid") {
         host.appendChild(renderField(items[index]));
         index += 1;
@@ -405,6 +486,28 @@ export function createConfigView(ctx) {
       host.appendChild(renderSwitchGrid(items.slice(index, end)));
       index = end;
     }
+  }
+
+  function renderOutputChoices(items) {
+    return h("div", { class: "field" }, [
+      h("div", { class: "cfg-output-choices", role: "group", "aria-label": "输出模式" }, items.map((item) => {
+        const input = h("input", {
+          type: "checkbox",
+          dataset: { outputKey: item.key },
+          onChange: (event) => onValueChanged(item.key, event.target.checked),
+        });
+        input.checked = Boolean(currentValue(item.key));
+        return h("label", { class: "cfg-output-choice", title: item.hint || "" }, [
+          input,
+          h("span", { text: item.label }),
+          h("span", {
+            class: "cfg-dirty", text: "已改", hidden: hasDraft(item.key) ? null : true,
+            dataset: { dirtyMark: item.key },
+          }),
+        ]);
+      })),
+      h("p", { class: "field-hint", text: "可任意组合，也可全部关闭。卡片还需开启「启用卡片渲染」；富媒体包含原图、视频、动图和音频。" }),
+    ]);
   }
 
   /** 开关网格：一排紧凑 tile，宽度不够自动换行。
@@ -469,6 +572,17 @@ export function createConfigView(ctx) {
     ])];
 
     const body = h("div", { class: "field-body" }, [control]);
+    if (item.secret && !credentials.managesKey(item.key)) {
+      const configured = secretConfigured(item.key);
+      body.prepend(
+        h("span", {
+          class: "cfg-dirty cred-secret-hint",
+          dataset: { secretHint: item.key },
+          hidden: configured ? true : null,
+          text: "已配置，留空则保持不变",
+        }),
+      );
+    }
     if (item.hint) {
       const hint = item.key === "PROXY"
         ? item.hint.replace(
@@ -916,11 +1030,58 @@ export function createConfigView(ctx) {
     // type="text" + secret=true（长 Cookie 想要多行输入框），原先会先命中下面的
     // textarea 分支 → 遮罩与「显示/隐藏」按钮对它们完全失效，Cookie 明文显示在页面上。
     if (item.secret) {
-      return secretInput(
+      // 已被凭据管理器接管的键不再手填：BILI_CK / XHS_CK / PIXIV_CK / GITHUB_TOKEN
+      // 只有一个入口，避免两边各存一份互相覆盖。配置项本身仍留在 meta 里，
+      // 搜索「大类/键名」照样能定位到这里。
+      if (credentials.managesKey(item.key)) {
+        const platform = credentials.platformOfKey(item.key);
+        const state = credentials.platforms().find((entry) => entry.id === platform);
+        return h("div", { class: "cred-managed" }, [
+          h("span", {
+            class: "cfg-dirty cred-managed-note",
+            dataset: { secretHint: item.key },
+            text: state && state.configured ? "已由凭据管理配置" : "尚未配置",
+          }),
+          h("span", {
+            class: "field-hint",
+            text: "请在上方「账号凭据」卡片里导入或检查。",
+          }),
+        ]);
+      }
+      const configured = secretConfigured(item.key);
+      const input = secretInput(
         value === null || value === undefined ? "" : String(value),
         (next) => onValueChanged(item.key, next),
-        item.placeholder || "",
+        // 已配置时值是空串：提示写清楚「留空 = 保持不变」，
+        // 否则用户会以为清空了、又不敢保存。
+        configured === true
+          ? item.placeholder || "已配置，留空则保持不变"
+          : item.placeholder || "",
       );
+      const clearButton = h("button", {
+        type: "button", class: "btn danger",
+        dataset: { secretClear: item.key },
+        disabled: configured !== true,
+        onClick: async () => {
+          if (pendingSecretClears.has(item.key)) {
+            pendingSecretClears.delete(item.key);
+            delete draft[item.key];
+          } else {
+            const ok = await confirmDialog({
+              title: `清除${item.label}`,
+              body: "点击页面的保存按钮后，该项已保存的值将被清除。",
+              confirmText: "标记清除", danger: true,
+            });
+            if (!ok) return;
+            pendingSecretClears.add(item.key);
+            draft[item.key] = "";
+          }
+          const field = input.querySelector("input");
+          if (field) field.value = "";
+          syncDirtyUI();
+        },
+      }, "清除已保存值");
+      return h("div", { class: "cred-generic-secret" }, [input, clearButton]);
     }
 
     if (item.type === "text") {
@@ -1019,7 +1180,11 @@ export function createConfigView(ctx) {
     try {
       const result = await ctx.api.post("config", { values: valuesToSave });
       values = result.values || values;
+      secretStatus = result.secret_status || {};
       draft = {};
+      pendingSecretClears.clear();
+      if (credentials.supported) await credentials.load();
+      if (cookiecloud.supported) await cookiecloud.load();
 
       if (result.errors && result.errors.length) {
         toast(`部分配置未保存：${result.errors.join("；")}`, "err");
@@ -1054,8 +1219,18 @@ export function createConfigView(ctx) {
     try {
       const result = await ctx.api.post("config/reset", {});
       values = result.values || values;
+      secretStatus = result.secret_status || {};
       draft = {};
-      toast(`已恢复默认（改动 ${result.changed ? result.changed.length : 0} 项）`, "ok");
+      pendingSecretClears.clear();
+      if (credentials.supported) await credentials.load();
+      if (cookiecloud.supported) await cookiecloud.load();
+      if (result.errors && result.errors.length) {
+        toast(`恢复默认时有操作未完成：${result.errors.join("；")}`, "err");
+      } else if (result.runtime_ok === false) {
+        toast("默认配置已写入，但运行时更新未完成，请重试", "err");
+      } else {
+        toast(`已恢复默认（改动 ${result.changed ? result.changed.length : 0} 项）`, "ok");
+      }
       render();
     } catch (error) {
       toast(`恢复失败：${error.message}`, "err");
@@ -1071,8 +1246,12 @@ export function createConfigView(ctx) {
       render();
     },
     async refresh() {
+      credentials.cancelLogin();
       await load();
       render();
+    },
+    unmount() {
+      credentials.cancelLogin();
     },
   };
 }

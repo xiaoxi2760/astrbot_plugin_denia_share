@@ -7,9 +7,7 @@
 
 相比 rika 原版移除了 Cloudflare 截图 Fallback（20+ 配置项）与 B站 Cookie 监控轮询。
 
-明确**不包含**的能力（有意不做，勿再引入）：
-- LLM 文本翻译
-- 视频仅发送封面 / 跳过视频本体
+不提供 LLM 文本翻译。
 """
 
 from __future__ import annotations
@@ -24,15 +22,35 @@ _config = None
 
 _HEX_COLOR_RE = re.compile(r"^#[0-9a-fA-F]{6}$")
 
+# 合并转发模式白名单：读侧只认这三个字面量，脏值一律回退 none（保持直发）
+AGGREGATION_MODES: frozenset[str] = frozenset({"none", "all", "conditional"})
+
+
+def _aggregation_threshold(raw: Any, default: int) -> int:
+    """把合并转发阈值读成非负 int。
+
+    非法值（非数字、None、空串）回退默认；负数按 0 处理——0 在
+    ``should_aggregate_nodes`` 里表示「这一项不触发」，比报错更符合预期。
+    """
+    try:
+        value = int(str(raw).strip())
+    except (TypeError, ValueError, AttributeError):
+        return default
+    return max(0, value)
+
 # 配置分组：展示顺序即此处的顺序，常用在前、折腾在后
 CONFIG_GROUPS: tuple[tuple[str, str], ...] = (
     ("解析设置", "日常最常用到的几项"),
     ("权限控制", "谁能触发解析：白名单 / 黑名单"),
     ("B站设置", "B站 Cookie 与下载清晰度"),
     ("Steam 设置", "价格地区与史低数据源"),
+    ("音乐设置", "QQ音乐、网易云的登录与搜歌点歌"),
+    ("CookieCloud", "从自建服务同步选定平台的浏览器登录态"),
     ("网页截图", "把任意网页截成图片发送"),
+    ("输出模式", "选择文本、卡片与富媒体，可任意组合"),
     ("卡片外观", "把解析结果渲染成分享卡片图片"),
     ("媒体发送", "视频怎么送到消息平台：共享目录或中转链接"),
+    ("合并转发", "选中的媒体要不要打包成一条合并转发消息"),
     ("高级设置", "一般用不到，按需开启"),
     ("维护", "缓存与调试，改动后立即生效"),
 )
@@ -51,13 +69,13 @@ CONFIG_SECTIONS: tuple[dict[str, Any], ...] = (
         "key": "platform",
         "label": "平台接入",
         "description": "各平台的凭据、清晰度与第三方数据源",
-        "groups": ("B站设置", "Steam 设置", "网页截图"),
+        "groups": ("B站设置", "Steam 设置", "音乐设置", "CookieCloud", "网页截图"),
     },
     {
         "key": "output",
         "label": "输出与投递",
-        "description": "卡片怎么渲染、视频怎么送到消息平台",
-        "groups": ("卡片外观", "媒体发送"),
+        "description": "选择发送内容，调整卡片与媒体投递",
+        "groups": ("输出模式", "卡片外观", "媒体发送", "合并转发"),
     },
     {
         "key": "advanced",
@@ -69,7 +87,7 @@ CONFIG_SECTIONS: tuple[dict[str, Any], ...] = (
 
 # 配置项元数据。字段说明：
 #   key/group/label/type/default/hint 必填；type 取值 string | text | int | bool | select
-#   secret=True 表示前端以密码框展示（仅遮罩显示，配置文件里仍是明文，与原生面板一致）
+#   secret=True 的值不会通过插件 WebUI 回读；配置文件的存储方式与原生面板一致。
 #   options/labels 仅 select 使用；min/max/unit 仅 int 使用；placeholder 仅输入框使用
 #   list=True 表示「逗号分隔字符串」类型的列表项，配置页渲染成标签编辑器
 #   而不是单行输入框（存储格式不变，纯展示层增强）；
@@ -107,6 +125,52 @@ _PROXY_SWITCH_ITEMS: tuple[dict[str, Any], ...] = tuple(
 )
 
 CONFIG_META: tuple[dict[str, Any], ...] = (
+    {"key": "COOKIECLOUD_URL", "group": "CookieCloud", "label": "服务地址", "type": "string", "default": "", "hint": "填写你自建的 CookieCloud 地址，可包含子目录。"},
+    {"key": "COOKIECLOUD_UUID", "group": "CookieCloud", "label": "用户密钥 UUID", "type": "string", "default": "", "secret": True, "hint": "与浏览器 CookieCloud 扩展中的用户密钥一致。"},
+    {"key": "COOKIECLOUD_PASSWORD", "group": "CookieCloud", "label": "端到端加密密码", "type": "string", "default": "", "secret": True, "hint": "仅在机器人本地解密，不会发送给同步服务器。"},
+    {"key": "COOKIECLOUD_PLATFORMS", "group": "CookieCloud", "label": "同步平台", "type": "string", "default": "", "list": True, "hint": "填写平台名：bilibili、xiaohongshu、pixiv、netease、qqmusic、xiaoheihe；留空不导入。GitHub Token 不参与同步。"},
+    {"key": "COOKIECLOUD_INTERVAL_MINUTES", "group": "CookieCloud", "label": "自动同步间隔", "type": "int", "default": 0, "min": 0, "max": 1440, "unit": "分钟", "hint": "0 为仅手动；自动同步只更新尚未配置或仍由 CookieCloud 管理的登录态，不覆盖手动修改。"},
+    {
+        "key": "MUSIC_COMMANDS_ENABLED", "group": "音乐设置", "label": "启用搜歌与点歌",
+        "type": "bool", "default": True,
+        "hint": "搜歌发送带编号的结果卡片，点歌或选歌后按当前语音/文件设置发送。分享链接解析由平台开关单独控制。",
+    },
+    {
+        "key": "MUSIC_DEFAULT_PLATFORM", "group": "音乐设置", "label": "默认搜歌平台",
+        "type": "select", "default": "both", "options": ["both", "netease", "qqmusic"],
+        "labels": ["两家一起搜", "网易云音乐", "QQ音乐"],
+        "hint": "也可以在指令里指定，例如：搜歌 QQ 晴天。",
+    },
+    {
+        "key": "MUSIC_SEARCH_LIMIT", "group": "音乐设置", "label": "搜歌结果数量",
+        "type": "int", "default": 5, "min": 1, "max": 10,
+        "hint": "结果卡片最多显示这些候选；两家一起搜时交错排列，编号连续。",
+    },
+    {
+        "key": "MUSIC_SESSION_TTL_SECONDS", "group": "音乐设置", "label": "选歌列表有效期",
+        "type": "int", "default": 300, "min": 30, "max": 1800, "unit": "秒",
+        "hint": "每个会话、每个用户分别保存搜索列表，过期后需要重新搜歌。",
+    },
+    {
+        "key": "MUSIC_SEARCH_COMMANDS", "group": "音乐设置", "label": "搜歌指令",
+        "type": "string", "default": "点歌",
+        "hint": "点歌 歌名显示本插件的搜歌卡片；可用逗号配置其他别名，不包含空格或斜杠。",
+    },
+    {
+        "key": "MUSIC_PLAY_COMMANDS", "group": "音乐设置", "label": "点歌与选歌指令",
+        "type": "string", "default": "听",
+        "hint": "听1 或听 1 发送列表第1首音频，不附带解析卡片。可用逗号配置其他选歌别名。",
+    },
+    {
+        "key": "NETEASE_CK", "group": "音乐设置", "label": "网易云 Cookie",
+        "type": "text", "default": "", "secret": True,
+        "hint": "在上方账号凭据导入 MUSIC_U 或完整 Cookie，会员歌曲按账号实际权限获取。扫码不可用时可直接导入。",
+    },
+    {
+        "key": "QQMUSIC_CK", "group": "音乐设置", "label": "QQ音乐 Cookie",
+        "type": "text", "default": "", "secret": True,
+        "hint": "在上方账号凭据扫码或导入包含 uin 与音乐密钥的 Cookie；可检查、续期与清除。",
+    },
     # ---------------- 解析设置 ---------------- #
     {
         "key": "DISABLED_PLATFORMS",
@@ -121,18 +185,18 @@ CONFIG_META: tuple[dict[str, Any], ...] = (
     {
         "key": "VIDEO_DURATION_MAXIMUM",
         "group": "解析设置",
-        "label": "视频最大时长",
+        "label": "视频/音频最大时长",
         "type": "int",
         "default": 480,
         "min": 0,
         "max": 86400,
         "unit": "秒",
-        "hint": "超过此时长不下载视频，但仍会返回标题、作者和封面",
+        "hint": "超过此时长不下载视频或音频；已选文本和卡片仍可显示内容与原因。",
     },
     {
         "key": "VIDEO_SIZE_MAXIMUM_MB",
         "group": "解析设置",
-        "label": "单个视频体积上限",
+        "label": "单个视频/音频体积上限",
         "type": "int",
         "default": 100,
         "min": 1,
@@ -224,7 +288,7 @@ CONFIG_META: tuple[dict[str, Any], ...] = (
         "type": "text",
         "default": "",
         "secret": True,
-        "hint": "推荐用「总览」页的扫码登录自动写入；配了才能下 1080P 及以上",
+        "hint": "可在「配置 → 账号凭据 → B站」或总览页扫码登录；画质按账号权限获取",
     },
     {
         "key": "BILI_QUALITY",
@@ -323,13 +387,64 @@ CONFIG_META: tuple[dict[str, Any], ...] = (
     },
     # ---------------- 卡片外观 ---------------- #
     {
+        "key": "OUTPUT_TEXT_ENABLED",
+        "group": "输出模式",
+        "label": "文本",
+        "type": "bool",
+        "default": False,
+        "hint": "一条普通文字消息，包含标题、链接、简洁播放信息与必要提示。可与卡片、富媒体同时发送。",
+    },
+    {
+        "key": "OUTPUT_CARD_ENABLED",
+        "group": "输出模式",
+        "label": "卡片",
+        "type": "bool",
+        "default": True,
+        "hint": "需同时开启「启用卡片渲染」。渲染失败时只跳过卡片，不改变其他输出选项。",
+    },
+    {
+        "key": "OUTPUT_MEDIA_ENABLED",
+        "group": "输出模式",
+        "label": "富媒体",
+        "type": "bool",
+        "default": True,
+        "hint": "发送原图、视频、动图和音频。关闭后不下载视频本体，卡片仅获取需要的图片。",
+    },
+    {
+        "key": "AUDIO_SEND_MODE",
+        "group": "输出模式",
+        "label": "音频发送方式",
+        "type": "select",
+        "default": "voice",
+        "options": ["voice", "file"],
+        "labels": ["语音条", "音频文件"],
+        "hint": "仅在富媒体开启时生效。语音条由宿主和协议端处理；音频文件保留原格式。每段音频只发送一种形式。",
+    },
+    {
+        "key": "SEND_BACKGROUND_MUSIC",
+        "group": "输出模式",
+        "label": "发送图文配乐",
+        "type": "bool",
+        "default": False,
+        "hint": "图文作品自带背景音乐时，是否把配乐也一并发出。目前抖音图文支持；默认关闭，避免普通图文突然多发一段音乐。",
+    },
+    {
+        "key": "OUTPUT_MODES_INITIALIZED",
+        "group": "输出模式",
+        "label": "输出模式迁移标记",
+        "type": "bool",
+        "default": False,
+        "internal": True,
+        "hint": "由插件维护，避免宿主补齐默认值后重复迁移用户选择。",
+    },
+    {
         "key": "RENDER_ENABLED",
         "group": "卡片外观",
         "subgroup": "基础",
         "label": "启用卡片渲染",
         "type": "bool",
         "default": True,
-        "hint": "关闭则回退为纯文本输出",
+        "hint": "仅控制卡片渲染。关闭后不发送卡片，不影响已选文本和富媒体。",
     },
     {
         "key": "RENDER_THEME",
@@ -435,6 +550,15 @@ CONFIG_META: tuple[dict[str, Any], ...] = (
         "hint": "显示视频封面中央的播放按钮，关闭后仅保留封面图片。",
     },
     {
+        "key": "RENDER_SHOW_AI_SUMMARY",
+        "group": "卡片外观",
+        "subgroup": "内容元素",
+        "label": "显示 B站 AI 总结",
+        "type": "bool",
+        "default": False,
+        "hint": "标准、杂志、信息流布局可显示；沉浸式不显示。无可用总结时隐藏。",
+    },
+    {
         "key": "RENDER_GRADIENT_TOP",
         "group": "卡片外观",
         "subgroup": "配色",
@@ -510,7 +634,63 @@ CONFIG_META: tuple[dict[str, Any], ...] = (
         "unit": "秒",
         "hint": "到期后链接失效。视频越大、链路越慢越要留足时间，建议不低于 120 秒",
     },
+    # ---------------- 合并转发 ---------------- #
+    # 合并转发（一条消息里装多个节点）只有 OneBot 协议端支持，其它协议端拿不到
+    # 这条入口，所以整组说明都标了「仅 OneBot 启用」。默认 none：升级后行为
+    # 与现在完全一致（逐条直发），不会突然把一堆图片塞成一条消息。
+    {
+        "key": "AGGREGATION_MODE",
+        "group": "合并转发",
+        "label": "聚合方式",
+        "type": "select",
+        "default": "none",
+        "options": ["none", "all", "conditional"],
+        "labels": ["不聚合", "全部聚合", "按条件聚合"],
+        "hint": (
+            "仅 OneBot 启用。将选中的图片、视频逐条发送，或合并成一条转发消息。"
+            "按条件聚合时，命中下面任一阈值才合并。"
+            "语音条、音频文件独立发送，简短文字和卡片不受影响；转发明确失败时改为逐条发送。"
+        ),
+    },
+    {
+        "key": "AGGREGATION_IMAGE_THRESHOLD",
+        "group": "合并转发",
+        "label": "图片数量阈值",
+        "type": "int",
+        "default": 3,
+        "min": 0,
+        "max": 99,
+        "unit": "张",
+        "hint": "仅「按条件聚合」生效：图片数达到该值就合并。0=这一项不触发",
+    },
+    {
+        "key": "AGGREGATION_VIDEO_THRESHOLD",
+        "group": "合并转发",
+        "label": "视频数量阈值",
+        "type": "int",
+        "default": 2,
+        "min": 0,
+        "max": 99,
+        "unit": "个",
+        "hint": "仅「按条件聚合」生效：视频数达到该值就合并。0=这一项不触发",
+    },
+    {
+        "key": "AGGREGATION_NODE_THRESHOLD",
+        "group": "合并转发",
+        "label": "总节点阈值",
+        "type": "int",
+        "default": 5,
+        "min": 0,
+        "max": 999,
+        "unit": "个",
+        "hint": "仅「按条件聚合」生效：本次待发送的图片与视频节点总数达到该值时合并。语音、文件、精简文字和卡片不计入。0=这一项不触发",
+    },
     # ---------------- 高级设置 ---------------- #
+    {
+        "key": "XIAOHEIHE_CK", "group": "高级设置", "subgroup": "平台凭据",
+        "label": "小黑盒 Cookie", "type": "text", "default": "", "secret": True,
+        "hint": "在上方「账号凭据 → 小黑盒」导入浏览器 Cookie。需要登录的帖子按账号权限获取，平台仍要求验证时请先在网页完成。",
+    },
     {
         "key": "XHS_CK",
         "group": "高级设置",
@@ -702,11 +882,11 @@ def config_meta_payload() -> dict[str, Any]:
             {
                 "name": name,
                 "description": description,
-                "keys": list(CONFIG_GROUP_KEYS.get(name, ())),
+                "keys": [key for key in CONFIG_GROUP_KEYS.get(name, ()) if not _ITEM_BY_KEY[key].get("internal")],
             }
             for name, description in CONFIG_GROUPS
         ],
-        "items": [dict(item) for item in CONFIG_META],
+        "items": [dict(item) for item in CONFIG_META if not item.get("internal")],
     }
 
 
@@ -832,6 +1012,33 @@ def verify_schema_alignment(schema: dict[str, Any]) -> list[str]:
     return problems
 
 
+def migrate_music_commands(config: Any) -> bool:
+    """Migrate the old direct-play defaults to 点歌 / 听N, preserving custom names."""
+    previous = {
+        'MUSIC_SEARCH_COMMANDS': {'搜歌', '音乐搜索'},
+        'MUSIC_PLAY_COMMANDS': {'点歌', '选歌'},
+    }
+    group = config.get('音乐设置')
+    nested = group if isinstance(group, dict) else {}
+    changed = False
+    for key, legacy in previous.items():
+        default = _DEFAULTS[key]
+        raw = nested.get(key, config.get(key, default))
+        if raw == default and key in config and config[key] != default:
+            raw = config[key]
+        aliases = {part for part in re.split(r'[,，、\s]+', str(raw or '')) if part}
+        if not aliases or not aliases <= legacy:
+            continue
+        if not isinstance(group, dict):
+            group = {}
+            config['音乐设置'] = group
+        group[key] = default
+        # The compatibility fallback must not resurrect stale flat aliases.
+        config.pop(key, None)
+        changed = True
+    return changed
+
+
 def migrate_grouped_config(config: Any) -> bool:
     """旧版扁平配置 → 分组配置，幂等。"""
     changed = False
@@ -914,6 +1121,44 @@ def migrate_proxy_switches(config: Any) -> bool:
     return True
 
 
+def migrate_output_modes(config: Any) -> bool:
+    """迁移旧输出习惯，兼容宿主已经按 schema 填齐默认值的情况。"""
+    group = config.get("输出模式")
+    if not isinstance(group, dict):
+        group = {}
+        config["输出模式"] = group
+    keys = ("OUTPUT_TEXT_ENABLED", "OUTPUT_CARD_ENABLED", "OUTPUT_MEDIA_ENABLED")
+    marker = "OUTPUT_MODES_INITIALIZED"
+    if group.get(marker) is True:
+        return False
+    # 兼容开发版的分组和扁平键，并保留明确的 false。
+    legacy = config.get("解析设置")
+    explicit = False
+    for key in keys:
+        if isinstance(legacy, dict) and key in legacy:
+            group[key] = legacy.pop(key)
+            explicit = True
+        if key in config:
+            group[key] = config.pop(key)
+            explicit = True
+    # 标记缺失、已有开关的原始配置属于明确选择；标记 false、值都等于
+    # 默认值的形态则是宿主为老版本补齐 schema，仍需迁移旧输出习惯。
+    explicit = explicit or (marker not in group and any(key in group for key in keys))
+    explicit = explicit or any(key in group and group[key] != _DEFAULTS[key] for key in keys)
+    if not explicit:
+        render_group = config.get("卡片外观")
+        render_enabled = render_group.get("RENDER_ENABLED", True) if isinstance(render_group, dict) else True
+        if render_enabled is True and config.get("RENDER_ENABLED") is False:
+            render_enabled = False
+        for key in keys:
+            group[key] = _DEFAULTS[key]
+        if render_enabled is False:
+            group["OUTPUT_TEXT_ENABLED"] = True
+            group["OUTPUT_CARD_ENABLED"] = False
+    group[marker] = True
+    return True
+
+
 class ParserConfig:
     """解析器配置 - 由 main.py 初始化"""
 
@@ -942,7 +1187,7 @@ class ParserConfig:
         """返回所有配置项的当前生效值（键 → 值）。"""
         return {
             item["key"]: self._cfg_get(item["key"], item["default"])
-            for item in CONFIG_META
+            for item in CONFIG_META if not item.get("internal")
         }
 
     def apply_updates(self, payload: Any) -> tuple[list[str], list[str]]:
@@ -965,7 +1210,7 @@ class ParserConfig:
 
         for key, raw in payload.items():
             item = _ITEM_BY_KEY.get(key)
-            if item is None:
+            if item is None or item.get("internal"):
                 errors.append(f"未知配置项：{key}")
                 continue
             value, error = coerce_value(item, raw)
@@ -993,7 +1238,7 @@ class ParserConfig:
     def reset_to_defaults(self) -> list[str]:
         """把所有配置项恢复为默认值，返回被改动的键列表。"""
         changed, _ = self.apply_updates(
-            {item["key"]: item["default"] for item in CONFIG_META}
+            {item["key"]: item["default"] for item in CONFIG_META if not item.get("internal")}
         )
         return changed
 
@@ -1079,6 +1324,62 @@ class ParserConfig:
     @property
     def XHS_CK(self) -> str | None:
         return self._cfg_get("XHS_CK", None)
+
+    @property
+    def COOKIECLOUD_URL(self) -> str:
+        return str(self._cfg_get('COOKIECLOUD_URL', '') or '').strip()
+
+    @property
+    def COOKIECLOUD_UUID(self) -> str:
+        return str(self._cfg_get('COOKIECLOUD_UUID', '') or '').strip()
+
+    @property
+    def COOKIECLOUD_PASSWORD(self) -> str:
+        return str(self._cfg_get('COOKIECLOUD_PASSWORD', '') or '')
+
+    @property
+    def COOKIECLOUD_PLATFORMS(self) -> str:
+        return str(self._cfg_get('COOKIECLOUD_PLATFORMS', '') or '')
+
+    @property
+    def COOKIECLOUD_INTERVAL_MINUTES(self) -> int:
+        return int(self._cfg_get('COOKIECLOUD_INTERVAL_MINUTES', 0))
+
+    @property
+    def XIAOHEIHE_CK(self) -> str:
+        return str(self._cfg_get("XIAOHEIHE_CK", "") or "").strip()
+
+    @property
+    def NETEASE_CK(self) -> str:
+        return str(self._cfg_get("NETEASE_CK", "") or "").strip()
+
+    @property
+    def QQMUSIC_CK(self) -> str:
+        return str(self._cfg_get("QQMUSIC_CK", "") or "").strip()
+
+    @property
+    def MUSIC_COMMANDS_ENABLED(self) -> bool:
+        return self._cfg_get("MUSIC_COMMANDS_ENABLED", True)
+
+    @property
+    def MUSIC_DEFAULT_PLATFORM(self) -> str:
+        return self._cfg_get("MUSIC_DEFAULT_PLATFORM", "both")
+
+    @property
+    def MUSIC_SEARCH_LIMIT(self) -> int:
+        return self._cfg_get("MUSIC_SEARCH_LIMIT", 5)
+
+    @property
+    def MUSIC_SESSION_TTL_SECONDS(self) -> int:
+        return self._cfg_get("MUSIC_SESSION_TTL_SECONDS", 300)
+
+    @property
+    def MUSIC_SEARCH_COMMANDS(self) -> str:
+        return self._cfg_get("MUSIC_SEARCH_COMMANDS", "点歌")
+
+    @property
+    def MUSIC_PLAY_COMMANDS(self) -> str:
+        return self._cfg_get("MUSIC_PLAY_COMMANDS", "听")
 
     # ---------------- Pixiv / GitHub ---------------- #
 
@@ -1224,6 +1525,111 @@ class ParserConfig:
         """
         return int(self._cfg_get("RESULT_CACHE_TTL_SECONDS", 600))
 
+    # ---------------- 输出内容 ---------------- #
+
+    @property
+    def OUTPUT_TEXT_ENABLED(self) -> bool:
+        return bool(self._cfg_get("OUTPUT_TEXT_ENABLED", False))
+
+    @property
+    def OUTPUT_CARD_ENABLED(self) -> bool:
+        return bool(self._cfg_get("OUTPUT_CARD_ENABLED", True))
+
+    @property
+    def OUTPUT_MEDIA_ENABLED(self) -> bool:
+        return bool(self._cfg_get("OUTPUT_MEDIA_ENABLED", True))
+
+    @property
+    def AUDIO_SEND_MODE(self) -> str:
+        """音频按哪种形式发出：``voice``（语音条）或 ``file``（音频文件）。
+
+        读侧**必须**走白名单回退：配置文件里的值可能来自 AstrBot 原生面板、
+        手改 JSON 或跨版本残留，而发送层只认这两个字面量。脏值若透下去，
+        就会落进「既不是语音也不是文件」的空档里，那条路没有任何兜底。
+        """
+        value = str(self._cfg_get("AUDIO_SEND_MODE", "voice") or "").strip()
+        return value if value in ("voice", "file") else "voice"
+
+    @property
+    def SEND_BACKGROUND_MUSIC(self) -> bool:
+        """图文作品自带配乐时是否一并发送（解析侧读取）。"""
+        return bool(self._cfg_get("SEND_BACKGROUND_MUSIC", False))
+
+    def output_modes(self) -> dict[str, bool]:
+        """本次请求实际允许输出哪几路（**已计入卡片总开关**）。
+
+        卡片的条件是「用户勾了卡片」**且**「卡片总开关打开」——两个都开才算
+        一路输出。总开关只掐卡片，文本与媒体永远不受它影响。
+
+        ``card_effective`` 与 ``card_selected`` 分开返回：前者是真正会不会发卡片，
+        后者是用户的选择。配置页与提示需要区分「我没勾」和「我勾了但总开关关了」。
+        """
+        card_selected = self.OUTPUT_CARD_ENABLED
+        card_effective = bool(card_selected and self.RENDER_ENABLED)
+        return {
+            "text": self.OUTPUT_TEXT_ENABLED,
+            "card_effective": card_effective,
+            "card_selected": card_selected,
+            "media": self.OUTPUT_MEDIA_ENABLED,
+        }
+
+    def any_output_enabled(self) -> bool:
+        """三路全关时应短路：既不解析也不下载，更不占去重与历史。"""
+        modes = self.output_modes()
+        return bool(modes["text"] or modes["card_effective"] or modes["media"])
+
+    # ---------------- 合并转发 ---------------- #
+
+    @property
+    def AGGREGATION_MODE(self) -> str:
+        """合并转发模式：``none`` / ``all`` / ``conditional``。
+
+        和 :attr:`AUDIO_SEND_MODE` 同样的道理，读侧必须走白名单回退：值可能
+        来自 AstrBot 原生面板、手改 JSON 或旧版本残留，脏值透下去就会掉进
+        「既不是 all 也不是 conditional 也不是 none」的分支里。
+        """
+        value = str(self._cfg_get("AGGREGATION_MODE", "none") or "").strip().lower()
+        return value if value in AGGREGATION_MODES else "none"
+
+    @property
+    def AGGREGATION_IMAGE_THRESHOLD(self) -> int:
+        return _aggregation_threshold(self._cfg_get("AGGREGATION_IMAGE_THRESHOLD", 3), 3)
+
+    @property
+    def AGGREGATION_VIDEO_THRESHOLD(self) -> int:
+        return _aggregation_threshold(self._cfg_get("AGGREGATION_VIDEO_THRESHOLD", 2), 2)
+
+    @property
+    def AGGREGATION_NODE_THRESHOLD(self) -> int:
+        return _aggregation_threshold(self._cfg_get("AGGREGATION_NODE_THRESHOLD", 5), 5)
+
+    def should_aggregate_nodes(
+        self,
+        image_count: int,
+        video_count: int,
+        node_count: int,
+    ) -> bool:
+        """按当前配置判断这次是否发送合并转发。
+
+        ``all`` 要求**确实有节点**才合并：没有内容时合成一条空消息没有意义，
+        直接 False，调用方可以照常走逐条直发。``conditional`` 是任一**启用**
+        的阈值命中即可，阈值为 0 表示这一项不触发而不是「立刻满足」；
+        ``none`` 恒为 False。
+        """
+        mode = self.AGGREGATION_MODE
+        if mode == "all":
+            return int(node_count or 0) > 0
+        if mode != "conditional":
+            return False
+        return any(
+            threshold > 0 and count >= threshold
+            for threshold, count in (
+                (self.AGGREGATION_IMAGE_THRESHOLD, image_count),
+                (self.AGGREGATION_VIDEO_THRESHOLD, video_count),
+                (self.AGGREGATION_NODE_THRESHOLD, node_count),
+            )
+        )
+
     # ---------------- 渲染 ---------------- #
 
     @property
@@ -1277,6 +1683,11 @@ class ParserConfig:
         return bool(self._cfg_get("RENDER_SHOW_PLAY_BUTTON", True))
 
     @property
+    def RENDER_SHOW_AI_SUMMARY(self) -> bool:
+        """是否在卡片上显示 B站 AI 总结（默认关闭；沉浸式布局始终不显示）。"""
+        return bool(self._cfg_get("RENDER_SHOW_AI_SUMMARY", False))
+
+    @property
     def RENDER_GRADIENT_TOP(self) -> str:
         value = str(self._cfg_get("RENDER_GRADIENT_TOP", "") or "").strip()
         return value if _HEX_COLOR_RE.match(value) else ""
@@ -1304,6 +1715,7 @@ class ParserConfig:
             "desc_max_lines": self.RENDER_DESC_MAX_LINES,
             "show_avatar": self.RENDER_SHOW_AVATAR,
             "show_play_button": self.RENDER_SHOW_PLAY_BUTTON,
+            "show_ai_summary": self.RENDER_SHOW_AI_SUMMARY,
             "gradient_top": self.RENDER_GRADIENT_TOP or None,
             "gradient_bottom": self.RENDER_GRADIENT_BOTTOM or None,
         }

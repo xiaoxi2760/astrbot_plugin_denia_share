@@ -23,6 +23,8 @@ from astrbot.api import logger
 
 from ...base_parser import BaseParser, PlatformEnum, ParseException, handle
 from ...data import Platform, platform_of
+from .models.video import unwrap_audio_url
+from ...media_utils import fmt_duration
 
 
 class DouyinParser(BaseParser):
@@ -48,6 +50,9 @@ class DouyinParser(BaseParser):
     @handle("jingxuan.douyin", r"jingxuan\.douyin\.com/m/(?P<ty>slides|video|note)/(?P<vid>\d+)")
     async def _parse_douyin(self, searched: re.Match[str]):
         ty, vid = searched.group("ty"), searched.group("vid")
+        # canonical **按参数传下去**，不挂在 self 上：解析器实例跨消息复用，
+        # 存实例属性会让并发请求互相覆盖又互相清空（图文请求可能因此拿到
+        # 上一条视频请求留下的 /video/ 链接）。
         result = await self._fetch_douyin(ty, vid)
         # 补规范链接：下面三条路径返回的结果都可能没有 url，而卡片页脚左侧画的就是它。
         # 这里用 handler 抓到的作品号拼一条 —— 用户常发的是 v.douyin.com 短链或带口令的
@@ -64,6 +69,9 @@ class DouyinParser(BaseParser):
         from .session import get_share_session
 
         get_share_session(type(self)).start_work()
+
+        # 规范链接跟着请求走（不存实例状态），图文才不会退化成 /video/。
+        canonical = f"https://www.douyin.com/{ty}/{vid}"
 
         # 1) HTML _ROUTER_DATA 路径。零签名成本，配会话 cookie 后最稳。
         #    slides 类型也试 /share/note/<id>/ —— 抖音两种写法都有，
@@ -90,7 +98,7 @@ class DouyinParser(BaseParser):
                 logger.debug(f"[douyin] slidesinfo 路径失败，转签名接口: {e}")
 
         # 3) 兜底：签名 Web API
-        return await self.parse_by_web_api(vid)
+        return await self.parse_by_web_api(vid, canonical_url=canonical)
 
     @staticmethod
     def _build_iesdouyin_url(ty: str, vid: str) -> str:
@@ -101,11 +109,89 @@ class DouyinParser(BaseParser):
         return f"https://m.douyin.com/share/{ty}/{vid}"
 
     # ------------------------------------------------------------------ #
+    # 音频（图文配乐 / 原生纯音频）
+    # ------------------------------------------------------------------ #
+
+    @staticmethod
+    def _background_music_enabled() -> bool:
+        """图文配乐开关。**读不到配置时按关闭处理**，不能让一个装饰性开关
+        把整条解析炸掉 —— 解析器的其余部分本来不依赖任何配置项。"""
+        try:
+            from ...config import get_config
+
+            return bool(getattr(get_config(), "SEND_BACKGROUND_MUSIC", False))
+        except Exception:
+            return False
+
+    @classmethod
+    def _extract_audio(cls, item: dict) -> tuple[str, float | None] | None:
+        """从签名 API 的原始 dict 里取出作品音频（URL + 秒级时长）。
+
+        与模型层的 :func:`unwrap_audio_url` 共用同一套判定，所以三条取数路径
+        （HTML / slidesinfo / 签名 API）对「什么算音频」不会分叉。
+
+        **不探测、不下载**：这里只做纯 URL 形状判断。任何 HEAD/GET 都会让
+        「仅文本」输出也去碰网络，惰性就废了。
+        """
+        if not isinstance(item, dict):
+            return None
+
+        music = item.get("music") or {}
+        seconds = None
+        if isinstance(music, dict):
+            duration = music.get("duration")
+            # music.duration 单位是**秒**；非数字/非正数就当没有，别猜。
+            if isinstance(duration, (int, float)) and not isinstance(duration, bool) and duration > 0:
+                seconds = float(duration)
+            play_url = music.get("play_url") or music.get("playUrl") or {}
+            if found := cls._first_url(play_url):
+                if real := unwrap_audio_url(found):
+                    return real, seconds
+
+        # 样本形状：真正的音频直链藏在 video.play_addr 的包装参数里。
+        # 时长仍取 music.duration —— 包装地址本身不带时长信息。
+        video = item.get("video") or {}
+        if isinstance(video, dict):
+            for key in ("play_addr", "playAddr", "PlayAddrStruct"):
+                found = cls._first_url(video.get(key))
+                if found and (real := unwrap_audio_url(found)):
+                    return real, seconds
+        return None
+
+    def _attach_audio(self, result, audio: tuple[str, float | None] | None, *, has_images: bool):
+        """按既定策略把音频挂到结果上，返回是否真的挂了。
+
+        三条规则（顺序即优先级）：
+
+        1. **原生纯音频**（既无图也无视频）：无条件产出 AudioContent。
+           这是作品本身就是一段音乐，不属于「背景音乐」，不该被开关拦掉。
+        2. **图文配乐**（有图）：只在 ``SEND_BACKGROUND_MUSIC`` 打开时附带，
+           否则维持现状（只发图），避免更新后所有图文突然多发一段音频。
+        3. **普通视频**：调用方根本不进来 —— 视频自带声音，再挂一段配乐
+           既重复又可能是被裁过的片段。
+        """
+        if audio is None:
+            return False
+        url, duration = audio
+        if has_images and not self._background_music_enabled():
+            return False
+        # 时长上限检查放在建任务**之前**：超限时用户需要知道「为什么没有音频」，
+        # 而不是拿到一个安静的空结果。这里的音频和视频限制都以秒计。
+        if duration:
+            self._add_limit_warning(result, duration, media_type="音频")
+            # 纯音频作品没有视频时长可显示，把音频秒数放进 extra，
+            # 好让卡片/文本能带上「66 秒」这类信息；已有真实视频时长则不覆盖。
+            if result.video is None and not result.extra.get("duration"):
+                result.extra["duration"] = fmt_duration(duration)
+        result.contents.append(self.create_audio(url, duration or 0.0))
+        return True
+
+    # ------------------------------------------------------------------ #
     # 路径一：HTML _ROUTER_DATA
     # ------------------------------------------------------------------ #
 
     async def parse_video(self, url: str):
-        from ...models.douyin.video import decoder as video_decoder
+        from .models.video import decoder as video_decoder
         from .session import get_share_session, looks_like_challenge
 
         text = await get_share_session(type(self)).fetch(url, self.ios_headers)
@@ -130,11 +216,16 @@ class DouyinParser(BaseParser):
         author = self.create_author(video_data.author.nickname, video_data.avatar_url)
         result = self.result(title=video_data.desc, author=author, timestamp=video_data.create_time)
 
+        audio = self._audio_from_data(video_data)
         if image_urls := video_data.image_urls:
             result.contents.extend(self.create_images(image_urls))
+            self._attach_audio(result, audio, has_images=True)
         elif video_url := video_data.video_url:
             self._add_limit_warning(result, video_data.duration)
             result.video = self.create_video(video_url, video_data.cover_url, video_data.duration)
+        elif audio is not None:
+            # 无图无视频但有真实音频：作品本身就是一段音乐，不受配乐开关限制。
+            self._attach_audio(result, audio, has_images=False)
         else:
             # 既没有图片也没有视频：多半是 SSR 结构变了、或命中了另一种页面变体。
             # 必须抛出去让 _parse_douyin 继续走后面的路径与兜底接口 —— 返回一个
@@ -142,8 +233,16 @@ class DouyinParser(BaseParser):
             raise ParseException("分享页里既没有图片也没有视频")
         return result
 
+    @staticmethod
+    def _audio_from_data(video_data) -> tuple[str, float | None] | None:
+        """HTML/slides 两条 msgspec 路径共用的音频提取。"""
+        url = video_data.audio_url
+        if not url:
+            return None
+        return url, video_data.audio_duration
+
     async def parse_slides(self, video_id: str):
-        from ...models.douyin.slides import decoder as slides_decoder
+        from .models.slides import decoder as slides_decoder
 
         url = "https://www.iesdouyin.com/web/api/v2/aweme/slidesinfo/"
         params = {"aweme_ids": f"[{video_id}]", "request_source": "200"}
@@ -167,11 +266,15 @@ class DouyinParser(BaseParser):
         # 原先是「有内嵌视频就用内嵌视频」，于是整条图集被当成一串视频发出去 ——
         # 用户看到的就是「解析图集变成了视频」，而静态图全被丢掉。
         # 内嵌视频只在**没有任何静态图**时才用，那种作品本质就是视频。
+        audio = self._audio_from_data(slides_data)
         if image_urls := slides_data.image_urls:
             result.contents.extend(self.create_images(image_urls))
+            self._attach_audio(result, audio, has_images=True)
         elif dynamic_urls := slides_data.dynamic_urls:
             for dynamic_url in dynamic_urls:
                 result.contents.append(self.create_video(dynamic_url))
+        elif audio is not None:
+            self._attach_audio(result, audio, has_images=False)
         else:
             # 静态图与内嵌视频段都没有：这条接口没给媒体。抛出去让 _parse_douyin
             # 接着走签名 Web API 兜底，而不是返回一个零媒体的空结果。
@@ -189,7 +292,9 @@ class DouyinParser(BaseParser):
             self._web_client = DouyinWebClient()
         return self._web_client
 
-    async def parse_by_web_api(self, item_id: str):
+    async def parse_by_web_api(self, item_id: str, canonical_url: str | None = None):
+        """canonical_url 可选：直接调用本方法（不经 handler）时不会传，
+        此时退回 /video/<id>，保持旧行为。"""
         client = self._get_web_client()
         async with aiohttp.ClientSession() as session:
             data = await client.fetch_detail(session, item_id)
@@ -206,7 +311,7 @@ class DouyinParser(BaseParser):
         if item is None:
             raise ParseException("响应中未包含目标作品")
 
-        return self._build_result_from_item(item)
+        return self._build_result_from_item(item, canonical_url=canonical_url)
 
     @staticmethod
     def _pick_item(data: dict, item_id: str) -> dict | None:
@@ -251,14 +356,24 @@ class DouyinParser(BaseParser):
 
     @classmethod
     def _video_urls(cls, item: dict) -> list[str]:
-        """返回按优先级排序的备用视频直链（已去水印）。"""
+        """返回按优先级排序的备用视频直链（已去水印）。
+
+        **必须排除「音频包装地址」**：图文作品会把音频直链接在 play_addr 的
+        video_id 参数里（样本 note/7697524967416115136）。不排除的话，纯音频作品
+        会被当成一条 0 字节的假视频发出去 —— 实测那条 playwm 地址是 404，
+        改写成 play 之后是 200 + text/plain + 0 字节。
+        """
         urls: list[str] = []
         video = item.get("video") or {}
         for key in ("play_addr", "playAddr", "PlayAddrStruct", "download_addr", "play_addr_h264"):
             if found := cls._first_url(video.get(key)):
+                if unwrap_audio_url(found):
+                    continue  # 这其实是音频，交给 _extract_audio
                 urls.append(cls._no_watermark(found))
         for bitrate in video.get("bit_rate") or []:
             if isinstance(bitrate, dict) and (found := cls._first_url(bitrate.get("play_addr"))):
+                if unwrap_audio_url(found):
+                    continue
                 urls.append(cls._no_watermark(found))
         # 去重保序
         return list(dict.fromkeys(urls))
@@ -311,26 +426,36 @@ class DouyinParser(BaseParser):
                 return value / 1000 if value > 1000 else value
         return 0.0
 
-    def _build_result_from_item(self, item: dict):
+    def _build_result_from_item(self, item: dict, canonical_url: str | None = None):
         author_info = item.get("author") or {}
         avatar = self._first_url(author_info.get("avatar_larger") or author_info.get("avatar_thumb"))
         author = self.create_author(author_info.get("nickname") or "抖音用户", avatar)
+
+        # 规范链接**交给 handler 决定**（`_parse_douyin` 用 URL 里的 ty+vid 拼
+        # /note/ 或 /slides/）。这里原先硬编码 /video/，图文作品会被写成
+        # https://www.douyin.com/video/<note_id> —— 那条链接打不开对应作品。
+        # 只有调用方没给（直接调本方法）时才退回 /video/。
+        url = canonical_url
+        if not url and item.get("aweme_id"):
+            url = f"https://www.douyin.com/video/{item.get('aweme_id')}"
 
         result = self.result(
             title=item.get("desc") or item.get("item_title") or "",
             author=author,
             timestamp=int(item.get("create_time") or 0) or None,
-            url=f"https://www.douyin.com/video/{item.get('aweme_id')}" if item.get("aweme_id") else None,
+            url=url,
         )
 
         image_urls = self._image_urls(item)
         video_urls = self._video_urls(item)
+        audio = self._extract_audio(item)
 
         # **图片优先，与 parse_video 的判定保持一致。**
-        # 图文帖（note / slides）的 item 里也有顶层 video —— 抖音会给图文生成一段
-        # 轮播视频 —— 先判视频会把整条图文作品当成视频，图片全被丢掉。
+        # 图文帖（note / slides）的 item 里也有顶层 video —— 抖音会把音频塞进
+        # 它的 play_addr。先判视频会把整条图文作品当成视频，图片全被丢掉。
         if image_urls:
             result.contents.extend(self.create_images(image_urls))
+            self._attach_audio(result, audio, has_images=True)
         elif video_urls:
             duration = self._duration(item)
             self._add_limit_warning(result, duration)
@@ -339,6 +464,9 @@ class DouyinParser(BaseParser):
             # 没有任何静态图、只有内嵌视频段：这种作品本质就是视频
             for slide_url in slide_videos:
                 result.contents.append(self.create_video(slide_url))
+        elif audio is not None:
+            # 原生纯音频：不依赖配乐开关。
+            self._attach_audio(result, audio, has_images=False)
         else:
             raise ParseException("未从作品中提取到媒体内容")
 

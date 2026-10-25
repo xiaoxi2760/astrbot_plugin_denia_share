@@ -44,6 +44,7 @@ const OVERRIDE_MAP = {
   RENDER_DESC_MAX_LINES: "desc_max_lines",
   RENDER_SHOW_AVATAR: "show_avatar",
   RENDER_SHOW_PLAY_BUTTON: "show_play_button",
+  RENDER_SHOW_AI_SUMMARY: "show_ai_summary",
   RENDER_COVER_FULL_SIZE: "cover_full_size",
   RENDER_GRADIENT_TOP: "gradient_top",
   RENDER_GRADIENT_BOTTOM: "gradient_bottom",
@@ -409,7 +410,7 @@ export function createAppearanceView(ctx) {
     ]);
 
     return card("卡片设计器", "改的是真正发出去的分享卡片，保存后立即生效", [
-      switchField("卡片渲染", "RENDER_ENABLED", "渲染卡片", "纯文本", "关闭后解析结果以纯文本发送，不再生成图片"),
+      switchField("启用卡片渲染", "RENDER_ENABLED", "开启", "关闭", "聊天中需同时选中「卡片」输出才会发送。此开关不影响文本和富媒体。"),
       h("div", { class: "field" }, [
         h("div", { class: "field-label", text: "卡片主题" }),
         themeSeg,
@@ -418,6 +419,13 @@ export function createAppearanceView(ctx) {
         h("div", { class: "field-label", text: "卡片布局" }),
         layoutSeg,
       ]),
+      switchField(
+        "B站 AI 总结",
+        "RENDER_SHOW_AI_SUMMARY",
+        "显示",
+        "隐藏",
+        "沉浸式布局不显示；标准、杂志、信息流布局可显示，没有可用总结时自动隐藏",
+      ),
       numField("卡片宽度", "RENDER_WIDTH", { min: 520, max: 1080, unit: "px（520~1080）" }),
       colorField("自定义强调色", "RENDER_ACCENT_COLOR", "留空=每个平台用自己的品牌色；填后所有卡片统一强调色"),
       signatureGroup,

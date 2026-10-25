@@ -8,6 +8,7 @@ import os
 import re
 import asyncio
 import hashlib
+import shutil
 import time
 from pathlib import Path
 from urllib.parse import urljoin, urlparse
@@ -205,6 +206,23 @@ async def _terminate_process(process: asyncio.subprocess.Process) -> None:
         await process.wait()
     except BaseException:
         logger.debug("回收 ffmpeg 子进程失败", exc_info=True)
+
+
+def ffmpeg_available() -> bool:
+    """本机是否可用 ffmpeg（只看能不能在 PATH 里找到可执行文件）。
+
+    **刻意不做缓存**，包括「缺失」这一侧。缺失结果一旦缓存住，用户中途装好
+    ffmpeg 之后插件仍然会一直判定不可用 —— 而它没有任何「需要重启」的提示，
+    表现为「装完还是不行」，比不检查更难查。
+
+    代价是一次 ``shutil.which`` 的 PATH 扫描，只在**确实要合并音视频**（B站
+    DASH 分离流）时才会走到，非 B站平台与纯图片链路一次都不调用，所以按需
+    实时查询完全负担得起。
+
+    不提供「ffmpeg 路径」配置项：这一项解决不了「PATH 里没有」以外的问题，
+    而绝大多数用户遇到的就是 PATH 里没有。
+    """
+    return shutil.which("ffmpeg") is not None
 
 
 async def exec_ffmpeg_cmd(cmd: list[str]) -> None:

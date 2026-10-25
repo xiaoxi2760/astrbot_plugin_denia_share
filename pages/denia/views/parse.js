@@ -14,6 +14,7 @@ import {
   spinner,
   fmtMs,
 } from "../ui.js";
+import { createDiagnosticsPanel } from '../diagnostics.js';
 
 const THEMES = [
   { value: "", label: "跟随配置" },
@@ -30,6 +31,7 @@ const LAYOUTS = [
 ];
 
 export function createParseView(ctx) {
+  const diagnostics = createDiagnosticsPanel(ctx);
   let container = null;
   let defaults = { theme: "dark", layout: "standard" };
   let overrides = { theme: "", layout: "" };
@@ -85,6 +87,7 @@ export function createParseView(ctx) {
   }
 
   function appendTools() {
+    container.appendChild(diagnostics.node);
     container.appendChild(toolDrawer("shot", "截图工具", "输入网址，单独测试网页截图", renderShotCard()));
     // 老版本后端没有 custom_parsers 接口时 custom 为 null，整卡不渲染
     const customCard = renderCustomParserCard();
@@ -212,6 +215,7 @@ export function createParseView(ctx) {
     } finally {
       busy = false;
       restore();
+      await diagnostics.load();
     }
   }
 
@@ -511,10 +515,12 @@ export function createParseView(ctx) {
       container = node;
       await loadDefaults();
       render();
+      await diagnostics.load();
     },
     async refresh() {
       await loadDefaults();
       render();
+      await diagnostics.load();
     },
     unmount() {},
   };
