@@ -20,6 +20,7 @@ import time
 import asyncio
 import hashlib
 from contextvars import ContextVar
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, AsyncGenerator, Dict
 
@@ -155,6 +156,12 @@ STEAM_PATTERN = re.compile(r"store\.steampowered\.com")
 XIAOHEIHE_PATTERN = re.compile(r"https?://(?:(?:www|api)\.)?xiaoheihe\.cn/", re.I)
 
 URL_PATTERN = re.compile(r"https?://[^\s'\"<>]+")
+
+
+@dataclass
+class _AudioFallbackItem:
+    result: ParseResult
+    path: Path
 
 
 class _EventUrlWrapper:
@@ -1321,7 +1328,10 @@ class DeniaSharePlugin(Star):
 
         # ---- 原始媒体（图片/视频/动图/音频） ----
         if media_on:
-            async for r in self._try_send_media(event, result, on_delivered=on_delivered):
+            async for r in self._try_send_media(
+                event, result, on_delivered=on_delivered,
+                on_failed=lambda: stage('send', 'error', 'send_failed'),
+            ):
                 yield r
 
     async def _audit_for_modes(
@@ -1934,7 +1944,8 @@ class DeniaSharePlugin(Star):
         yield event.chain_result([Comp.Plain("\n".join(lines))])
 
     async def _try_send_media(
-        self, event: AstrMessageEvent, result: ParseResult, *, on_delivered=None
+        self, event: AstrMessageEvent, result: ParseResult, *, on_delivered=None,
+        on_failed=None,
     ):
         """按聚合配置发送富媒体，语音和文件保持独立发送。"""
         pconfig = get_config()
@@ -1942,20 +1953,27 @@ class DeniaSharePlugin(Star):
         _DELIVERY_UNCERTAIN.set(False)
         if not self._is_onebot(event) or pconfig.AGGREGATION_MODE == "none":
             async for parts in self._iter_media_components(result):
-                yield event.chain_result(parts)
+                async for output in self._send_media_item(
+                    event, parts, on_delivered=on_delivered, on_failed=on_failed
+                ):
+                    yield output
             return
 
         messages = [parts async for parts in self._iter_media_components(result)]
         # 只把图片、视频送进转发，避免一段语音或文件使整份图集发送失败。
         eligible = [
             parts for parts in messages
-            if all(isinstance(part, (Comp.Image, Comp.Video)) for part in parts)
+            if not isinstance(parts, _AudioFallbackItem)
+            and all(isinstance(part, (Comp.Image, Comp.Video)) for part in parts)
         ]
         image_count = sum(isinstance(part, Comp.Image) for parts in eligible for part in parts)
         video_count = sum(isinstance(part, Comp.Video) for parts in eligible for part in parts)
         if not eligible or not pconfig.should_aggregate_nodes(image_count, video_count, len(eligible)):
             for parts in messages:
-                yield event.chain_result(parts)
+                async for output in self._send_media_item(
+                    event, parts, on_delivered=on_delivered, on_failed=on_failed
+                ):
+                    yield output
             return
 
         try:
@@ -1971,20 +1989,51 @@ class DeniaSharePlugin(Star):
             _DELIVERY_UNCERTAIN.set(True)
             logger.warning("[denia_share] 合并转发送达状态未知，不自动重发图片视频，继续发送独立音频", exc_info=True)
             for parts in messages:
-                if not all(isinstance(part, (Comp.Image, Comp.Video)) for part in parts):
-                    yield event.chain_result(parts)
+                if isinstance(parts, _AudioFallbackItem) or not all(
+                    isinstance(part, (Comp.Image, Comp.Video)) for part in parts
+                ):
+                    async for output in self._send_media_item(
+                        event, parts, on_delivered=on_delivered, on_failed=on_failed
+                    ):
+                        yield output
             return
         except Exception:
             logger.warning("[denia_share] 合并转发失败，改为逐条发送已选媒体", exc_info=True)
             for parts in messages:
-                yield event.chain_result(parts)
+                async for output in self._send_media_item(
+                    event, parts, on_delivered=on_delivered, on_failed=on_failed
+                ):
+                    yield output
             return
 
         if on_delivered is not None:
             on_delivered()
         for parts in messages:
-            if not all(isinstance(part, (Comp.Image, Comp.Video)) for part in parts):
-                yield event.chain_result(parts)
+            if isinstance(parts, _AudioFallbackItem) or not all(
+                isinstance(part, (Comp.Image, Comp.Video)) for part in parts
+            ):
+                async for output in self._send_media_item(
+                    event, parts, on_delivered=on_delivered, on_failed=on_failed
+                ):
+                    yield output
+
+    async def _send_media_item(
+        self, event: AstrMessageEvent, item, *, on_delivered=None, on_failed=None
+    ):
+        """仅失败兜底模式主动发送，其他媒体仍交给宿主管线。"""
+        if not isinstance(item, _AudioFallbackItem):
+            yield event.chain_result(item)
+            return
+        pconfig = get_config()
+        sent = await self._try_send_audio(
+            event, item.result, item.path, pconfig.MEDIA_RELAY_ENABLED,
+            pconfig.MEDIA_RELAY_CALLBACK_URL, pconfig.MEDIA_RELAY_TTL,
+        )
+        if sent:
+            if on_delivered is not None:
+                on_delivered()
+        elif on_failed is not None:
+            on_failed()
 
     async def _iter_media_components(self, result: ParseResult):
         """构建原始媒体组件，复用下载、缓存和中转规则。
@@ -2054,6 +2103,8 @@ class DeniaSharePlugin(Star):
                     yield [Comp.Video.fromURL(url)]
                 else:
                     yield [Comp.Video.fromFileSystem(str(path))]
+            elif pconfig.AUDIO_SEND_MODE == "voice_fallback_file":
+                yield _AudioFallbackItem(result, path)
             else:
                 yield [await self._build_audio_component(
                     result, path, relay_enabled, callback_base, ttl
@@ -2067,11 +2118,27 @@ class DeniaSharePlugin(Star):
         relay_enabled: bool,
         callback_base: str,
         ttl: int,
-    ):
-        """单独发送一段音频，与媒体聚合共用组件构建。"""
-        yield event.chain_result([await self._build_audio_component(
-            result, path, relay_enabled, callback_base, ttl
-        )])
+    ) -> bool:
+        """优先发送语音，接口失败时仅尝试一次文件兜底。"""
+        for mode in ("voice", "file"):
+            try:
+                component = await self._build_audio_component(
+                    result, path, relay_enabled, callback_base, ttl, mode=mode
+                )
+                sent = await event.send(event.chain_result([component]))
+                if sent is False:
+                    raise RuntimeError("音频发送接口返回失败")
+            except Exception:
+                if mode == "voice":
+                    logger.warning(
+                        "[denia_share] 语音发送失败，尝试音频文件兜底", exc_info=True
+                    )
+                else:
+                    logger.warning("[denia_share] 音频文件兜底发送失败", exc_info=True)
+            else:
+                logger.debug(f"[denia_share] 音频发送接口已接受: mode={mode}")
+                return True
+        return False
 
     async def _build_audio_component(
         self,
@@ -2080,23 +2147,17 @@ class DeniaSharePlugin(Star):
         relay_enabled: bool,
         callback_base: str,
         ttl: int,
+        *,
+        mode: str | None = None,
     ):
-        """按「音频发送方式」发音频，**一次只发一种**。
+        """构建音频组件；显式 mode 用于语音失败后的文件兜底。
 
-        两种形式的**发送链路并不等价**，不能互相兜底：
-
-        - ``voice`` → :class:`Comp.Record`：AstrBot 侧会转 base64，所以不依赖
-          协议端能读到本地路径。
-        - ``file`` → :class:`Comp.File`：**不走**语音的 base64 链路。协议端在
-          另一个容器时读不到这里的路径，所以复用了视频那套「中转 URL / 本地路径」
-          的回退。
-
-        这里刻意**没有**做「语音失败就改发文件」：用户选的是一种形式，
-        悄悄换一种等于替他做了决定，而且会在群里多出一条消息。真发不出去时
-        下载限制已由审计写入已选文本/卡片；协议端发送结果仍由宿主处理。
+        Record 由宿主转 base64；File 沿用媒体中转或共享本地路径，
+        因此文件发送仍需要协议端能够访问音频。
         """
-        pconfig = get_config()
-        if pconfig.AUDIO_SEND_MODE == "file":
+        if mode is None:
+            mode = get_config().AUDIO_SEND_MODE
+        if mode == "file":
             name = _audio_display_name(result, path)
             url = None
             if relay_enabled:
