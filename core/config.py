@@ -416,9 +416,9 @@ CONFIG_META: tuple[dict[str, Any], ...] = (
         "label": "音频发送方式",
         "type": "select",
         "default": "voice",
-        "options": ["voice", "file"],
-        "labels": ["语音条", "音频文件"],
-        "hint": "仅在富媒体开启时生效。语音条由宿主和协议端处理；音频文件保留原格式。每段音频只发送一种形式。",
+        "options": ["voice", "file", "voice_fallback_file"],
+        "labels": ["语音条", "音频文件", "语音条（失败后发送文件）"],
+        "hint": "仅在富媒体开启时生效。音频文件保留原格式；失败兜底仅针对发送接口报错或明确返回失败，无法检测接口成功但客户端未收到的情况。超时也会尝试文件，可能同时收到语音和文件。",
     },
     {
         "key": "SEND_BACKGROUND_MUSIC",
@@ -1541,14 +1541,9 @@ class ParserConfig:
 
     @property
     def AUDIO_SEND_MODE(self) -> str:
-        """音频按哪种形式发出：``voice``（语音条）或 ``file``（音频文件）。
-
-        读侧**必须**走白名单回退：配置文件里的值可能来自 AstrBot 原生面板、
-        手改 JSON 或跨版本残留，而发送层只认这两个字面量。脏值若透下去，
-        就会落进「既不是语音也不是文件」的空档里，那条路没有任何兜底。
-        """
+        """音频发送方式；不支持的配置值沿用默认语音条。"""
         value = str(self._cfg_get("AUDIO_SEND_MODE", "voice") or "").strip()
-        return value if value in ("voice", "file") else "voice"
+        return value if value in ("voice", "file", "voice_fallback_file") else "voice"
 
     @property
     def SEND_BACKGROUND_MUSIC(self) -> bool:

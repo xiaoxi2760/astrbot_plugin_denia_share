@@ -210,11 +210,25 @@ class MusicController:
             # 但**不**经过 _deliver —— 那里会按输出模式补发普通解析卡片。
             await plugin._audit_for_modes(result, media_on=True)
             delivered = False
-            async for output in plugin._try_send_media(event, result):
+            send_failed = False
+
+            def mark_delivered():
+                nonlocal delivered
+                delivered = True
+
+            def mark_failed():
+                nonlocal send_failed
+                send_failed = True
+
+            async for output in plugin._try_send_media(
+                event, result, on_delivered=mark_delivered, on_failed=mark_failed
+            ):
                 delivered = True
                 yield output
             if delivered:
                 await plugin._record_history(result, None, via='command')
+            elif send_failed:
+                yield event.plain_result('这首歌暂时发不出来：语音和音频文件发送均失败，详情见 AstrBot 日志')
             else:
                 # 下载失败/无权限/体积或时长超限都不能沉默：给一句带原因的小提示。
                 yield event.plain_result(f'这首歌暂时发不出来：{self._delivery_reason(result)}')
