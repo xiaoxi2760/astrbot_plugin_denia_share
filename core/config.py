@@ -25,6 +25,10 @@ _HEX_COLOR_RE = re.compile(r"^#[0-9a-fA-F]{6}$")
 # 合并转发模式白名单：读侧只认这三个字面量，脏值一律回退 none（保持直发）
 AGGREGATION_MODES: frozenset[str] = frozenset({"none", "all", "conditional"})
 
+# 插件管理页样式白名单：读侧只认这两个字面量，脏值一律回退 classic。
+# 该值只决定 pages/denia/index.html 启动器加载哪套界面，不参与解析或发送行为。
+WEBUI_STYLES: frozenset[str] = frozenset({"classic", "denia"})
+
 
 def _aggregation_threshold(raw: Any, default: int) -> int:
     """把合并转发阈值读成非负 int。
@@ -40,6 +44,7 @@ def _aggregation_threshold(raw: Any, default: int) -> int:
 
 # 配置分组：展示顺序即此处的顺序，常用在前、折腾在后
 CONFIG_GROUPS: tuple[tuple[str, str], ...] = (
+    ("界面设置", "选择插件管理页面的界面样式，不影响聊天中的卡片"),
     ("解析设置", "日常最常用到的几项"),
     ("权限控制", "谁能触发解析：白名单 / 黑名单"),
     ("B站设置", "B站 Cookie 与下载清晰度"),
@@ -62,8 +67,8 @@ CONFIG_SECTIONS: tuple[dict[str, Any], ...] = (
     {
         "key": "basic",
         "label": "基础",
-        "description": "解析行为、发送策略与访问权限，日常最常改",
-        "groups": ("解析设置", "权限控制"),
+        "description": "界面、解析行为、发送策略与访问权限，日常最常改",
+        "groups": ("界面设置", "解析设置", "权限控制"),
     },
     {
         "key": "platform",
@@ -125,6 +130,19 @@ _PROXY_SWITCH_ITEMS: tuple[dict[str, Any], ...] = tuple(
 )
 
 CONFIG_META: tuple[dict[str, Any], ...] = (
+    {
+        "key": "WEBUI_STYLE",
+        "group": "界面设置",
+        "label": "WebUI 样式",
+        "type": "select",
+        "default": "classic",
+        "options": ["classic", "denia"],
+        "labels": ["经典界面", "达妮娅的泡泡工坊"],
+        "hint": (
+            "保存后宿主会重载插件，刷新页面后生效。只影响插件管理页面，"
+            "不改变聊天里发送的卡片样式；切换失败时可用页面上的「经典界面」恢复入口"
+        ),
+    },
     {"key": "COOKIECLOUD_URL", "group": "CookieCloud", "label": "服务地址", "type": "string", "default": "", "hint": "填写你自建的 CookieCloud 地址，可包含子目录。"},
     {"key": "COOKIECLOUD_UUID", "group": "CookieCloud", "label": "用户密钥 UUID", "type": "string", "default": "", "secret": True, "hint": "与浏览器 CookieCloud 扩展中的用户密钥一致。"},
     {"key": "COOKIECLOUD_PASSWORD", "group": "CookieCloud", "label": "端到端加密密码", "type": "string", "default": "", "secret": True, "hint": "仅在机器人本地解密，不会发送给同步服务器。"},
@@ -186,7 +204,7 @@ CONFIG_META: tuple[dict[str, Any], ...] = (
         "default": "",
         "list": True,
         "list_source": "platforms",
-        "hint": "勾选=禁用该平台，都不勾=全部启用。「总览」页的平台开关改的是同一份（那边点一下立即生效）",
+        "hint": "填写禁用的平台标识，用逗号分隔，例如 bilibili,douyin；留空表示全部启用。经典界面的「总览」也可逐个平台切换，修改的是同一份配置。",
     },
     {
         "key": "VIDEO_DURATION_MAXIMUM",
@@ -1282,6 +1300,19 @@ class ParserConfig:
                 "[denia_share] 配置写入磁盘失败，本次修改只存在于内存，重启后会回滚"
             )
             return False
+
+    # ---------------- 界面 ---------------- #
+
+    @property
+    def WEBUI_STYLE(self) -> str:
+        """管理页面样式：``classic`` / ``denia``。
+
+        和 :attr:`AUDIO_SEND_MODE`、:attr:`AGGREGATION_MODE` 一样走读侧白名单：
+        原生面板、手改 JSON 或旧版本残留都可能给出脏值，透给启动器会让它加载
+        不存在的界面。无法识别的值一律回退 ``classic``，保证管理页始终能打开。
+        """
+        value = str(self._cfg_get("WEBUI_STYLE", "classic") or "").strip().lower()
+        return value if value in WEBUI_STYLES else "classic"
 
     # ---------------- 平台 ---------------- #
 

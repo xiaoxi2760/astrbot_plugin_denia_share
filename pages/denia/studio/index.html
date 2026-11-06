@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>达妮娅的泡泡工坊</title>
+  <link rel="icon" data-shared-resource="brand/logo.png">
+  <link rel="stylesheet" href="./studio.css">
+  <link rel="stylesheet" href="./denia-forms.css">
+  <link rel="stylesheet" href="./workspace.css">
+</head>
+<body>
+  <div class="ambient-form" aria-hidden="true"><i></i><i></i><i></i></div>
+  <a class="skip-link" href="#main">跳到主要内容</a>
+  <header class="topbar">
+    <a class="brand" href="#/workbench" aria-label="达妮娅的泡泡工坊">
+      <img data-shared-resource="brand/logo.png" hidden alt="">
+      <span><strong>达妮娅的泡泡工坊<span class="brand-dot">.</span></strong><small>DENIA BUBBLE WORKSHOP</small></span>
+    </a>
+    <nav class="navigation" aria-label="主导航">
+      <a href="#/workbench" data-nav="workbench">工作台</a>
+      <a href="#/library" data-nav="library">分享记录<span class="nav-badge" id="nav-badge" hidden>0</span></a>
+      <a href="#/studio" data-nav="studio">卡片工坊</a>
+      <a href="#/connections" data-nav="connections">平台与账号</a>
+      <a href="#/settings" data-nav="settings">设置</a>
+    </nav>
+    <div class="header-tools">
+      <span class="status" id="head-status" hidden></span>
+      <button class="icon-button" id="search-button" aria-label="搜索页面或配置（Ctrl K）" title="搜索 · Ctrl K"></button>
+      <button class="icon-button" id="theme-button" aria-label="切换为深色主题" title="切换主题"></button>
+    </div>
+  </header>
+  <main id="main" tabindex="-1"><div class="loading-shell">工坊正在准备中…</div></main>
+  <footer class="page-footer">
+    <span class="footer-denia"><i class="form-mark" aria-hidden="true"></i>达妮娅的泡泡工坊</span>
+    <div class="footer-meta"><span data-connection>连接中…</span><span data-version></span></div>
+    <div class="footer-links"><a data-open-classic href="#" class="quiet-link">打开经典界面 ↗</a><span>DENIA / BUBBLE WORKSHOP</span></div>
+  </footer>
+  <div id="toast" role="status" aria-live="polite"></div>
+  <dialog id="dialog" aria-labelledby="dialog-title"><div id="dialog-content"></div></dialog>
+  <!-- classic 业务组件（分享记录 / 完整设置 / 凭据 / 诊断）的弹窗与提示挂载点 -->
+  <div id="toast-host" class="toast-host" aria-live="polite"></div>
+  <div id="modal-host" class="modal-host" hidden></div>
+</body>
+</html>

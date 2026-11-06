@@ -9,5 +9,18 @@
       "title": "Hope Parser",
       "description": "Overview, manual link parsing, parse-cache management, UI and card appearance customization, and full configuration."
     }
+  },
+  "config": {
+    "界面设置": {
+      "description": "「界面设置」: Choose the WebUI style. Saving reloads the plugin on the host; refresh the page afterwards. This only affects the management page, not the cards sent in chat.",
+      "WEBUI_STYLE": {
+        "description": "WebUI style",
+        "hint": "Saving reloads the plugin on the host; refresh the page afterwards. This only affects the management page, not the cards sent in chat. If the workbench fails, use the classic interface recovery link on the page.",
+        "labels": [
+          "Classic interface",
+          "Denia’s Bubble Workshop"
+        ]
+      }
+    }
   }
 }

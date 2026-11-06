@@ -12,6 +12,7 @@ import { createParseView } from "./views/parse.js";
 import { createCacheView } from "./views/cache.js";
 import { createConfigView } from "./views/config.js";
 import { createAppearanceView } from "./views/appearance.js";
+import { loadSharedResources, applySharedResources } from "../shared-resources.js";
 
 const bridge = window.AstrBotPluginPage;
 const hasBridge = Boolean(bridge && typeof bridge.apiGet === "function");
@@ -351,7 +352,8 @@ async function boot() {
     }
   }
 
-  await loadPrefs(api);
+  await Promise.all([loadPrefs(api), loadSharedResources(api)]);
+  applySharedResources();
 
   if (!devMode) ctx.setConnection(true, "已连接");
   // 尊重地址栏里的 hash：支持深链与刷新后停在原页面

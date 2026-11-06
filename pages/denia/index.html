@@ -4,74 +4,29 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>希望解析器</title>
-    <link rel="stylesheet" href="./style.css" />
+    <!--
+      稳定入口：本页只负责按 WEBUI_STYLE 选择界面，不承载任何业务布局。
+      经典界面完整保存在classic/index.html；达妮娅的泡泡工坊在 studio/index.html。两套界面的 HTML/CSS/JS 都按需加载，互不预先执行。
+    -->
+    <link rel="stylesheet" href="./bootstrap.css" />
   </head>
   <body>
-    <div class="bg-aurora" aria-hidden="true"></div>
-    <div class="app">
-      <aside class="rail">
-        <div class="rail-brand">
-          <!-- 品牌位直接指向本页目录下的 logo.png（与插件根目录那张是同一张图）。
-               页面资源只能在本页目录内，所以这里放了一份副本；自检会校验两者逐字节一致。 -->
-          <img class="rail-logo" src="./logo.png" alt="希望解析器" />
-          <span class="rail-brand-text">
-            <strong>希望解析器</strong>
-            <em id="brand-version">—</em>
-          </span>
-        </div>
-        <nav class="rail-nav" id="rail-nav">
-          <button class="rail-item is-active" data-view="overview" type="button">
-            <span class="rail-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="8" height="10" rx="2"/><rect x="13" y="3" width="8" height="6" rx="2"/><rect x="13" y="11" width="8" height="10" rx="2"/><rect x="3" y="15" width="8" height="6" rx="2"/></svg></span>
-            <span class="rail-label">总览</span>
-          </button>
-          <button class="rail-item" data-view="parse" type="button">
-            <span class="rail-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7"/><path d="M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7"/></svg></span>
-            <span class="rail-label">解析</span>
-          </button>
-          <button class="rail-item" data-view="cache" type="button">
-            <span class="rail-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v14c0 1.7 3.6 3 8 3s8-1.3 8-3V5"/><path d="M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/></svg></span>
-            <span class="rail-label">缓存</span>
-            <span class="rail-badge" id="cache-badge" hidden>0</span>
-          </button>
-          <button class="rail-item" data-view="appearance" type="button">
-            <span class="rail-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="13.5" cy="6.5" r="0.8"/><circle cx="17.5" cy="10.5" r="0.8"/><circle cx="8.5" cy="7.5" r="0.8"/><circle cx="6.5" cy="12.5" r="0.8"/><path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.9 0 1.7-.8 1.7-1.7 0-.4-.2-.8-.4-1.2-.3-.3-.4-.7-.4-1.2 0-.9.8-1.7 1.7-1.7h2c3 0 5.4-2.5 5.4-5.5C22 6 17.5 2 12 2z"/></svg></span>
-            <span class="rail-label">外观</span>
-          </button>
-          <button class="rail-item" data-view="config" type="button">
-            <span class="rail-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0-.3-1.9 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9l-.1-.1a2 2 0 1 1 2.8 2.8l.1.1a1.7 1.7 0 0 0-.3 1.9v.1a1.7 1.7 0 0 0 1.5 1h.1a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg></span>
-            <span class="rail-label">配置</span>
-          </button>
-        </nav>
-        <div class="rail-foot" id="rail-foot">
-          <span class="dot" id="rail-dot"></span>
-          <span id="rail-status">连接中…</span>
-        </div>
-      </aside>
-
-      <main class="stage">
-        <header class="stage-head">
-          <div class="stage-title">
-            <h1 id="view-title">总览</h1>
-            <p id="view-sub">插件运行状态一览</p>
-          </div>
-          <!-- 页头彩蛋文案：轮换逻辑在 banner.js，样式在 style.css 末尾。
-               放在 .stage-head 静态区 —— #stage-body 每次刷新都会被 clear() 重建，
-               放里面一点「刷新」就没了。纯展示：aria-hidden、无事件，不抢焦点。 -->
-          <div class="head-banner" id="head-banner" role="presentation" aria-hidden="true">
-            <span class="head-banner-line" id="banner-line"></span>
-          </div>
-          <div class="stage-actions">
-            <span class="pill" id="head-pill" hidden></span>
-            <button class="btn" id="btn-reload" type="button">刷新</button>
-          </div>
-        </header>
-        <div class="stage-body" id="stage-body"></div>
-      </main>
+    <div id="denia-boot" class="denia-boot" role="status" aria-live="polite">
+      <div class="denia-boot-card">
+        <span class="denia-boot-mark" aria-hidden="true"></span>
+        <p class="denia-boot-title">希望解析器</p>
+        <p class="denia-boot-text">正在载入管理界面…</p>
+        <span class="denia-boot-spinner" aria-hidden="true"></span>
+        <p class="denia-boot-fallback">
+          打不开？<a id="denia-boot-recovery" href="?ui=classic">直接进入经典界面</a>
+        </p>
+      </div>
     </div>
-
-    <div class="toast-host" id="toast-host" aria-live="polite"></div>
-    <div class="modal-host" id="modal-host" hidden></div>
-
-    <script type="module" src="./app.js"></script>
+    <noscript>
+      <p class="denia-boot-noscript">
+        管理页面需要 JavaScript。请在浏览器中启用后刷新；如果仍然无法打开，请检查插件是否已启用。
+      </p>
+    </noscript>
+    <script type="module" src="./bootstrap.js"></script>
   </body>
 </html>

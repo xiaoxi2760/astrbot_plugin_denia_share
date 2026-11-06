@@ -1770,13 +1770,12 @@ class DeniaSharePlugin(Star):
         return ParseResult(
             platform=platform_of(PlatformEnum.BILIBILI),
             author=Author(
-                name="希望示例频道",
+                name="达妮娅 · 样例",
                 avatar=PathTask(_static(avatar_path)),
-                description="本卡片为离线示例，用于预览外观效果",
+                description="这是一张用于预览的样例卡片",
             ),
-            title="示例：全新外观设计器效果预览",
-            text="这是一条用于预览的示例简介。调整左侧的主题、布局、强调色、水印等参数，"
-                 "卡片会立刻按新外观重新渲染，无需发送任何真实链接。",
+            title="先看看卡片的样子",
+            text="这是预览用的样例。颜色和版式，慢慢挑就好。",
             timestamp=1760000000,
             url="https://www.bilibili.com/video/BV1uth56uEz3",
             contents=[video],
@@ -1784,7 +1783,7 @@ class DeniaSharePlugin(Star):
                 "content_type": "视频",
                 "stats_line": "👍 12.3万 🪙 3.4万 ⭐ 5.6万 👀 210.5万",
                 "duration": "05:09",
-                "ai_summary": "这条离线示例展示了封面、作者和播放信息的排列。此摘要仅用于预览开关效果，不代表真实视频内容。",
+                "ai_summary": "样例摘要：这里展示摘要文字的排版效果，不代表真实视频内容。",
                 "ai_summary_status": "ok",
             },
         )

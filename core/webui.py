@@ -45,6 +45,7 @@ from .media_utils import clear_cache_dir, cleanup_cache_dir, is_docker_environme
 from .music.models import MusicError
 from .relay import resolve_callback_base
 from .screenshot import is_probably_screenshotable
+from .shared_resources import load_shared_resources
 # 注意：``json_response`` / ``error_response`` **故意不在这里别名导入** ——
 # 本文件下方已经定义了同名薄封装 ``_json_response`` / ``_error``（它们才是
 # 所有调用点实际用的东西）。先前的 ``error_response as _error`` 会被同名函数
@@ -279,6 +280,7 @@ class WebUIApi:
     def register(self) -> None:
         context = self.plugin.context
         routes: tuple[tuple[str, Callable[..., Any], tuple[str, ...], str], ...] = (
+            ("/assets", self.assets, ("GET",), "共享静态资源"),
             ("/overview", self.overview, ("GET",), "插件总览与状态"),
             ("/config", self.get_config, ("GET",), "读取全部配置项"),
             ("/config", self.save_config, ("POST",), "保存配置项"),
@@ -360,6 +362,11 @@ class WebUIApi:
         return timed
 
     # ==================== 总览 ==================== #
+
+    async def assets(self):
+        """返回固定白名单中的共享 WebUI 图片资源。"""
+        payload = await asyncio.to_thread(load_shared_resources)
+        return _json_response(payload)
 
     async def overview(self):
         plugin = self.plugin
