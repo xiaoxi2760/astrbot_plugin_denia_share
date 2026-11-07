@@ -819,7 +819,9 @@ class ConfirmController:
         self._config_snapshot = snap
         if prev is None:
             return
-        if snap["mode"] != "confirm" or not snap["media"] or not (snap["text"] or snap["card"]):
+        # 确认提示是独立控制消息，不依赖文本/卡片渠道；只有退出 confirm 模式
+        # 或关闭富媒体才会让 pending 不再可信。
+        if snap["mode"] != "confirm" or not snap["media"]:
             self.invalidate_all("output")
             return
         if (snap["size"], snap["duration"]) != (prev["size"], prev["duration"]):
@@ -940,7 +942,8 @@ class ConfirmController:
         cache_key: str,
         searched: Any,
     ) -> AsyncGenerator[Any, None]:
-        """登记 offer、渲染预览卡片（仅封面），并把媒体信息与短编号发出去。
+        """登记 offer、渲染预览卡片（仅封面）；确认提示作为**独立**普通文本消息
+        发送（媒体信息 / 编号 / TTL / 指令），不并入作品文本、不进入卡片投影。
 
         源视频 / 音频 / 整套图集在确认前一次都不 ``get()``；急式解析器或已
         开始下载的结果明确拒绝，**不静默回退**自动模式。
@@ -959,10 +962,10 @@ class ConfirmController:
             async for r in self._plugin._deliver(event, result, cache_key):
                 yield r
             return
-        if not modes["media"] or not (modes["text"] or modes["card_effective"]):
-            yield event.plain_result(
-                "❌ 确认下载需要开启富媒体输出，并用文本或卡片展示确认信息。"
-            )
+        # 全输出关闭由 main 既有入口短路；这里只需富媒体即可登记 offer，
+        # 确认提示独立发送，用户只开富媒体也能收到并等待确认。
+        if not modes["media"]:
+            yield event.plain_result("❌ 确认下载需要开启富媒体输出。")
             return
 
         from .base_parser import apply_result_image_limit
@@ -1008,8 +1011,9 @@ class ConfirmController:
         offer, is_new = created
 
         preview = self.build_preview(result)
-        lines = self._info_lines(offer)
-        preview.extra.setdefault("limit_warnings", []).extend(lines)
+        # 卡片投影只保留真实平台限制提示；确认操作信息（媒体描述 / 编号 /
+        # TTL / 指令）统一放进下方独立发送的确认提示，不进卡片。
+        preview.extra.setdefault("limit_warnings", []).extend(offer.limits or [])
         text_on = bool(modes["text"])
         card_on = bool(modes["card_effective"])
         preview_path = None
@@ -1029,16 +1033,18 @@ class ConfirmController:
                 offer.history_id = record.id
                 await self._update_history(offer, result, "pending", desc)
 
-        card_sent = False
         if card_on and preview_path is not None:
-            card_sent = await self._plugin._delivery.send_image(event, preview_path)
-        text = "\n".join(build_concise_text(preview)) if text_on else ""
-        if text:
-            yield event.plain_result(text)
-        if not card_sent and not text:
-            if is_new:
-                self._drop(offer.id)
-            return
+            await self._plugin._delivery.send_image(event, preview_path)
+        # 普通文本：仍按原有精简文字发送作品内容，与确认提示严格分开。
+        if text_on:
+            text = "\n".join(build_concise_text(preview))
+            if text:
+                yield event.plain_result(text)
+        # 确认提示是用户明确要求的控制消息：独立发送一次；不并入作品文本，
+        # 不因卡片渲染/发送失败或普通文本关闭而省略，也不因这些失败丢弃新 offer。
+        title = (offer.title or "").strip()
+        confirm_lines = ([f"标题：{title}"] if title else []) + self._info_lines(offer)
+        yield event.plain_result("\n".join(confirm_lines))
 
     # ==================== handle：确认后下载并立即发送 ====================
 
