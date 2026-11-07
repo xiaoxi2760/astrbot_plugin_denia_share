@@ -15,10 +15,27 @@ from astrbot.api import logger
 #: 惰性工厂的返回值类型：协程、已调度的 Task，或直接给出的路径。
 _LazySource = Coroutine[Any, Any, Path] | asyncio.Task[Path] | Path
 
-#: 临时失败时**最多重建几次**下载（不含首次，即最多共 3 次尝试）。
+#: 临时失败时**最多重建几次**下载（不含首次，即默认共 3 次尝试）。
 #:
 #: 必须是有限次数：重试是为了盖住「一次网络抖动」，不是常驻重试循环。
+#: 这是配置项 ``DOWNLOAD_RETRY_ATTEMPTS``（默认 2，0～5）的兜底值——
+#: 实际生效值每次重试判定时实时读取（见 :func:`_retry_attempts`），
+#: WebUI 保存后无需重建任务即对后续失败生效。
 MAX_TRANSIENT_ATTEMPTS = 2
+
+
+def _retry_attempts() -> int:
+    """当前下载重试次数（= 首次失败后额外重建次数）。
+
+    config 未初始化（旧测试桩）或读到脏值时回退模块默认 :data:`MAX_TRANSIENT_ATTEMPTS`，
+    绝不在 import / 判定路径上抛异常。
+    """
+    try:
+        from .config import get_config
+        value = int(getattr(get_config(), "DOWNLOAD_RETRY_ATTEMPTS", MAX_TRANSIENT_ATTEMPTS))
+    except Exception:
+        return MAX_TRANSIENT_ATTEMPTS
+    return max(0, value)
 
 
 class PathTask:
@@ -169,7 +186,7 @@ class PathTask:
                     self._attempts += 1
                     logger.info(
                         f"[denia_share] 临时失败，重建下载任务"
-                        f"（第 {self._attempts}/{MAX_TRANSIENT_ATTEMPTS} 次）| "
+                        f"（第 {self._attempts}/{_retry_attempts()} 次）| "
                         f"{type(exc).__name__}",
                     )
 
@@ -231,13 +248,16 @@ class PathTask:
     def _should_retry(self, exc: Exception) -> bool:
         """临时失败 + 有工厂 + 未超次数 ⇒ 可以重建一次。
 
+        次数实时读配置（``DOWNLOAD_RETRY_ATTEMPTS``，未初始化回退 2），
+        含义不变：**首次失败之后的额外重建次数**，0 表示不重试。
+
         ``_factory is None`` 覆盖的是急式构造的**一次性**协程 / Task：它们只能
         await 一次，await 完就是终态，重建只会凭空造一个新协程（等于重复下载
         一次还可能下出半个文件）。这类只能把失败如实抛出去，由调用方淘汰缓存。
         """
         if self._factory is None:
             return False
-        if self._attempts >= MAX_TRANSIENT_ATTEMPTS:
+        if self._attempts >= _retry_attempts():
             return False
         return self._is_transient(exc)
 

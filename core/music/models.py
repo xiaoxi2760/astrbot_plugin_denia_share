@@ -49,12 +49,19 @@ class PlayURL:
 
     ``duration`` 是「实际能播放的秒数」，拿不到完整时长时宁可给 0 也不要谎报；
     ``preview`` 标记试听片段，调用方据此决定是否提示用户。
+
+    ``quality`` / ``size`` 是**可选的媒体描述字段**：provider 只在接口确实
+    返回了对应数据时才填（如网易云 ``br``/``size``、QQ音乐 ``filename`` 前缀
+    与 ``midurlinfo.size``）；拿不到就保持空串 / ``None``，不猜、不编 0。
+    供确认下载预览的 ``AudioContent.info_loader`` 展示音质与大小。
     """
 
     url: str = ""
     duration: float = 0.0
     preview: bool = False
     message: str = ""
+    quality: str = ""
+    size: int | None = None
 
 
 class MusicError(Exception):

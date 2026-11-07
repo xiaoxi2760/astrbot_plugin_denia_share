@@ -45,6 +45,10 @@ from .media_utils import clear_cache_dir, cleanup_cache_dir, is_docker_environme
 from .music.models import MusicError
 from .relay import resolve_callback_base
 from .screenshot import is_probably_screenshotable
+from .history_download import (
+    SourceFilesUnavailable, source_files, download_info, build_media_export,
+)
+from .base_parser import apply_result_image_limit
 # 注意：``json_response`` / ``error_response`` **故意不在这里别名导入** ——
 # 本文件下方已经定义了同名薄封装 ``_json_response`` / ``_error``（它们才是
 # 所有调用点实际用的东西）。先前的 ``error_response as _error`` 会被同名函数
@@ -309,6 +313,8 @@ class WebUIApi:
             ("/cache/cleanup", self.cleanup_cache, ("POST",), "按过期时间清理缓存文件"),
             ("/cache/thumbnail", self.cache_thumbnail, ("GET",), "解析记录卡片缩略图"),
             ("/cache/download", self.cache_download, ("GET",), "下载解析记录卡片原图"),
+            ("/cache/media", self.cache_media_info, ("GET",), "源文件下载信息"),
+            ("/cache/media/download", self.cache_media_download, ("GET",), "下载解析记录源文件"),
             ("/bili/status", self.bili_status, ("GET",), "B站登录状态"),
             ("/bili/qrcode", self.bili_qrcode, ("POST",), "获取B站登录二维码"),
             ("/bili/qrcode/status", self.bili_qrcode_status, ("GET",), "B站扫码状态"),
@@ -812,7 +818,7 @@ class WebUIApi:
         try:
             diagnostic.stage('parse', 'running')
             keyword, searched = parser.search_url(url)
-            result = await parser.parse(keyword, searched)
+            result = apply_result_image_limit(await parser.parse(keyword, searched))
             diagnostic.stage('parse', 'ok')
         except IgnoreException as exc:
             diagnostic.stage('parse', 'skipped', 'skipped')
@@ -1253,11 +1259,9 @@ class WebUIApi:
                     target = _safe_under(cache_dir, Path(record.card_file))
                     card_exists = bool(target and target.is_file())
                 data["card_exists"] = card_exists
-                data["media_existing"] = sum(
-                    1
-                    for name in record.media_files
-                    if (target := _safe_under(cache_dir, Path(name))) and target.is_file()
-                )
+                sources, missing = source_files(cache_dir, data)
+                data["media_existing"] = len(sources)
+                data["media_missing"] = missing
                 assembled.append(data)
             return assembled
 
@@ -1398,6 +1402,51 @@ class WebUIApi:
             filename=safe_name,
             content_type="image/png" if path.suffix.lower() == ".png" else None,
         )
+
+    async def cache_media_info(self):
+        record = await self._record_or_error()
+        if not isinstance(record, dict):
+            return record
+        try:
+            info = await asyncio.to_thread(download_info, self.plugin.cache_dir, record)
+        except SourceFilesUnavailable as exc:
+            return _error(str(exc), 404)
+        return _json_response(info)
+
+    async def cache_media_download(self):
+        record = await self._record_or_error()
+        if not isinstance(record, dict):
+            return record
+        force_archive = query_arg("archive") == "1"
+        task = asyncio.create_task(asyncio.to_thread(
+            build_media_export, self.plugin.cache_dir, record, force_archive=force_archive,
+        ))
+        try:
+            exported = await asyncio.shield(task)
+        except asyncio.CancelledError:
+            def discard(done):
+                try:
+                    done.result().close()
+                except Exception:
+                    pass
+            task.add_done_callback(discard)
+            raise
+        except SourceFilesUnavailable as exc:
+            return _error(str(exc), 404)
+        except OSError:
+            logger.warning("[denia_share] 源文件打包失败", exc_info=True)
+            return _error("源文件可能已被清理，或临时目录空间不足，请刷新后重试", 409)
+        try:
+            response = file_response(
+                exported.path, filename=exported.filename,
+                content_type="application/zip" if exported.archive else None,
+                on_close=exported.close if exported.archive else None,
+            )
+            from inspect import isawaitable
+            return await response if isawaitable(response) else response
+        except BaseException:
+            exported.close()
+            raise
 
     async def _record_or_error(self):
         """按 id 取记录；出错时直接返回响应对象。"""

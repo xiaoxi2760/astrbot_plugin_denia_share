@@ -396,7 +396,7 @@ export function createConfigView(ctx) {
   /* ---------------- 分组卡片（第二级） ---------------- */
 
   function renderGroup(group, items) {
-    const isCollapsed = collapsed.has(group.name);
+    const isCollapsed = collapsed.has(group.name) && !filter;
     const dirtyCount = group.keys.filter(hasDraft).length;
     const section = meta.sections.find((s) => s.groups.includes(group.name));
 

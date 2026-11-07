@@ -9,22 +9,15 @@ Steam 历史最低价需配置 ITAD_API_KEY（免费申请），未配置时只�
 - astrbot_plugin_rika_share（MIT）：解析框架 / 卡片渲染 / B站 / 微博 / 小红书 / AcFun / NGA
 - Johnserf-Seed/f2（Apache-2.0）：抖音 a_bogus 签名，见 core/parsers/douyin/sign.py
 
-有意不实现的能力：LLM 文本翻译、视频仅发送封面。
+支持按需先发封面卡片，确认后下载并发送源媒体。
 """
 
 import os
 import re
-import io
 import json
-import time
 import asyncio
-import hashlib
-from contextvars import ContextVar
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, AsyncGenerator, Dict
-
-_DELIVERY_UNCERTAIN = ContextVar("denia_delivery_uncertain", default=False)
 
 import aiohttp
 import httpx
@@ -44,15 +37,17 @@ from .core.config import init_config, get_config, verify_schema_alignment
 from .core.download import StreamDownloader
 from .core.link_dedup import HINT, PROCEED, SILENT, LinkDedup
 from .core.data import (
-    ParseResult, ImageContent, VideoContent, AudioContent, Author, platform_of,
-    build_concise_text,
+    ParseResult, ImageContent, VideoContent, Author, platform_of,
 )
 from .core.history import HistoryStore, ParseRecord
 from .core.permissions import is_allowed
-from .core.relay import register_file
 from .core.constants import (
     PLATFORM_DISPLAY_NAMES, PlatformEnum, is_custom_platform, platform_meta,
 )
+from .core.result_cache import ResultCache
+from .core.delivery import DeliveryService, _DELIVERY_UNCERTAIN
+from .core.confirm_download import ConfirmController
+from .core.bili_login import BiliLoginManager
 # 版本号只认 __init__.py 那一处：register 装饰器直接读它，
 # 不用再在装饰器里手写一遍版本字符串（以前改版本要同时改三处，漏一处就版本不一致）
 from . import __version__
@@ -79,66 +74,10 @@ from .core.custom_parsers import (
 
 PLUGIN_NAME = "astrbot_plugin_denia_share"
 
-# ========== B站扫码登录 API ==========
-BILI_QR_GENERATE_URL = "https://passport.bilibili.com/x/passport-login/web/qrcode/generate"
-BILI_QR_POLL_URL = "https://passport.bilibili.com/x/passport-login/web/qrcode/poll"
-QR_CODE_SCANNED = 86090
-QR_CODE_EXPIRED = 86038
-QR_CODE_SUCCESS = 0
-QR_CODE_EXPIRE_TIME = 180
-POLL_INTERVAL = 5
-
-# 登录状态在任务结束后还要留一会儿：WebUI 是**轮询**读取的，任务一结束就删，
-# 最后一轮会拿到「登录任务不存在」而不是「登录成功」。
-LOGIN_STATE_TTL = 300
-# 状态字典的条数上限。WebUI 每点一次「获取二维码」都是一个随机 task_id，
-# 原先只从 _bili_login_tasks 里 pop，状态永远留着 —— 点得越多字典越长。
-LOGIN_STATE_MAX = 32
-
-# 解析结果内存缓存的条数上限。`_result_cache` 原先只在「清理循环 / 切换缓存目录 /
-# 手动清空缓存」三处 clear，而清理循环在 CACHE_TTL_HOURS=0 时根本不启动 ——
-# 也就是说那种部署下它永不回收。加个条数上限兜底，与 TTL 无关。
-MAX_RESULT_CACHE_ENTRIES = 128
-
-# 渲染索引（cache_key -> 卡片路径）的条数上限。
-#
-# `_result_cache` 有 TTL、有条数上限，而 `_render_cache` 原先**两者都没有**：
-# 磁盘卡片按 CACHE_TTL_HOURS 清理时，渲染索引不会被回收（CACHE_TTL_HOURS=0
-# 时清理循环根本不启动），于是处理过的每个不同链接都会在索引里留一条，
-# 无界增长。它只是「哪张卡片图在磁盘哪个位置」的记忆，条数少了的代价只是
-# 重新渲染一次，不会丢内容 —— 与磁盘保留策略分开管。
-MAX_RENDER_CACHE_ENTRIES = 128
-
-
 def _get_plugin_data_dir() -> Path:
     from astrbot.core.utils.astrbot_path import get_astrbot_data_path
 
     return Path(get_astrbot_data_path()) / "plugin_data" / PLUGIN_NAME
-
-
-#: 音频文件名里需要剔除的字符（路径分隔符 + 各家文件系统的保留字符）。
-#: Windows 那几个（<>:"/\|?*）在聊天软件里同样不该出现 —— 收件人一存盘就报错。
-_UNSAFE_FILENAME_CHARS = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
-
-#: 兜底文件名：标题被清洗成空串（全是表情、全是标点）时用它。
-_FALLBACK_AUDIO_NAME = "音频"
-
-
-def _audio_display_name(result: ParseResult, path: Path) -> str:
-    """给「音频文件」模式起一个人类可读的名字，**后缀按真实文件走**。
-
-    下载侧的缓存名是 URL 哈希（``<md5>.m4s``），直接当附件名发出去，用户在
-    QQ 里看到的就是一串十六进制。这里换成「标题 + 真实后缀」，但只换**主名**：
-    后缀必须来自磁盘上的真实文件，不能拿标题去拼 —— 那是编造格式。
-    """
-    suffix = path.suffix  # 含点；认不出就是空串，那就不加后缀，绝不瞎补 .mp3
-    title = (getattr(result, "title", "") or "").strip()
-    cleaned = _UNSAFE_FILENAME_CHARS.sub("_", title).strip(" .")
-    if not cleaned:
-        cleaned = _FALLBACK_AUDIO_NAME
-    # 留出后缀的位置，避免标题太长时把扩展名挤掉。
-    max_stem = max(1, 120 - len(suffix))
-    return f"{cleaned[:max_stem]}{suffix}"
 
 
 # ========== URL 匹配模式 ==========
@@ -157,11 +96,8 @@ XIAOHEIHE_PATTERN = re.compile(r"https?://(?:(?:www|api)\.)?xiaoheihe\.cn/", re.
 
 URL_PATTERN = re.compile(r"https?://[^\s'\"<>]+")
 
-
-@dataclass
-class _AudioFallbackItem:
-    result: ParseResult
-    path: Path
+#: 确认下载：严格匹配「确认下载」或「确认下载 <短编号>」，不吞普通聊天。
+CONFIRM_DOWNLOAD_PATTERN = re.compile(r"^确认下载(?:\s+([0-9A-Za-z]{1,8}))?$")
 
 
 class _EventUrlWrapper:
@@ -185,13 +121,53 @@ class _EventUrlWrapper:
 )
 class DeniaSharePlugin(Star):
 
+    # ==================== 组合服务（懒加载） ====================
+    #
+    # 三块实现已按职责抽到 core/ 下的独立服务里（core/delivery.py /
+    # core/result_cache.py / core/bili_login.py）。插件保留同名薄委托方法与
+    # 状态属性，WebUI / music controller / credentials / 既有测试照旧引用。
+    # 这里做懒加载：测试用 object.__new__ 建桩、不跑 __init__ 也能拿到服务。
+
+    @property
+    def _delivery(self) -> DeliveryService:
+        svc = getattr(self, "_delivery_service", None)
+        if svc is None:
+            svc = DeliveryService(self)
+            self._delivery_service = svc
+        return svc
+
+    @property
+    def _caches(self) -> ResultCache:
+        svc = getattr(self, "_cache_service", None)
+        if svc is None:
+            svc = ResultCache()
+            svc._result_cache = getattr(self, "_result_cache", svc._result_cache)
+            svc._render_cache = getattr(self, "_render_cache", svc._render_cache)
+            self._result_cache = svc._result_cache
+            self._render_cache = svc._render_cache
+            self._cache_service = svc
+        return svc
+
+    @property
+    def _bili_login(self) -> BiliLoginManager:
+        mgr = getattr(self, "_bili_login_manager", None)
+        if mgr is None:
+            mgr = BiliLoginManager(self)
+            self._bili_login_manager = mgr
+        return mgr
+
+    @property
+    def _confirm(self) -> ConfirmController:
+        controller = getattr(self, "_confirm_controller", None)
+        if controller is None:
+            controller = ConfirmController(self)
+            self._confirm_controller = controller
+        return controller
+
     @staticmethod
     def _is_onebot(event: AstrMessageEvent) -> bool:
         """合并转发（Comp.Nodes）是 OneBot v11 独有特性。"""
-        try:
-            return "aiocqhttp" in event.get_platform_name().lower()
-        except Exception:
-            return False
+        return DeliveryService.is_onebot(event)
 
     @staticmethod
     def _fallback_cache_dir(data_dir: Path) -> tuple[Path, str]:
@@ -326,12 +302,16 @@ class DeniaSharePlugin(Star):
             logger.warning("旧版配置迁移失败，将使用兼容回退读取", exc_info=True)
 
         # 直连下载器：常驻。代理下载器按需懒建（见 _downloader_for）——
-        # 代理绑定在 httpx 连接池上没法按请求切换，分解析器代理靠两个实例实现
+        # 代理绑定在 httpx 连接池上没法按请求切换，分解析器代理靠两个实例实现。
+        # 并发闸门直连 / 代理各池，各自带上配置的并发值（构造时读死，热更新
+        # 走 apply_runtime_config 的 reconfigure 请求重建）。
         self.downloader = StreamDownloader(
             self.cache_dir,
             proxies=None,
             max_size_mb=pconfig.VIDEO_SIZE_MAXIMUM_MB,
             verify_ssl=pconfig.HTTP_VERIFY_SSL,
+            image_concurrency=pconfig.DOWNLOAD_IMAGE_CONCURRENCY,
+            media_concurrency=pconfig.DOWNLOAD_MEDIA_CONCURRENCY,
         )
         self._proxy_downloader: StreamDownloader | None = None
         self.disabled_platforms = pconfig.DISABLED_PLATFORMS
@@ -345,9 +325,12 @@ class DeniaSharePlugin(Star):
         # 平台（文件被删/改名，或新版本加载失败）摘掉 —— 见 _init_custom_parsers。
         self._custom_parser_keys: set[str] = set()
         self._init_parsers()
-        # 存 (写入时刻, 结果) —— 时刻是给「重复解析间隔」用的，见 _get_cached_result
-        self._result_cache: dict[str, tuple[float, ParseResult]] = {}
-        self._render_cache: dict[str, Path] = {}
+        # 结果/渲染缓存由 core/result_cache.py 的 ResultCache 服务统一管理；
+        # 这里把服务持有的两本字典以同名属性暴露给既有调用方（webui / 生命周期 /
+        # 测试），它们是**同一对象**，.clear() 等直接操作会同步到服务。
+        self._cache_service = ResultCache()
+        self._result_cache = self._cache_service._result_cache
+        self._render_cache = self._cache_service._render_cache
         #: 本次媒体投递是否落在「送达未知」（合并转发回执超时/断连）。
         #: 见 _process_url：未知时保留去重窗口但不记成功历史。
         # 同群重复链接去重：只解析第一个，后来者不解析也不收卡片（见 core/link_dedup）
@@ -372,7 +355,13 @@ class DeniaSharePlugin(Star):
         self._bili_cookie_file = self._bili_data_dir / "bili_cookie.json"
 
         # ========== 解析记录（WebUI「缓存」页的数据源） ==========
-        self.history = HistoryStore(data_dir / "history.jsonl")
+        # 容量取配置的 HISTORY_MAX_RECORDS，保存后由 apply_runtime_config 热同步。
+        self.history = HistoryStore(
+            data_dir / "history.jsonl", max_records=pconfig.HISTORY_MAX_RECORDS
+        )
+        # 确认下载状态机（模式为 auto 时完全不参与解析链路）。
+        self._confirm_controller = ConfirmController(self)
+        self._confirm.refresh_config()
 
         self._check_schema_alignment()
         self._register_webui()
@@ -445,6 +434,8 @@ class DeniaSharePlugin(Star):
                 proxies=pconfig.PROXY or None,
                 max_size_mb=pconfig.VIDEO_SIZE_MAXIMUM_MB,
                 verify_ssl=pconfig.HTTP_VERIFY_SSL,
+                image_concurrency=pconfig.DOWNLOAD_IMAGE_CONCURRENCY,
+                media_concurrency=pconfig.DOWNLOAD_MEDIA_CONCURRENCY,
             )
             logger.info(
                 f"[denia_share] 已创建代理下载器（{pconfig.PROXY}），"
@@ -881,6 +872,64 @@ class DeniaSharePlugin(Star):
             # 兼容停止标记存放于 result 的宿主版本：yield 可能替换 result。
             event.stop_event()
 
+    # ==================== 确认下载入口 ====================
+
+    @filter.command("确认下载")
+    async def confirm_download_command(self, event: AstrMessageEvent):
+        """确认下载：下载并立即发送待确认的源媒体"""
+        if not self._claim_confirm_command(event):
+            return
+        async for r in self._confirm_entry(event):
+            yield r
+
+    @filter.regex(CONFIRM_DOWNLOAD_PATTERN)
+    async def confirm_download_regex(self, event: AstrMessageEvent, matched: re.Match | None = None):
+        """确认下载（无前缀）：确认下载 [短编号]"""
+        if not self._claim_confirm_command(event):
+            return
+        async for r in self._confirm_entry(event):
+            yield r
+
+    def _claim_confirm_command(self, event: AstrMessageEvent) -> bool:
+        """同一条消息同时命中 command + regex 时只处理一次（同步抢占）。"""
+        try:
+            if event.get_extra("_denia_confirm_handled"):
+                return False
+            event.set_extra("_denia_confirm_handled", True)
+            return True
+        except Exception:
+            flag = getattr(event, "_denia_confirm_handled", False)
+            if flag:
+                return False
+            event._denia_confirm_handled = True
+            return True
+
+    async def _confirm_entry(self, event: AstrMessageEvent):
+        try:
+            text = (event.message_str or "").strip()
+        except Exception:
+            return
+        match = CONFIRM_DOWNLOAD_PATTERN.match(text)
+        if match is None:
+            return
+        event.stop_event()
+        try:
+            try:
+                event.should_call_llm(False)
+            except Exception:
+                pass
+            async for r in self._confirm.handle(event, match.group(1)):
+                yield r
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("[denia_share] 确认下载处理异常")
+            yield event.plain_result(
+                "❌ 确认下载失败（内部错误），详情见 AstrBot 日志"
+            )
+        finally:
+            event.stop_event()
+
     @filter.regex(r".*")
     async def json_card_handler(self, event: AstrMessageEvent, matched: re.Match | None = None):
         """QQ 小程序分享卡片（Json 消息段）里的链接解析"""
@@ -934,13 +983,8 @@ class DeniaSharePlugin(Star):
 
     @staticmethod
     def result_cache_key(url: str) -> str:
-        """解析结果缓存键：全量 URL 的短哈希。
-
-        直接截断 URL 前 64 字符会让不同链接撞成同一个 key（小红书 / 微博的
-        分享链常带长参数），撞上就会把 A 链接的解析结果当成 B 链接的返回。
-        WebUI 的手动解析也必须用同一个键，否则同一链接在两条链路上各缓存一份。
-        """
-        return hashlib.md5(url.encode()).hexdigest()[:16]
+        """解析结果缓存键（实现见 core/result_cache.py）。"""
+        return ResultCache.result_cache_key(url)
 
     async def _process_url(
         self, event: AstrMessageEvent, parser: Any
@@ -1007,6 +1051,35 @@ class DeniaSharePlugin(Star):
                 )
                 return
 
+            # ---- 确认下载：只取封面、生成信息卡，等用户确认后再取源文件 ----
+            # 必须排在去重之前：同链接的不同分享 / 同群其他成员确认不能被
+            # 同链接去重窗口拦住；本分支也不会占用/撤销去重占位。
+            if self._confirm.mode() == "confirm":
+                parser_key = str(
+                    getattr(getattr(parser, "platform", None), "name", "") or ""
+                )
+                reason = self._confirm.preflight(parser_key)
+                if reason:
+                    yield event.plain_result(reason)
+                    return
+                phase = 'parse'
+                diagnostic.stage('parse', 'running')
+                result = await parser.parse(keyword, searched)
+                diagnostic.stage('parse', 'ok')
+                async for r in self._confirm.offer(
+                    event,
+                    parser=parser,
+                    parser_key=parser_key or result.platform.name,
+                    result=result,
+                    matched=matched,
+                    cache_key=cache_key,
+                    searched=searched,
+                ):
+                    yield r
+                diagnostic.stage('send', 'ok')
+                diagnostic.finish('ok')
+                return
+
             # ---- 同群重复链接去重 ----
             # 必须排在缓存查询**之前**：命中结果缓存时照旧要发卡片，而去重要的
             # 是「不再响应」。先查缓存的话第二个人的卡片就照发出来了，等于没去重。
@@ -1021,7 +1094,21 @@ class DeniaSharePlugin(Star):
                     diagnostic.stage('parse', 'skipped', 'duplicate')
                     diagnostic.finish('skipped')
                     uncertain = self._link_dedup.is_uncertain(scope, dedup_key)
-                    yield event.plain_result(self._UNCERTAIN_HINT if uncertain else self._DEDUP_HINT)
+                    if uncertain:
+                        # 送达不确定与「确认重复」是两回事：即使提示文字被清空，
+                        # 这条也必须发 —— 用户需要知道上一条可能根本没送达。
+                        yield event.plain_result(self._UNCERTAIN_HINT)
+                    else:
+                        hint = self._dedup_hint_text()
+                        if hint:
+                            yield event.plain_result(hint)
+                        else:
+                            # 配置把提示文字清空 = 已确认重复时静默（同 SILENT 的
+                            # 不打扰语义，只是保留 HINT 判定的窗口语义）。
+                            logger.info(
+                                f"[denia_share] 同会话重复链接已按配置静默: scope={scope} "
+                                f"url={matched[:60]}"
+                            )
                     return
                 if decision == SILENT:
                     diagnostic.stage('parse', 'skipped', 'duplicate')
@@ -1126,8 +1213,21 @@ class DeniaSharePlugin(Star):
     # ---- 同群重复链接去重的辅助 ----
 
     #: 窗口内后来者收到的提示。只发一次（见 core/link_dedup 的说明）。
+    #: 这是配置项 ``DEDUP_HINT_TEXT`` 的兜底默认值；实际发送文字见
+    #: :meth:`_dedup_hint_text`（配置留空 = 已确认重复时静默）。
     _DEDUP_HINT = "这个链接刚刚已经解析过了哦"
     _UNCERTAIN_HINT = "上一条合并转发的发送结果还没确认，请先查看聊天记录；若未收到，等去重窗口结束后再发。"
+
+    def _dedup_hint_text(self) -> str:
+        """已确认重复时发送的提示文字；配置为空白时返回空串（上游静默）。
+
+        不确定送达提示（:attr:`_UNCERTAIN_HINT`）不受本方法影响 —— 调用方
+        在确认重复分支里才用它。配置读取失败（旧测试桩未初始化）时回退默认文案。
+        """
+        try:
+            return str(get_config().DEDUP_HINT_TEXT or "").strip()
+        except Exception:
+            return self._DEDUP_HINT
 
     @staticmethod
     def _dedup_applies(event: AstrMessageEvent) -> bool:
@@ -1266,244 +1366,63 @@ class DeniaSharePlugin(Star):
     async def _deliver(
         self, event: AstrMessageEvent, result: ParseResult, cache_key: str, *, on_delivered=None, diagnostic=None
     ) -> AsyncGenerator[MessageEventResult, None]:
-        """把已得到的 ParseResult 按用户选中的输出模式发出去。
-
-        三个独立分支（文本 / 卡片 / 原始媒体），互不排斥、互不代偿：
-        某一支失败**只会让那一支没有产物**，绝不自动补发用户没勾的那几路。
-
-        链接解析与 /pixiv 搜索共用这条输出链路。
-        """
-        pconfig = get_config()
-        modes = pconfig.output_modes()
-        text_on = bool(modes["text"])
-        card_on = bool(modes["card_effective"])
-        media_on = bool(modes["media"])
-        def stage(name, state, reason=''):
-            if diagnostic is not None:
-                diagnostic.stage(name, state, reason)
-
-        # 全关时本就不会走到这里（入口已短路），留一道兜底防止将来新增调用方
-        if not (text_on or card_on or media_on):
-            logger.info("[denia_share] 三路输出全关，本次不发送任何内容")
-            return
-
-        # 缺料审计只覆盖**用户真的要的**媒体：媒体一路开着才审计全部内容，
-        # 仅卡片时只审计渲染真正会去取的图（封面/头像/图集，且跳过派生任务）。
-        # 审计会 get() 这些任务，也就是**这一步才是触发下载的地方** —— 全关时
-        # 一次都不会被调用，一个字节都不下载。
-        if media_on or card_on:
-            stage('media', 'running')
-            try:
-                missing = await self._audit_for_modes(result, media_on=media_on)
-                limited = bool(result.extra.get('limit_warnings'))
-                stage('media', 'error' if missing else 'skipped' if limited else 'ok',
-                    'media_missing' if missing else 'limit' if limited else '')
-            except Exception:
-                stage('media', 'error', 'media_missing')
-                missing = {}
-                logger.warning("[denia_share] 媒体下载结算失败", exc_info=True)
-            if missing:
-                logger.warning(
-                    f"[denia_share] 本次解析有媒体未落盘: "
-                    f"{'、'.join(f'{k}×{v}' for k, v in missing.items())}"
-                )
-        else:
-            stage('media', 'skipped', 'skipped')
-
-        # ---- 卡片 ----
-        # 渲染/发送都可能抛（Pillow 缺字体、协议端拒绝、磁盘满）。它们**只能**
-        # 让卡片这一路没有产物，绝不能把已经选中的文本与媒体一起带崩。
-        # 同样地，这里也**不会**因为卡片失败就改发用户没勾的那几路。
-        render_path: Path | None = None
-        if card_on:
-            stage('render', 'running')
-            try:
-                render_path = await self._renderer.render(
-                    result, cache_key=cache_key,
-                    existing=self._render_cache.get(cache_key),
-                )
-            except Exception:
-                render_path = None
-                logger.warning("[denia_share] 卡片渲染失败，继续发送已勾选的其他输出", exc_info=True)
-            if render_path is not None:
-                self._remember_render(cache_key, render_path)
-            stage('render', 'ok' if render_path is not None else 'error', '' if render_path is not None else 'render_failed')
-        else:
-            stage('render', 'skipped', 'skipped')
-
-        # ---- 文本 ----
-        # 渲染失败**不**回退成文本：文本只在 text_on 时才发。反过来也一样。
-        if text_on:
-            async for r in self._send_text(event, result):
-                yield r
-
-        if render_path is not None:
-            # 卡片发不出去（协议端拒绝/找不到会话）也不能连累已勾选的媒体
-            try:
-                if await self._send_image(event, render_path):
-                    if on_delivered is not None:
-                        on_delivered()
-                else:
-                    stage('send', 'error', 'send_failed')
-            except Exception:
-                stage('send', 'error', 'send_failed')
-                logger.warning("[denia_share] 卡片发送失败，继续发送已勾选的其他输出", exc_info=True)
-
-        # ---- 原始媒体（图片/视频/动图/音频） ----
-        if media_on:
-            async for r in self._try_send_media(
-                event, result, on_delivered=on_delivered,
-                on_failed=lambda: stage('send', 'error', 'send_failed'),
-            ):
-                yield r
+        """把已得到的 ParseResult 按用户选中的输出模式发出去（实现见 core/delivery.py）。"""
+        async for r in self._delivery.deliver(
+            event, result, cache_key, on_delivered=on_delivered, diagnostic=diagnostic
+        ):
+            yield r
 
     async def _audit_for_modes(
         self, result: ParseResult, *, media_on: bool
     ) -> dict[str, int]:
-        """按输出模式结算媒体下载，返回失败统计。
+        """按输出模式结算媒体下载（实现见 core/delivery.py）。"""
+        return await self._delivery.audit_for_modes(result, media_on=media_on)
 
-        - **媒体一路开着**：审计全部内容（与旧行为一致），提示会进
-          ``extra["limit_warnings"]``，由已选中的文本/卡片如实展示。
-        - **仅卡片**：只审计渲染会去取的图，且**跳过 ``needs_media`` 的派生任务**
-          （用 ffmpeg 抽帧那种）。否则为了给卡片补一张封面就得先下整段视频，
-          与「仅卡片只要封面和头像」的意图相反。
+    # ---- 结果 / 渲染缓存：实现见 core/result_cache.py（ResultCache 服务） ----
+    # 字典本身仍是 ``self._result_cache`` / ``self._render_cache``（指向服务的同一对象，
+    # 见 __init__）；这里只留薄委托，WebUI / 生命周期 / 既有测试照旧调用。
 
-        这里走 :meth:`ParseResult.audit_missing_media` 之外的精简路径时，
-        仍遵守它「幂等、只撤自己写的那条」的所有权约定。
-        """
-        if media_on:
-            return await result.audit_missing_media()
+    def _result_cache_limit(self) -> int:
+        """当前解析结果缓存条数上限（实现见 core/result_cache.py）。"""
+        return self._caches._result_cache_limit()
 
-        # 仅卡片：把派生任务（needs_media）从审计范围里摘掉后再走同一条通道
-        return await result.audit_missing_media(img_only=True)
+    def _render_cache_limit(self) -> int:
+        """当前渲染索引条数上限（实现见 core/result_cache.py）。"""
+        return self._caches._render_cache_limit()
+
+    def _trim_result_cache(self) -> None:
+        """按当前上限即时收敛结果缓存（实现见 core/result_cache.py）。"""
+        return self._caches._trim_result_cache()
+
+    def _trim_render_cache(self) -> None:
+        """按当前上限即时收敛渲染索引（实现见 core/result_cache.py）。"""
+        return self._caches._trim_render_cache()
 
     def _remember_result(self, cache_key: str, result: ParseResult) -> None:
-        """写入解析结果内存缓存，并维持条数上限（见 MAX_RESULT_CACHE_ENTRIES）。"""
-        cache = self._result_cache
-        cache[cache_key] = (time.monotonic(), result)
-        # dict 保持插入序：超限就丢最早写入的（FIFO 够用，这里只是防无界增长）
-        while len(cache) > MAX_RESULT_CACHE_ENTRIES:
-            evicted = next(iter(cache))
-            cache.pop(evicted, None)
-            # 结果被淘汰时**连带摘掉渲染索引**：留着的话，
-            # ``renderer.render`` 会拿 existing 直接返回旧图，而那条图对应的
-            # 结果已经不存在了，索引就成了无主条目。
-            self._render_cache.pop(evicted, None)
+        """写入解析结果内存缓存（实现见 core/result_cache.py）。"""
+        return self._caches._remember_result(cache_key, result)
 
     def _remember_render(self, cache_key: str, path: Path) -> None:
-        """登记渲染产物并维持索引条数上限（见 MAX_RENDER_CACHE_ENTRIES）。
-
-        WebUI 的独立预览也走这里：那条入口**不经** ``_remember_result``，
-        曾经绕过上限直接写 ``_render_cache``（只受结果缓存淘汰牵动）。
-        """
-        self._render_cache[cache_key] = path
-        while len(self._render_cache) > MAX_RENDER_CACHE_ENTRIES:
-            self._render_cache.pop(next(iter(self._render_cache)), None)
+        """登记渲染产物（实现见 core/result_cache.py）。"""
+        return self._caches._remember_render(cache_key, path)
 
     @staticmethod
     def _cache_media_gone(result: ParseResult) -> bool:
-        """缓存里的结果，其媒体文件是否**已经被磁盘清理掉了**。
-
-        为什么必须查：``PathTask`` 首次下载后把路径存进 ``_path``，之后再取
-        一律直接返回，**不检查文件还在不在**；发送侧也不一定查
-        ``path.exists()``。于是只要解析结果还在内存里、而磁盘文件已按
-        ``CACHE_TTL_HOURS`` 被清掉，就会拿着一个不存在的路径去发媒体 ——
-        卡片正常发出去、**视频/图片/封面静默消失**，日志里什么都没有。
-
-        覆盖范围用 ``result._iter_media_tasks()``（视频 / 封面 / 音频 / 图片 /
-        graphics / 转发），那是 ``core/data.py`` 里已有的媒体清单，收口在一处
-        免得以后加了新内容类型这里漏掉。头像另算 —— 它只是装饰，但它同样会
-        画在卡片上，文件没了会出现裂图。
-
-        只查已解析出路径的（``resolved`` 非 None）：还在下载中的、或下载失败
-        的不据此判定，那两种情况另有分支管。
-        """
-        tasks = list(result._iter_media_tasks())
-        author = getattr(result, "author", None)
-        avatar = getattr(author, "avatar", None) if author is not None else None
-        if avatar is not None:
-            tasks.append(("头像", avatar))
-
-        for _label, task in tasks:
-            path = task.resolved
-            if path is not None and not path.exists():
-                return True
-        return False
+        """缓存结果的媒体文件是否已被磁盘清理（实现见 core/result_cache.py）。"""
+        return ResultCache._cache_media_gone(result)
 
     def _get_cached_result(self, cache_key: str) -> ParseResult | None:
-        """取可用的缓存结果；不可用（过期 / 媒体已清理）时顺手删掉并返回 None。
-
-        两种失效都**删掉条目**而不是留着等下次 —— 留着等于每次都白查一遍
-        磁盘，而且会让「清空缓存」之外的路径继续返回一份发不出媒体的结果。
-        """
-        entry = self._result_cache.get(cache_key)
-        if entry is None:
-            return None
-        stored_at, result = entry
-
-        # 读侧兑底：手改过 JSON / 配置项是脏值时不能让整条链路跟着报错。
-        # 用 int() 包一层 —— 裸 int("abc") 抛 ValueError，会被 _process_url 的
-        # except Exception 吞成「处理出错」，而且异常发生在 pop 之前，
-        # 坏条目永远摘不掉，那一个 key 从此每次都报错、无法自愈。
-        try:
-            ttl = int(get_config().RESULT_CACHE_TTL_SECONDS)
-        except (TypeError, ValueError):
-            ttl = 600
-            logger.warning(
-                "[denia_share] 重复解析间隔配置不是整数，按 600 秒处理",
-            )
-        if ttl <= 0:
-            # 0 = 关掉这个优化，每次都重新解析。**不能写成「跳过过期检查」**：
-            # 那样 TTL=0 反而变成永不过期，与配置项文案正好相反。
-            self._drop_cache_entry(cache_key)
-            return None
-        if (time.monotonic() - stored_at) >= ttl:
-            self._drop_cache_entry(cache_key)
-            logger.debug(
-                f"[denia_share] 解析结果已过重复解析间隔（{ttl}s），重新解析"
-            )
-            return None
-
-        if self._cache_media_gone(result):
-            self._drop_cache_entry(cache_key)
-            logger.info(
-                "[denia_share] 缓存里的媒体文件已被清理，重新解析一次（只是白费一次请求）"
-            )
-            return None
-
-        # 轻量测试桩（只实现几个方法的替身）没有这个方法，getattr 兜一层，
-        # 免得缓存读取在桩上直接 AttributeError。
-        failed_check = getattr(self, "_cache_media_failed", None)
-        if failed_check is not None and failed_check(result):
-            # 缓存里这份结果已经**确定拿不到**媒体：留着它等于让后续每一次
-            # 同链接都命中一份缺料的结果，而且它自己永远不会自愈。摘掉，
-            # 让下一次真正重新解析（PathTask 侧只对临时失败有限重试，
-            # 这里处理的是重试也没救回来的那部分）。
-            self._drop_cache_entry(cache_key)
-            logger.info(
-                "[denia_share] 缓存里的媒体下载已失败，淘汰后重新解析一次"
-            )
-            return None
-
-        return result
+        """取可用缓存结果；不可用时已顺手淘汰（实现见 core/result_cache.py）。"""
+        return self._caches._get_cached_result(cache_key)
 
     @staticmethod
     def _cache_media_failed(result: ParseResult) -> bool:
-        """缓存结果里是否已有**确定失败**的媒体任务（见 PathTask.failed）。"""
-        for _label, task in result._iter_media_tasks():
-            if task.failed:
-                return True
-        return False
+        """缓存结果是否已有确定失败的媒体任务（实现见 core/result_cache.py）。"""
+        return ResultCache._cache_media_failed(result)
 
     def _drop_cache_entry(self, cache_key: str) -> None:
-        """摘掉一条解析结果，并连带摘掉它的渲染卡片。
-
-        两者必须**同步**摘：卡片是从这份结果画出来的，结果都重解析了，卡片还
-        留着的话，``renderer.render`` 见到 ``existing.exists()`` 就直接返回旧图，
-        用户看到的标题/点赞数是上一次的。只做一半会出现「视频是新的、卡片是旧的」。
-        """
-        self._result_cache.pop(cache_key, None)
-        self._render_cache.pop(cache_key, None)
+        """摘掉一条结果并连带摘掉渲染卡片（实现见 core/result_cache.py）。"""
+        return self._caches._drop_cache_entry(cache_key)
 
     # ==================== 解析记录 ====================
 
@@ -1518,14 +1437,16 @@ class DeniaSharePlugin(Star):
         """把一次成功的解析写入历史，供 WebUI 查看与管理。
 
         这是纯旁路：任何异常都只记日志，绝不影响正常的解析与发送。
+
+        记录里的文件路径一律是 ``cache_dir`` 内的**安全相对 POSIX 路径**
+        （如 ``sub/abc.jpg``），不存绝对路径、不泄露容器内位置；只记录
+        ``contents`` / ``graphics`` / ``repost`` 链里已 ``resolved`` 且真实位于
+        ``cache_dir`` 内的源媒体（不含头像与卡片封面），绝不为记历史触发任何
+        下载。旧记录里的裸文件名（``abc.jpg``）仍按原样展示。
         """
         try:
-            media_files: list[str] = []
-            for cont in result.contents:
-                path = cont.path_task.resolved
-                if path is not None:
-                    media_files.append(path.name)
-
+            media_files = self._history_media_files(result, self.cache_dir)
+            cache_dir = self.cache_dir
             record = ParseRecord.create(
                 url=result.url or "",
                 platform=result.platform.name,
@@ -1536,7 +1457,7 @@ class DeniaSharePlugin(Star):
                 title=result.title or "",
                 author=result.author.name if result.author else "",
                 via=via,
-                card_file=render_path.name if render_path else None,
+                card_file=self._cache_relative_path(cache_dir, render_path) if render_path else None,
                 media_files=media_files,
                 detail=self._history_detail(result),
                 elapsed_ms=elapsed_ms,
@@ -1551,6 +1472,63 @@ class DeniaSharePlugin(Star):
         except Exception:
             logger.warning("[denia_share] 写入解析记录失败", exc_info=True)
             return None
+
+    @staticmethod
+    def _history_media_files(result: ParseResult, cache_dir: Path) -> list[str]:
+        """收集记录页「源文件下载」可用的已落盘媒体（安全相对路径）。
+
+        遍历 ``contents``、``graphics`` 里的 :class:`ImageContent`，以及
+        ``repost`` 链（转发原帖）的同类媒体；只读 ``PathTask.resolved``，
+        **绝不调用 get()**，因此不会为了记历史触发任何下载。路径统一经
+        :meth:`_cache_relative_path` 限制在 ``cache_dir`` 内，并按规范化后的
+        相对路径去重（同一条媒体出现在 contents 与 graphics 时只记一次）。
+
+        **刻意不收**头像（``Author.avatar``）与卡片封面
+        （``VideoContent/AudioContent.cover``）：它们是卡片装饰，不属于用户要
+        下载的源媒体；渲染卡片本体也不在遍历范围，由 ``card_file`` 单独记录。
+        """
+        files: list[str] = []
+        seen: set[str] = set()
+        seen_results: set[int] = set()
+
+        def walk(node: ParseResult) -> None:
+            # repost 理论上可被异常构造成环；按对象身份兜底，避免死循环。
+            if id(node) in seen_results:
+                return
+            seen_results.add(id(node))
+            tasks = [cont.path_task for cont in node.contents]
+            tasks.extend(
+                gra.path_task for gra in node.graphics if isinstance(gra, ImageContent)
+            )
+            for task in tasks:
+                path = task.resolved
+                rel = DeniaSharePlugin._cache_relative_path(cache_dir, path)
+                if rel and rel not in seen:
+                    seen.add(rel)
+                    files.append(rel)
+            if node.repost is not None:
+                walk(node.repost)
+
+        walk(result)
+        return files
+
+    @staticmethod
+    def _cache_relative_path(cache_dir: Path, path: Path) -> str | None:
+        """把已落盘文件换算成 ``cache_dir`` 内的安全相对 POSIX 路径。
+
+        - 不在 ``cache_dir`` 内（含经符号链接逃逸）的文件返回 ``None``，不记录；
+        - 只返回 POSIX 相对路径（正斜杠），**绝不返回绝对路径**；
+        - 只读路径形状，不触碰文件系统内容，也不触发下载。
+        """
+        if path is None:
+            return None
+        try:
+            rel = Path(path).resolve().relative_to(Path(cache_dir).resolve())
+        except (ValueError, OSError):
+            return None
+        if not rel.parts or rel.parts[0] in ("", ".", ".."):
+            return None
+        return rel.as_posix()
 
     @staticmethod
     def _history_detail(result: ParseResult) -> dict[str, Any]:
@@ -1595,6 +1573,7 @@ class DeniaSharePlugin(Star):
             self._result_cache.clear()
             self._render_cache.clear()
             self._link_dedup.clear()
+            self._confirm.invalidate_all("cache_dir")
             logger.info(f"[denia_share] 媒体缓存目录已切换到 {self.cache_dir}")
         summary["cache_dir"] = str(self.cache_dir)
         summary["cache_dir_source"] = self.cache_dir_source
@@ -1605,13 +1584,15 @@ class DeniaSharePlugin(Star):
                 max_size_mb=pconfig.VIDEO_SIZE_MAXIMUM_MB,
                 cache_dir=self.cache_dir,
                 verify_ssl=pconfig.HTTP_VERIFY_SSL,
+                image_concurrency=pconfig.DOWNLOAD_IMAGE_CONCURRENCY,
+                media_concurrency=pconfig.DOWNLOAD_MEDIA_CONCURRENCY,
             )
         except Exception:
             logger.warning("[denia_share] 更新下载器参数失败", exc_info=True)
 
         # 代理下载器跟随同一份缓存目录 / 体积上限 / 证书开关，代理地址取配置值。
         # 地址被清空时 reconfigure 会把它的池切成直连 —— 池子留着不关，
-        # 省得下次有平台开开关又要重建。
+        # 省得下次有平台开开关又要重建。并发同样取配置值：直连 / 代理各池。
         if self._proxy_downloader is not None:
             try:
                 await self._proxy_downloader.reconfigure(
@@ -1619,9 +1600,27 @@ class DeniaSharePlugin(Star):
                     max_size_mb=pconfig.VIDEO_SIZE_MAXIMUM_MB,
                     cache_dir=self.cache_dir,
                     verify_ssl=pconfig.HTTP_VERIFY_SSL,
+                    image_concurrency=pconfig.DOWNLOAD_IMAGE_CONCURRENCY,
+                    media_concurrency=pconfig.DOWNLOAD_MEDIA_CONCURRENCY,
                 )
             except Exception:
                 logger.warning("[denia_share] 更新代理下载器参数失败", exc_info=True)
+
+        # 历史保留条数热同步：容量改后立即收敛既有记录（只裁记录，不删媒体），
+        # 与「history.jsonl」的持久化上限保持同一个值。
+        try:
+            await asyncio.to_thread(
+                self.history.set_max_records, pconfig.HISTORY_MAX_RECORDS
+            )
+        except Exception:
+            logger.warning("[denia_share] 同步历史保留条数失败", exc_info=True)
+
+        # 内存缓存条数上限热收敛：容量调小时立即把现有字典裁到新上限
+        # （FIFO，保留 TTL —— 过期判定仍在读取侧做，这里只按条数收敛）。
+        # 后面的全量 clear 是「配置变了结果失效」的既有逻辑，两者不冲突：
+        # 即使只改了条数上限、其它配置没动，这里也保证当场收敛。
+        self._trim_result_cache()
+        self._trim_render_cache()
 
         self.parsers = {}
         self._init_parsers()
@@ -1665,6 +1664,10 @@ class DeniaSharePlugin(Star):
 
         # 截图后端的代理 / 证书校验同样是构造时读死的，热更新要一起重建
         self._build_screenshot_service()
+
+        # 确认下载：权限每次实时读取，这里只按相关配置（模式/输出/限额/平台）
+        # 失效 pending；无关保存不会清掉任何人的待确认项。
+        self._confirm.refresh_config()
 
         summary["rebuilt"] = True
         summary["platforms"] = sorted(self.parsers)
@@ -1858,280 +1861,57 @@ class DeniaSharePlugin(Star):
             )
         return "\n".join(parts)
 
-    async def _send_image(self, event: AstrMessageEvent, path: Path):
-        """主动发送图片，绕开事件回复管线，避免被附加「引用回复 / @」。"""
-        try:
-            sent = await self.context.send_message(
-                event.unified_msg_origin, MessageChain().file_image(str(path)),
-            )
-            if not sent:
-                logger.warning(f"解析卡片主动发送未找到匹配平台会话: {path.name}")
-            return bool(sent)
-        except Exception as e:
-            logger.warning(f"解析卡片主动发送异常: {e}")
-            return False
+    async def _send_image(self, event: AstrMessageEvent, path: Path) -> bool:
+        """主动发送图片，绕开事件回复管线（实现见 core/delivery.py）。"""
+        return await self._delivery.send_image(event, path)
+
+    @staticmethod
+    def _forward_node_nickname() -> str:
+        """合并转发节点的显示昵称（实现见 core/delivery.py）。"""
+        return DeliveryService.forward_node_nickname()
 
     @staticmethod
     async def _build_nodes_result(event: AstrMessageEvent, header: str, items: list[list]):
-        sender_name = "希望解析器"
-        sender_id = event.get_self_id()
-        nodes = Comp.Nodes([])
-
-        def _node(content):
-            # AstrBot 4.x 的 Node.__init__(content, **_) 会把 uin/name 吞进 **_ 丢弃，
-            # 必须构造后赋值属性，否则合并转发里昵称与 QQ 号全空
-            node = Comp.Node(content=content)
-            node.uin = sender_id
-            node.name = sender_name
-            return node
-
-        if header:
-            nodes.nodes.append(_node([Comp.Plain(header)]))
-        for item in items:
-            nodes.nodes.append(_node(item))
-        return event.chain_result([nodes])
+        """构建合并转发结果（实现见 core/delivery.py）。"""
+        return await DeliveryService.build_nodes_result(event, header, items)
 
     async def _build_output(self, result: ParseResult) -> tuple[str, list[list]]:
-        """统一构建 (标题头, 内容节点列表)。
-
-        **已不再用于发送**：三路输出模式里文本走 :meth:`_send_text`（一条普通
-        消息，不含长简介/AI 总结/合并转发），图片归富媒体一路。这里保留是为了
-        兼容仍在引用它的旁路（如调试与既有测试），不要再在发送链路里用它。
-        """
-        header = f"希望解析器 | {result.platform.display_name} - {result.content_type}"
-        if result.author:
-            header += f" @{result.author.name}"
-
-        nodes: list[list] = []
-        if result.title:
-            nodes.append([Comp.Plain(result.title)])
-        if result.text:
-            nodes.append([Comp.Plain(result.text[:300])])
-
-        for key, prefix in (
-            ("stats_line", ""),
-            ("duration", "⏱ 时长："),
-            ("online", ""),
-            ("info", "📝 "),
-        ):
-            if value := result.extra.get(key):
-                nodes.append([Comp.Plain(f"{prefix}{value}")])
-
-        for image in result.img_contents:
-            path = await image.path_task.safe_get()
-            # exists() 兜底：PathTask 记着首次下载的路径，之后一律直接返回、
-            # 不碰文件系统。文件被缓存清理任务删掉时，这里会把一个不存在的
-            # 路径交给协议端（图片则渲染成裂图）。视频那条链路已有同样检查。
-            if path and path.exists():
-                nodes.append([Comp.Image.fromFileSystem(str(path))])
-        for graphic in result.graphics:
-            if isinstance(graphic, ImageContent):
-                path = await graphic.path_task.safe_get()
-                if path and path.exists():
-                    nodes.append([Comp.Image.fromFileSystem(str(path))])
-            elif isinstance(graphic, str):
-                nodes.append([Comp.Plain(graphic)])
-
-        return header, nodes
+        """统一构建 (标题头, 内容节点列表)；已不再用于发送（实现见 core/delivery.py）。"""
+        return await self._delivery.build_output(result)
 
     async def _send_plain_output(self, event: AstrMessageEvent, header: str, nodes_content: list[list]):
-        """非 OneBot 平台：合并成一条消息链。"""
-        parts: list = []
-        if header:
-            parts.append(Comp.Plain(header + "\n"))
-
-        text_lines: list[str] = []
-        for node_content in nodes_content:
-            for comp in node_content:
-                if isinstance(comp, Comp.Plain):
-                    text_lines.append(comp.text)
-                elif isinstance(comp, Comp.Image):
-                    parts.append(comp)
-        if text_lines:
-            parts.append(Comp.Plain("\n".join(text_lines)))
-
-        if parts:
-            yield event.chain_result(parts)
+        """非 OneBot 平台：合并成一条消息链（实现见 core/delivery.py）。"""
+        async for r in self._delivery.send_plain_output(event, header, nodes_content):
+            yield r
 
     async def _send_text(self, event: AstrMessageEvent, result: ParseResult):
-        """发送**一条**普通文本消息（标题 + 干净地址 + 简洁播放信息 + 必要提示）。
-
-        刻意**不**包含：``result.text`` 长简介、``graphics`` 正文、B站
-        ``extra["info"]`` 里的 AI 总结，也不走 OneBot 合并转发 —— 一条普通
-        ``Plain`` 消息，客户端里就是一条干净的文本。
-        """
-        lines = build_concise_text(result)
-        if not lines:
-            logger.info("[denia_share] 精简文本为空，跳过文本发送")
-            return
-        yield event.chain_result([Comp.Plain("\n".join(lines))])
+        """发送一条普通文本消息（实现见 core/delivery.py）。"""
+        async for r in self._delivery.send_text(event, result):
+            yield r
 
     async def _try_send_media(
         self, event: AstrMessageEvent, result: ParseResult, *, on_delivered=None,
         on_failed=None,
     ):
-        """按聚合配置发送富媒体，语音和文件保持独立发送。"""
-        pconfig = get_config()
-        # 每条媒体链路开始前先清标记：上一次「送达未知」不能继承到下一条链接。
-        _DELIVERY_UNCERTAIN.set(False)
-        if not self._is_onebot(event) or pconfig.AGGREGATION_MODE == "none":
-            async for parts in self._iter_media_components(result):
-                async for output in self._send_media_item(
-                    event, parts, on_delivered=on_delivered, on_failed=on_failed
-                ):
-                    yield output
-            return
-
-        messages = [parts async for parts in self._iter_media_components(result)]
-        # 只把图片、视频送进转发，避免一段语音或文件使整份图集发送失败。
-        eligible = [
-            parts for parts in messages
-            if not isinstance(parts, _AudioFallbackItem)
-            and all(isinstance(part, (Comp.Image, Comp.Video)) for part in parts)
-        ]
-        image_count = sum(isinstance(part, Comp.Image) for parts in eligible for part in parts)
-        video_count = sum(isinstance(part, Comp.Video) for parts in eligible for part in parts)
-        if not eligible or not pconfig.should_aggregate_nodes(image_count, video_count, len(eligible)):
-            for parts in messages:
-                async for output in self._send_media_item(
-                    event, parts, on_delivered=on_delivered, on_failed=on_failed
-                ):
-                    yield output
-            return
-
-        try:
-            forward = await self._build_nodes_result(event, "", eligible)
-            # 主动发送才能捕获协议端拒绝；yield 的发送异常在宿主管线中发生。
-            sent = await event.send(forward)
-            if sent is False:
-                raise RuntimeError("合并转发未发送成功")
-        except (TimeoutError, ConnectionError):
-            # 回执丢失时转发可能已经送达，不能自动重放整套图片/视频。
-            # 标记「送达未知」而不是「失败」：调用方据此保留去重窗口、
-            # 但不记成功历史（见 _process_url 的对应分支）。
-            _DELIVERY_UNCERTAIN.set(True)
-            logger.warning("[denia_share] 合并转发送达状态未知，不自动重发图片视频，继续发送独立音频", exc_info=True)
-            for parts in messages:
-                if isinstance(parts, _AudioFallbackItem) or not all(
-                    isinstance(part, (Comp.Image, Comp.Video)) for part in parts
-                ):
-                    async for output in self._send_media_item(
-                        event, parts, on_delivered=on_delivered, on_failed=on_failed
-                    ):
-                        yield output
-            return
-        except Exception:
-            logger.warning("[denia_share] 合并转发失败，改为逐条发送已选媒体", exc_info=True)
-            for parts in messages:
-                async for output in self._send_media_item(
-                    event, parts, on_delivered=on_delivered, on_failed=on_failed
-                ):
-                    yield output
-            return
-
-        if on_delivered is not None:
-            on_delivered()
-        for parts in messages:
-            if isinstance(parts, _AudioFallbackItem) or not all(
-                isinstance(part, (Comp.Image, Comp.Video)) for part in parts
-            ):
-                async for output in self._send_media_item(
-                    event, parts, on_delivered=on_delivered, on_failed=on_failed
-                ):
-                    yield output
+        """按聚合配置发送富媒体，语音和文件保持独立发送（实现见 core/delivery.py）。"""
+        async for r in self._delivery.try_send_media(
+            event, result, on_delivered=on_delivered, on_failed=on_failed
+        ):
+            yield r
 
     async def _send_media_item(
         self, event: AstrMessageEvent, item, *, on_delivered=None, on_failed=None
     ):
-        """仅失败兜底模式主动发送，其他媒体仍交给宿主管线。"""
-        if not isinstance(item, _AudioFallbackItem):
-            yield event.chain_result(item)
-            return
-        pconfig = get_config()
-        sent = await self._try_send_audio(
-            event, item.result, item.path, pconfig.MEDIA_RELAY_ENABLED,
-            pconfig.MEDIA_RELAY_CALLBACK_URL, pconfig.MEDIA_RELAY_TTL,
-        )
-        if sent:
-            if on_delivered is not None:
-                on_delivered()
-        elif on_failed is not None:
-            on_failed()
+        """仅失败兜底模式主动发送，其他媒体仍交给宿主管线（实现见 core/delivery.py）。"""
+        async for r in self._delivery.send_media_item(
+            event, item, on_delivered=on_delivered, on_failed=on_failed
+        ):
+            yield r
 
     async def _iter_media_components(self, result: ParseResult):
-        """构建原始媒体组件，复用下载、缓存和中转规则。
-
-        旧实现里图片是塞进文本节点的（``_build_output``），而精简文本按设计
-        **只含标题/地址/播放信息**，所以图片必须在这里显式发出去 —— 否则
-        关掉文本就等于把图集弄丢了。卡片图片走 ``_send_image``，与这里无关。
-
-        **视频为什么需要特殊处理**：AstrBot 把 ``Video`` 段的 ``file:///...``
-        原样交给协议端（图片 / 语音会先转成 base64，所以没这个问题），
-        而那个路径是 astrbot 容器内的路径。协议端在另一个容器里读不到，
-        视频就发不出去。
-
-        所以开了「媒体中转」就先把文件注册成 ``{回调地址}/api/file/<token>``
-        用 URL 发送；没开、注册失败、或地址不合法时，回退成原来的本地文件发送。
-        """
-        pconfig = get_config()
-        relay_enabled = pconfig.MEDIA_RELAY_ENABLED
-        callback_base = pconfig.MEDIA_RELAY_CALLBACK_URL
-        ttl = pconfig.MEDIA_RELAY_TTL
-
-        # 图片在 contents 里（contents/graphics 混排的平台两种都有），逐个发
-        for image in result.img_contents:
-            path = await image.path_task.safe_get()
-            if path is None or not path.exists():
-                continue
-            yield [Comp.Image.fromFileSystem(str(path))]
-
-        for graphic in result.graphics:
-            if not isinstance(graphic, ImageContent):
-                continue
-            path = await graphic.path_task.safe_get()
-            if path is None or not path.exists():
-                continue
-            yield [Comp.Image.fromFileSystem(str(path))]
-
-        # 转发的原帖图片同样归富媒体（微博/NGA 那种 repost 里有图集的情况）。
-        # 递归只走一层：repost 不会自己再套 repost。
-        if result.repost is not None:
-            async for parts in self._iter_media_components(result.repost):
-                yield parts
-
-        for cont in result.contents:
-            if not isinstance(cont, (VideoContent, AudioContent)):
-                continue
-            path = await cont.path_task.safe_get()
-            if path is None:
-                continue
-            # 双保险：正常情况下主流程已经拦掉了「缓存命中但文件已清理」的情况
-            # （见 _cache_media_gone）。这里再挡一次 —— 清理任务可能正好在
-            # _get_cached_result 检查之后、这里之前把文件删了。
-            if not path.exists():
-                logger.warning(
-                    f"[denia_share] 媒体文件已不存在，跳过发送: {path.name}"
-                )
-                continue
-
-            if isinstance(cont, VideoContent):
-                url = None
-                if relay_enabled:
-                    url = await register_file(path, callback_base, ttl)
-                    if url is None:
-                        logger.info(
-                            f"[denia_share] 视频中转不可用，回退本地文件发送: {path.name}"
-                        )
-                if url:
-                    yield [Comp.Video.fromURL(url)]
-                else:
-                    yield [Comp.Video.fromFileSystem(str(path))]
-            elif pconfig.AUDIO_SEND_MODE == "voice":
-                yield _AudioFallbackItem(result, path)
-            else:
-                yield [await self._build_audio_component(
-                    result, path, relay_enabled, callback_base, ttl
-                )]
+        """构建原始媒体组件（实现见 core/delivery.py）。"""
+        async for parts in self._delivery.iter_media_components(result):
+            yield parts
 
     async def _try_send_audio(
         self,
@@ -2142,80 +1922,18 @@ class DeniaSharePlugin(Star):
         callback_base: str,
         ttl: int,
     ) -> bool:
-        """优先发送语音，接口失败时仅尝试一次文件兜底。
-
-        这里的发送是主动 ``event.send``，不经过宿主 RespondStage，所以
-        RespondStage 的文件路径映射不会自动生效，需要在这条路径上自行补上。
-        """
-        for mode in ("voice", "file"):
-            try:
-                component = await self._build_audio_component(
-                    result, path, relay_enabled, callback_base, ttl, mode=mode
-                )
-                self._apply_audio_path_mapping(event, component)
-                sent = await event.send(event.chain_result([component]))
-                if sent is False:
-                    raise RuntimeError("音频发送接口返回失败")
-            except asyncio.CancelledError:
-                raise
-            except Exception:
-                if mode == "voice":
-                    logger.warning(
-                        "[denia_share] 语音发送失败，尝试音频文件兜底", exc_info=True
-                    )
-                else:
-                    logger.warning("[denia_share] 音频文件兜底发送失败", exc_info=True)
-            else:
-                logger.debug(f"[denia_share] 音频发送接口已接受: mode={mode}")
-                return True
-        return False
+        """优先发送语音，接口失败时仅尝试一次文件兜底（实现见 core/delivery.py）。"""
+        return await self._delivery.try_send_audio(
+            event, result, path, relay_enabled, callback_base, ttl
+        )
 
     def _path_mapping_rules(self, event: AstrMessageEvent) -> list:
-        """读取当前会话在宿主配置里的 ``platform_settings.path_mapping``。"""
-        get_host_config = getattr(self.context, "get_config", None)
-        if not callable(get_host_config):
-            return []
-        host_config = get_host_config(event.unified_msg_origin)
-        if host_config is None:
-            return []
-        settings = host_config.get("platform_settings") or {}
-        rules = settings.get("path_mapping") or []
-        if not rules:
-            return []
-        if not isinstance(rules, (list, tuple)):
-            raise ValueError(
-                f"path_mapping 应为列表，实际为 {type(rules).__name__}"
-            )
-        return list(rules)
+        """读取宿主配置的 path_mapping（实现见 core/delivery.py）。"""
+        return self._delivery.path_mapping_rules(event)
 
     def _apply_audio_path_mapping(self, event: AstrMessageEvent, component) -> None:
-        """主动发送前按宿主逻辑映射本地 ``Comp.File`` 的路径。
-
-        URL 中转与 Record 都不需要映射；没有规则时保留原路径。映射本身
-        失败时直接抛出，让本次发送按失败处理 —— 不能把协议端读不到的
-        容器内路径当成发送成功。
-        """
-        file_cls = getattr(Comp, "File", None)
-        if file_cls is None or not isinstance(component, file_cls):
-            return
-        if getattr(component, "url", ""):
-            return
-        local_path = getattr(component, "file", "")
-        if not local_path:
-            return
-        rules = self._path_mapping_rules(event)
-        if not rules:
-            return
-        # 延迟导入：离线单测的 astrbot 是轻量桩，宿主没装全时不能让插件
-        # 顶层 import 失败；只有真的要映射时才需要宿主工具。
-        try:
-            from astrbot.core.utils.path_util import path_Mapping
-        except ImportError as exc:
-            raise RuntimeError("宿主缺少文件路径映射工具") from exc
-        mapped = path_Mapping(rules, str(local_path))
-        if not isinstance(mapped, str) or not mapped:
-            raise RuntimeError("宿主文件路径映射返回了空路径")
-        component.file = mapped
+        """主动发送前按宿主逻辑映射本地 Comp.File 路径（实现见 core/delivery.py）。"""
+        return self._delivery.apply_audio_path_mapping(event, component)
 
     async def _build_audio_component(
         self,
@@ -2227,29 +1945,10 @@ class DeniaSharePlugin(Star):
         *,
         mode: str | None = None,
     ):
-        """构建音频组件；显式 mode 用于语音失败后的文件兜底。
-
-        Record 由宿主转 base64；File 沿用媒体中转或共享本地路径，
-        因此文件发送仍需要协议端能够访问音频。
-        """
-        if mode is None:
-            mode = get_config().AUDIO_SEND_MODE
-        if mode == "file":
-            name = _audio_display_name(result, path)
-            url = None
-            if relay_enabled:
-                url = await register_file(path, callback_base, ttl)
-                if url is None:
-                    logger.info(
-                        f"[denia_share] 音频中转不可用，回退本地路径发送: {path.name}"
-                    )
-            if url:
-                return Comp.File(name=name, url=url)
-            return Comp.File(name=name, file=str(path))
-
-        # 语音条：沿用既有 Record 路径（AstrBot 侧转 base64，无需中转）。
-        return Comp.Record(file=str(path))
-
+        """构建音频组件（实现见 core/delivery.py）。"""
+        return await self._delivery.build_audio_component(
+            result, path, relay_enabled, callback_base, ttl, mode=mode
+        )
     # ==================== B站扫码登录 ====================
 
     @filter.permission_type(filter.PermissionType.ADMIN)
@@ -2300,83 +1999,24 @@ class DeniaSharePlugin(Star):
         else:
             yield event.plain_result(f"❌ B站Cookie失效\n错误: {result.get('error', '未知错误')}")
 
-    # ---------- 扫码登录：WebUI 与聊天命令共用的实现 ----------
+    # ---------- 扫码登录：WebUI 与聊天命令共用的实现（见 core/bili_login.py） ----------
 
     async def bili_qr_create(self) -> tuple[str, str]:
-        """向 B站申请扫码登录二维码。
-
-        Returns:
-            (扫码 URL, qrcode_key)
-
-        Raises:
-            ParseException: 申请失败或返回内容不完整。
-        """
-        if not self._bili_http_session or self._bili_http_session.closed:
-            self._bili_http_session = aiohttp.ClientSession()
-
-        async with self._bili_http_session.get(
-            BILI_QR_GENERATE_URL, headers=self._bili_headers(),
-            timeout=aiohttp.ClientTimeout(total=15),
-        ) as resp:
-            data = await resp.json()
-
-        if data.get("code") != 0:
-            raise ParseException(f"获取二维码失败: {data.get('message', '未知错误')}")
-
-        payload = data.get("data") or {}
-        qrcode_url = payload.get("url")
-        qrcode_key = payload.get("qrcode_key")
-        if not qrcode_url or not qrcode_key:
-            raise ParseException("B站未返回二维码地址或 qrcode_key")
-        return str(qrcode_url), str(qrcode_key)
+        """向 B站申请扫码登录二维码（实现见 core/bili_login.py）。"""
+        return await self._bili_login.qr_create()
 
     @staticmethod
     def render_qr_png(data: str) -> bytes:
-        """把文本渲染成 PNG 字节，供 WebUI 拼成 data URL 展示。"""
-        buffer = io.BytesIO()
-        qrcode.make(data).save(buffer, "PNG")
-        return buffer.getvalue()
+        """把文本渲染成 PNG 字节，供 WebUI 拼成 data URL 展示（实现见 core/bili_login.py）。"""
+        return BiliLoginManager.render_qr_png(data)
 
     def bili_login_state(self, task_id: str) -> dict[str, Any]:
-        """读取扫码登录任务的当前状态（WebUI 轮询用）。"""
-        state = self._bili_login_states.get(task_id)
-        if state is None:
-            return {"state": "unknown", "message": "登录任务不存在或已结束"}
-        return dict(state)
+        """读取扫码登录任务的当前状态（实现见 core/bili_login.py）。"""
+        return self._bili_login.state(task_id)
 
     async def bili_login_cancel(self, task_id: str | None = None) -> bool:
-        """停止后台扫码轮询，**不登出、不清除已保存的 Cookie**。
-
-        Args:
-            task_id: 指定任务；为空时取消所有仍在进行的任务（含聊天命令发起的）。
-
-        幂等：任务不存在、已结束、重复取消都返回 True。只取消**未完成**的任务，
-        因此已经扫码成功并写入 Cookie 的登录不会被误删。
-        """
-        tasks = getattr(self, "_bili_login_tasks", None) or {}
-        if task_id:
-            targets = [task_id]
-        else:
-            targets = [tid for tid, task in tasks.items() if not task.done()]
-
-        pending: list[tuple[str, asyncio.Task]] = []
-        for tid in targets:
-            task = tasks.get(tid)
-            state = self._bili_login_states.get(tid, {})
-            if task is not None and not task.done() and state.get("state") not in {"success", "failed", "expired"}:
-                task.cancel()
-                pending.append((tid, task))
-        if pending:
-            await asyncio.gather(*(task for _, task in pending), return_exceptions=True)
-        for tid, task in pending:
-            # Cancelling before the coroutine starts never runs its finally block.
-            if tasks.get(tid) is task:
-                tasks.pop(tid, None)
-                state = self._bili_login_states.get(tid)
-                if state is not None and state.get("state") in {"waiting", "scanned"}:
-                    state.update(state="cancelled", message="登录任务已取消")
-                self._schedule_login_state_cleanup(tid)
-        return True
+        """停止后台扫码轮询，不登出、不清除已保存的 Cookie（实现见 core/bili_login.py）。"""
+        return await self._bili_login.cancel(task_id)
 
     def bili_login_start(
         self,
@@ -2386,104 +2026,24 @@ class DeniaSharePlugin(Star):
         notify_umo: str | None = None,
         qr_path: Path | None = None,
     ) -> None:
-        """启动后台轮询任务。
-
-        Args:
-            task_id: 任务标识，聊天命令用发送者 ID，WebUI 用随机串。
-            qrcode_key: ``bili_qr_create`` 返回的轮询凭据。
-            notify_umo: 需要把登录结果发到聊天时填会话标识，WebUI 场景传 None。
-            qr_path: 临时二维码文件，任务结束时删除（WebUI 不落盘，传 None）。
-        """
-        existing = self._bili_login_tasks.get(task_id)
-        if existing is not None and not existing.done():
-            return
-
-        import time as _time
-
-        self._bili_login_states[task_id] = {
-            "state": "waiting",
-            "message": "等待扫码",
-            "username": "",
-            "uid": 0,
-            "started_at": _time.time(),
-            "expires_in": QR_CODE_EXPIRE_TIME,
-        }
-        self._bili_login_tasks[task_id] = asyncio.create_task(
-            self._bili_poll_qr_login(
-                task_id, qrcode_key, notify_umo=notify_umo, qr_path=qr_path
-            )
+        """启动后台轮询任务（实现见 core/bili_login.py）。"""
+        return self._bili_login.start(
+            task_id, qrcode_key, notify_umo=notify_umo, qr_path=qr_path
         )
 
     async def bili_cookie_status(self) -> dict[str, Any]:
-        """检查当前 Cookie 是否仍有效。
-
-        会真实请求 B站接口，仅在用户主动点「检测」时调用，不要放进总览的自动刷新里。
-        """
-        if not self._bili_cookie:
-            return {"configured": False, "valid": False, "error": "尚未配置 Cookie"}
-        result = await self._bili_check_cookie_valid()
-        return {
-            "configured": True,
-            "valid": bool(result.get("valid")),
-            "username": result.get("username", ""),
-            "uid": result.get("uid", 0),
-            "error": result.get("error", ""),
-        }
+        """检查当前 Cookie 是否仍有效（实现见 core/bili_login.py）。"""
+        return await self._bili_login.cookie_status()
 
     async def bili_logout(self) -> bool:
-        """清除本地保存的 B站 Cookie（不会撤销 B站侧的登录态）。
+        """清除本地保存的 B站 Cookie（不会撤销 B站侧的登录态）（实现见 core/bili_login.py）。"""
+        return await self._bili_login.logout()
 
-        要清三处，少一处都会「看起来清了、实际还在用」：
-        主模块的 ``bili_cookie.json``、解析器自己持久化的 ``bilibili_cookies.json``、
-        以及配置项 ``BILI_CK``（否则重建解析器时又被读回来）。
-
-        清除前先停掉仍在轮询的扫码任务：否则它可能在清除之后才判定成功，
-        把刚清掉的 Cookie 又写回内存与文件（「清了又自己回来」）。
-        """
-        await self.bili_login_cancel()
-        self._bili_cookie = ""
-        # 同步「已生效的配置项值」：下面会把配置项也清空，不清这里的话
-        # 下一次热更新会以为配置项「没变」而跳过（其实该走的分支已经走完了）
-        self._bili_ck_applied = ""
-
-        cleared = True
-        parser = self.parsers.get("bilibili")
-        if parser is not None and hasattr(parser, "clear_cookie"):
-            try:
-                if parser.clear_cookie() is False:
-                    cleared = False
-            except Exception:
-                cleared = False
-                logger.warning("[denia_share] 清除解析器 B站 Cookie 失败")
-
-        pconfig = get_config()
-        try:
-            changed, errors = pconfig.apply_updates({"BILI_CK": ""})
-            if errors or not changed and not pconfig.save():
-                cleared = False
-        except Exception:
-            cleared = False
-            logger.warning("[denia_share] 清除配置里的 B站 Cookie 失败", exc_info=True)
-
-        try:
-            self._bili_cookie_file.unlink(missing_ok=True)
-            return cleared
-        except OSError:
-            logger.warning("[denia_share] 删除 bili_cookie.json 失败", exc_info=True)
-            return False
-
-    # ---------- 内部方法 ----------
+    # ---------- 内部方法（实现见 core/bili_login.py） ----------
 
     @staticmethod
     def _bili_headers() -> dict:
-        return {
-            "User-Agent": (
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-                "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-            ),
-            "Referer": "https://www.bilibili.com/",
-            "Accept": "application/json, text/plain, */*",
-        }
+        return BiliLoginManager._headers()
 
     async def _bili_poll_qr_login(
         self,
@@ -2493,243 +2053,38 @@ class DeniaSharePlugin(Star):
         notify_umo: str | None = None,
         qr_path: Path | None = None,
     ):
-        """轮询扫码结果，成功后写入并持久化 Cookie。
-
-        状态写进 ``self._bili_login_states``，WebUI 通过 ``bili_login_state`` 读取；
-        聊天命令则靠 ``notify_umo`` 收结果。两条路径共用这一份实现。
-        """
-        import time as _time
-
-        state = self._bili_login_states.get(task_id)
-        if state is None:
-            state = {"state": "waiting", "message": "等待扫码", "username": "", "uid": 0}
-            self._bili_login_states[task_id] = state
-
-        start = _time.time()
-        try:
-            while _time.time() - start < QR_CODE_EXPIRE_TIME:
-                if not self._bili_http_session or self._bili_http_session.closed:
-                    # 这里 break 会跳过 while 的 else（只有「时间耗尽」才走 else），
-                    # 不显式置状态的话 UI 会一直显示「等待扫码」直到 300 秒回收。
-                    state["state"] = "failed"
-                    state["message"] = "登录会话已关闭，请重新获取二维码"
-                    break
-                try:
-                    async with self._bili_http_session.get(
-                        BILI_QR_POLL_URL, params={"qrcode_key": qrcode_key},
-                        headers=self._bili_headers(), timeout=aiohttp.ClientTimeout(total=15),
-                    ) as resp:
-                        poll_data = await resp.json()
-                        set_cookie_headers = resp.headers.getall("Set-Cookie", [])
-                except (asyncio.TimeoutError, aiohttp.ClientError):
-                    await asyncio.sleep(POLL_INTERVAL)
-                    continue
-
-                code = poll_data.get("data", {}).get("code", -1)
-                if code == QR_CODE_EXPIRED:
-                    state["state"] = "expired"
-                    state["message"] = "二维码已过期，请重新获取"
-                    break
-                if code == QR_CODE_SCANNED:
-                    state["state"] = "scanned"
-                    state["message"] = "已扫码，请在手机上确认登录"
-                elif code == QR_CODE_SUCCESS:
-                    cookie_dict: dict[str, str] = {}
-                    for header in set_cookie_headers:
-                        part = header.split(";")[0].strip()
-                        if "=" in part:
-                            k, v = part.split("=", 1)
-                            cookie_dict[k.strip()] = v.strip()
-                    if not cookie_dict:
-                        state["state"] = "failed"
-                        state["message"] = "B站未返回 Cookie，请重试"
-                        break
-                    cookie_str = "; ".join(f"{k}={v}" for k, v in cookie_dict.items())
-                    # 先校验候选值再提交：旧 Cookie 可能还有效，没通过校验的候选值
-                    # 绝不能顶掉它。校验只拿候选值发请求，不写 self._bili_cookie。
-                    result = await self._bili_check_cookie_valid(cookie_str)
-                    if not result["valid"]:
-                        state["state"] = "failed"
-                        state["message"] = (
-                            "Cookie 校验失败，已保留原登录态："
-                            f"{result.get('error', '未知错误')}"
-                        )
-                        break
-                    problem = await self._bili_commit_login_cookie(cookie_str)
-                    if problem:
-                        state["state"] = "failed"
-                        state["message"] = problem
-                        break
-                    state["state"] = "success"
-                    state["username"] = result.get("username", "")
-                    state["uid"] = result.get("uid", 0)
-                    state["message"] = "登录成功"
-                    if notify_umo:
-                        await self._bili_notify(
-                            notify_umo,
-                            f"🎉 登录成功！\n👤 用户: {result.get('username')}\n🆔 UID: {result.get('uid', 0)}",
-                        )
-                    break
-                await asyncio.sleep(POLL_INTERVAL)
-            else:
-                state["state"] = "expired"
-                state["message"] = "二维码已过期，请重新获取"
-        except asyncio.CancelledError:
-            state["state"] = "cancelled"
-            state["message"] = "登录任务已取消"
-            raise
-        except Exception:
-            logger.warning("[denia_share] B站扫码轮询未完成")
-            state["state"] = "failed"
-            state["message"] = "扫码登录未完成，请重新获取二维码"
-        finally:
-            self._bili_login_tasks.pop(task_id, None)
-            # 状态不能跟着一起 pop：UI 还要读最终结果，见 _schedule_login_state_cleanup
-            self._schedule_login_state_cleanup(task_id)
-            if qr_path is not None:
-                self._schedule_qr_cleanup(qr_path)
+        """轮询扫码结果，成功后写入并持久化 Cookie（实现见 core/bili_login.py）。"""
+        return await self._bili_login._poll_qr_login(
+            task_id, qrcode_key, notify_umo=notify_umo, qr_path=qr_path
+        )
 
     def _schedule_login_state_cleanup(self, task_id: str) -> None:
-        """登录任务结束后延迟回收状态，并把总量夹在上限内。
-
-        两个理由：一是 WebUI 轮询读取，任务刚结束就删会让最后一轮拿到
-        「登录任务不存在」而不是「登录成功」；二是 task_id 在 WebUI 侧是随机串，
-        不清就会随点击次数无限增长（原先只 pop 了 ``_bili_login_tasks``，
-        状态字典是只进不出的）。
-        """
-        if len(self._bili_login_states) > LOGIN_STATE_MAX:
-            ordered = sorted(
-                self._bili_login_states.items(),
-                key=lambda kv: kv[1].get("started_at") or 0.0,
-            )
-            for old_id, _ in ordered[: len(ordered) - LOGIN_STATE_MAX]:
-                # old_id == task_id 是「正在收尾的这条」：调用方在 finally 里已经先把
-                # 本任务从 _bili_login_tasks 里 pop 掉了，所以下面那条豁免对它无效 ——
-                # 一旦它恰好是最旧的一条，最终状态会被自己这次清理删掉，UI 再也读不到
-                # 「登录成功」。所以本任务要单独豁免。
-                if old_id == task_id or old_id in self._bili_login_tasks:
-                    continue  # 本任务与还在跑的任务都不能丢，UI 要读它的进度
-                self._bili_login_states.pop(old_id, None)
-
-        async def _delayed_drop() -> None:
-            try:
-                await asyncio.sleep(LOGIN_STATE_TTL)
-                self._bili_login_states.pop(task_id, None)
-            except asyncio.CancelledError:
-                raise
-            except Exception:
-                logger.debug("回收扫码登录状态失败", exc_info=True)
-
-        self._delayed_cleanup_tasks = [
-            task for task in self._delayed_cleanup_tasks if not task.done()
-        ]
-        self._delayed_cleanup_tasks.append(asyncio.create_task(_delayed_drop()))
+        """登录任务结束后延迟回收状态（实现见 core/bili_login.py）。"""
+        return self._bili_login._schedule_state_cleanup(task_id)
 
     def _schedule_qr_cleanup(self, qr_path: Path, delay: int = 120) -> None:
-        """延迟删除二维码临时文件。
-
-        二维码图片已经 yield 进消息管线，真正读取它的时刻在发送阶段，
-        轮询一结束就删会与发送竞争、导致图片发不出去；所以推迟到
-        ``delay`` 秒后再清理。顺带回收已完成的旧任务，避免列表无限增长。
-        """
-        async def _delayed_unlink() -> None:
-            try:
-                await asyncio.sleep(delay)
-                qr_path.unlink(missing_ok=True)
-            except Exception:
-                logger.debug("清理二维码临时文件失败", exc_info=True)
-
-        self._delayed_cleanup_tasks = [
-            task for task in self._delayed_cleanup_tasks if not task.done()
-        ]
-        self._delayed_cleanup_tasks.append(asyncio.create_task(_delayed_unlink()))
+        """延迟删除二维码临时文件（实现见 core/bili_login.py）。"""
+        return self._bili_login._schedule_qr_cleanup(qr_path, delay=delay)
 
     def _bili_apply_cookie_to_parser(self, cookie_str: str):
-        parser = self.parsers.get("bilibili")
-        if parser and hasattr(parser, "update_cookie"):
-            parser.update_cookie(cookie_str)
-            logger.info("B站 Cookie 已应用到解析器")
+        """把 Cookie 应用到 B站解析器（实现见 core/bili_login.py）。"""
+        return self._bili_login._apply_cookie_to_parser(cookie_str)
 
     async def _bili_check_cookie_valid(self, cookie_str: str | None = None) -> dict:
-        cookie = self._bili_cookie if cookie_str is None else cookie_str
-        if not cookie or not self._bili_http_session:
-            return {"valid": False, "error": "Cookie 为空或会话未初始化"}
-        headers = {**self._bili_headers(), "Cookie": cookie}
-        try:
-            async with self._bili_http_session.get(
-                "https://api.bilibili.com/x/web-interface/nav",
-                headers=headers, timeout=aiohttp.ClientTimeout(total=15),
-            ) as resp:
-                data = await resp.json()
-            if data.get("code") == 0 and data.get("data", {}).get("isLogin"):
-                u = data["data"]
-                return {"valid": True, "username": u.get("uname", ""), "uid": u.get("mid", 0)}
-            return {"valid": False, "error": "登录态已失效或验证未通过"}
-        except Exception:
-            return {"valid": False, "error": "验证暂时失败，请稍后重试"}
+        """校验 B站 Cookie（实现见 core/bili_login.py）。"""
+        return await self._bili_login._check_cookie_valid(cookie_str)
 
     async def _bili_load_cookie(self):
-        # **配置项优先**：BILI_CK 是用户显式填的，持久化文件只是扫码登录的暂存。
-        # 取值顺序要和 apply_runtime_config 与 parser._init_credential 保持一致，
-        # 否则「网页上改了 BILI_CK」还是会被旧登录态压住。
-        configured = str(get_config().BILI_CK or "")
-        # 记下启动时生效的配置项值：apply_runtime_config 靠它判断「到底变没变」
-        self._bili_ck_applied = configured
-        if configured:
-            self._bili_cookie = configured
-            return
-        try:
-            if self._bili_cookie_file.exists():
-                saved = json.loads(self._bili_cookie_file.read_text(encoding="utf-8")).get("cookie", "")
-                if saved:
-                    self._bili_cookie = saved
-                    logger.info("已从持久化文件加载B站 Cookie")
-        except Exception as e:
-            logger.warning(f"加载B站 Cookie 失败: {e}")
+        """启动时加载 B站 Cookie（实现见 core/bili_login.py）。"""
+        return await self._bili_login.load_cookie()
 
     async def _bili_commit_login_cookie(self, cookie_str: str) -> str:
-        """Commit a verified QR credential; return a public error on failure."""
-        pconfig = get_config()
-        old_cookie = str(pconfig.BILI_CK or "")
-        staged = self._bili_cookie_file.with_name(
-            f".{self._bili_cookie_file.name}.{time.time_ns()}.tmp"
-        )
-        config_attempted = False
-        try:
-            with staged.open("x", encoding="utf-8") as stream:
-                json.dump({"cookie": cookie_str}, stream, ensure_ascii=False)
-            config_attempted = True
-            changed, errors = pconfig.apply_updates({"BILI_CK": cookie_str})
-            if errors or not changed and not pconfig.save():
-                raise OSError("configuration save failed")
-            staged.replace(self._bili_cookie_file)
-        except Exception:
-            if config_attempted:
-                try:
-                    changed, errors = pconfig.apply_updates({"BILI_CK": old_cookie})
-                    if errors or not changed and not pconfig.save():
-                        logger.warning("[denia_share] B站登录配置回滚未能持久保存")
-                except Exception:
-                    logger.warning("[denia_share] B站登录配置回滚未完成")
-            return "登录凭据未能完整保存，请检查配置和存储后重试"
-        finally:
-            try:
-                staged.unlink(missing_ok=True)
-            except OSError:
-                logger.warning("[denia_share] B站登录临时文件未能清理")
-        self._bili_cookie = cookie_str
-        self._bili_ck_applied = cookie_str
-        self._bili_apply_cookie_to_parser(cookie_str)
-        return ""
+        """提交已校验的扫码凭据；失败返回公开错误信息（实现见 core/bili_login.py）。"""
+        return await self._bili_login.commit_login_cookie(cookie_str)
 
     async def _bili_notify(self, session: str, message: str):
-        try:
-            # session 期望是 unified_msg_origin（平台:消息类型:会话ID 三段式）；
-            # 对历史调用方只传裸 QQ 号的情况做兼容兜底
-            umo = session if ":" in session else f"default:FriendMessage:{session}"
-            await self.context.send_message(umo, MessageChain().message(message))
-        except Exception as e:
-            logger.error(f"发送消息到 {session} 失败: {e}")
+        """把登录结果发到聊天会话（实现见 core/bili_login.py）。"""
+        return await self._bili_login.notify(session, message)
 
     # ==================== JSON 卡片工具 ====================
 
@@ -2827,9 +2182,14 @@ class DeniaSharePlugin(Star):
         self._result_cache.clear()
         self._render_cache.clear()
         self._link_dedup.clear()
+        self._confirm.invalidate_all("cache_cleared")
         yield event.plain_result(f"🧹 已清空 {cleaned} 个缓存文件")
 
     async def terminate(self):
+        # 先取消确认协程并等它们退出，避免下载器 / 缓存目录关闭后仍在下载发送。
+        controller = getattr(self, "_confirm_controller", None)
+        if controller is not None:
+            await controller.close()
         cookiecloud = getattr(self, '_cookiecloud_sync', None)
         if cookiecloud is not None:
             await cookiecloud.close()

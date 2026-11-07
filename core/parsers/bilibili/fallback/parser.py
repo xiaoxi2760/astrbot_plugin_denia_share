@@ -46,6 +46,7 @@ from ....download import validate_cached_media
 from ....media_utils import ffmpeg_available
 from ....task import PathTask
 from .fetch import fetch_single_file, fetch_streams
+from .streams import quality_label, stream_meta
 from .video import ResolvedPage, VideoInfo, fetch_video_info
 from .wbi import WbiKeyProvider
 
@@ -234,6 +235,11 @@ class FallbackBilibiliParser(BaseParser):
             page.cover,
             page.duration,
         )
+        # 确认下载预览的描述 loader：选流但**不下载源媒体**。auto 模式没有
+        # 调用方会 await 它，因此不改变默认网络时序。
+        video_content.info_loader = lambda: self.describe_video_streams(
+            info, page, limit_warnings,
+        )
 
         return self.result(
             url=url,
@@ -250,6 +256,110 @@ class FallbackBilibiliParser(BaseParser):
                 "limit_warnings": limit_warnings,
             },
         )
+
+    async def describe_video_streams(
+        self,
+        info: VideoInfo,
+        page: ResolvedPage,
+        limit_warnings: Optional[List[str]] = None,
+    ) -> Dict[str, Any]:
+        """确认预览：选流但**不下载源媒体**，有预算 HEAD 得到大小。
+
+        与 :meth:`_download` 共用同一份备用取流逻辑，但**不调用**下载器：
+
+        - 正常 DASH：视频 + 音频两路都 HEAD 到长度才给合计，合并后体积算
+          ``estimated=True``；任一未知则合计未知；
+        - 本机缺 ffmpeg：改取单文件并 HEAD 单文件（精确大小），档位取接口
+          实际返回的 ``quality``，**不是**配置目标 ``BILI_QUALITY``；
+        - 平台业务明确不可用（受限 / 缺 ffmpeg 且无单文件）才给
+          ``unavailable_reason``；网络/HEAD 失败只报未知。
+
+        字典不含 URL / Cookie；本方法由 ``VideoContent.info_loader`` 惰性调用。
+        """
+        from ....config import get_config
+        from ....media_probe import empty_description, probe_url
+
+        desc = empty_description(1)
+        target_qn = _QUALITY_BY_NAME.get(
+            str(get_config().BILI_QUALITY).strip().upper().replace("＋", "+"),
+            _DEFAULT_QN,
+        )
+        try:
+            video, audio, raw = await fetch_streams(
+                lambda: self.new_client(),
+                info.bvid,
+                page.cid,
+                headers=self.headers,
+                cookie_header=self._bili_ck,
+                codec_preference=get_config().BILI_CODEC,
+                max_qn=target_qn,
+                key_provider=self._key_provider,
+            )
+        except Exception:
+            # 网络 / 接口失败只能未知，不能武断说「无权限」。
+            return desc
+
+        if not video:
+            return desc
+
+        access = analyze_play_access(payload=raw, has_cookie=bool(self._bili_ck))
+        if access.get("status") == STATUS_BLOCKED:
+            desc["unavailable_reason"] = (
+                access.get("message") or "当前无法获取该视频的完整流"
+            )
+            return desc
+
+        if audio is not None and not ffmpeg_available():
+            try:
+                pair, single_raw = await fetch_single_file(
+                    lambda: self.new_client(),
+                    info.bvid,
+                    page.cid,
+                    headers=self.headers,
+                    cookie_header=self._bili_ck,
+                    key_provider=self._key_provider,
+                )
+            except Exception:
+                return desc
+            single_access = analyze_play_access(
+                payload=single_raw, has_cookie=bool(self._bili_ck)
+            )
+            if single_access.get("status") != STATUS_FULL:
+                desc["unavailable_reason"] = (
+                    single_access.get("message")
+                    or "当前无法获取可发送的完整单文件视频"
+                )
+                return desc
+            if not pair:
+                desc["unavailable_reason"] = (
+                    "本机未安装 ffmpeg，无法合并B站音视频分离流，"
+                    "且未取到可用的单文件视频"
+                )
+                return desc
+            desc["quality"] = quality_label((single_raw or {}).get("quality"))
+            probed = await probe_url(
+                self.downloader, pair[0], headers=self.headers,
+            )
+            desc["size_bytes"] = probed.get("size_bytes")
+            desc["estimated"] = False
+            return desc
+
+        meta = stream_meta((raw or {}).get("dash") or {}, video[0])
+        desc["quality"] = meta.get("quality") or ""
+        sizes: List[Optional[int]] = []
+        video_probe = await probe_url(
+            self.downloader, video[0], headers=self.headers,
+        )
+        sizes.append(video_probe.get("size_bytes"))
+        if audio:
+            audio_probe = await probe_url(
+                self.downloader, audio[0], headers=self.headers,
+            )
+            sizes.append(audio_probe.get("size_bytes"))
+        if all(size is not None for size in sizes):
+            desc["size_bytes"] = int(sum(size for size in sizes if size is not None))
+            desc["estimated"] = bool(audio)
+        return desc
 
     async def _download(
         self,

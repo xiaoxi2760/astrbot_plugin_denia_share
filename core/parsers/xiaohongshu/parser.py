@@ -8,7 +8,23 @@ from typing import ClassVar
 from httpx import Cookies, AsyncClient
 from astrbot.api import logger
 from ...base_parser import BaseParser, PlatformEnum, ParseException, handle
+from ...config import get_config
 from ...data import Platform, platform_of
+
+# 默认图宽（配置 XHS_IMAGE_WIDTH 未初始化时兜底，与旧硬编码 1080 一致）
+_DEFAULT_IMAGE_WIDTH = 1080
+
+
+def _image_width() -> int:
+    """读配置的小红书图片宽度；0 = 不加 CDN 缩放/转码指令。"""
+    try:
+        cfg = get_config()
+    except RuntimeError:
+        return _DEFAULT_IMAGE_WIDTH
+    try:
+        return max(0, int(getattr(cfg, "XHS_IMAGE_WIDTH", _DEFAULT_IMAGE_WIDTH)))
+    except (TypeError, ValueError):
+        return _DEFAULT_IMAGE_WIDTH
 
 
 class XiaoHongShuParser(BaseParser):
@@ -215,13 +231,22 @@ class XiaoHongShuParser(BaseParser):
         xhslink.cn/o/raJQGfoLlq（``oss-sg/notes_pre_post/…`` 与
         ``note_pre_post_uhdr/…``）图集因此全部 404，改成按 path 结构定位。
         匹配不上时原样返回，不会把链接弄坏。
+
+        图宽来自配置 ``XHS_IMAGE_WIDTH``（默认 1080，行为与旧硬编码一致）；
+        配置为 **0** 时**完全去掉 CDN 变换指令**（``?imageView2/...``），直接取
+        sns-img-hw 上的原始对象。**不保证是「原图」**：这是去掉本插件的缩放/转码
+        指令，远端对象本身的格式与尺寸由 CDN 决定；fileId 的完整命名空间前缀
+        （``notes_pre_post/``、``oss-sg/notes_pre_post/``…）必须照旧保留。
         """
         if not url or ("sns-webpic" not in url and "sns-img" not in url):
             return url
         file_id = cls._extract_file_id(url)
         if not file_id:
             return url
-        return f"https://sns-img-hw.xhscdn.com/{file_id}?imageView2/2/w/1080/format/jpg"
+        width = _image_width()
+        if width:
+            return f"https://sns-img-hw.xhscdn.com/{file_id}?imageView2/2/w/{width}/format/jpg"
+        return f"https://sns-img-hw.xhscdn.com/{file_id}"
 
     @staticmethod
     def _extract_file_id(url: str) -> str | None:

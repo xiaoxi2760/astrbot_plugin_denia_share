@@ -323,6 +323,12 @@ class BilibiliParser(BaseParser):
             PathTask(lambda: download_video()),
             page_info.cover, page_info.duration,
         )
+        # 确认下载预览的描述 loader：选流但**不下载**（见 describe_video_streams）。
+        # auto 模式没有任何调用方会 await 它，不会改变默认网络时序。
+        video_content.info_loader = lambda: self.describe_video_streams(
+            video=video, page_index=page_info.index, warnings=limit_warnings,
+            rights=video_info.rights, bvid=video_info.bvid, cid=page_info.cid,
+        )
 
         result = self.result(
             url=url, title=page_info.title, timestamp=page_info.timestamp,
@@ -331,8 +337,12 @@ class BilibiliParser(BaseParser):
         )
         from ...card_extras import CardInfoLoader
 
+        # 附加信息（在线人数 / AI 总结）的等待上限按配置
+        # BILI_EXTRA_INFO_TIMEOUT_SECONDS（默认 5s）；只影响卡片出图时的
+        # 附加信息，不影响解析与下载本身。读不到配置属性时回退默认。
         result.card_info_loader = CardInfoLoader(
             result, fetch_online=fetch_online, fetch_ai=fetch_ai,
+            timeout=float(getattr(pconfig, "BILI_EXTRA_INFO_TIMEOUT_SECONDS", 5.0)),
         )
         return result
 
@@ -446,6 +456,7 @@ class BilibiliParser(BaseParser):
         *,
         cookie_header: str = "",
         warnings: list[str] | None = None,
+        meta_out: dict | None = None,
     ):
         """自建取流备用路径。拿不到就返回 ``None``，让调用方按原逻辑走。
 
@@ -457,11 +468,15 @@ class BilibiliParser(BaseParser):
         去请求也拿不到流，白白多打一次请求还会把日志搅浑，所以调用方要先用
         ``restriction_type`` 判断。
 
-        :returns: ``(v_url, v_backups, a_url, a_backups)``，取不到返回 ``None``。
+        :returns: ``(v_url, v_backups, a_url, a_backups)``，取不到返回
+            ``None``。**返回形状保持不变**；实际选中流的
+            ``quality/width/height`` 通过可选的 ``meta_out`` 字典带回，
+            供描述与选流分支保留**实际档位**（不传就完全走旧行为）。
         """
         from astrbot.api import logger
 
         from .fallback import fetch_streams
+        from .fallback.streams import quality_label, stream_meta
         from .fallback.wbi import WbiKeyProvider
         from .fallback.fetch import fetch_single_file
         # get_config 在本文件里一律**方法内 import**（顶层不引，见 parse_video /
@@ -498,7 +513,9 @@ class BilibiliParser(BaseParser):
         access = analyze_play_access(_raw, has_cookie=bool(cookie_header))
         self._append_access_warning(warnings, access["message"])
         if access["status"] == STATUS_BLOCKED:
-            raise IgnoreException(access["message"] or "无法获取视频流")
+            unavailable = IgnoreException(access["message"] or "无法获取视频流")
+            unavailable.unavailable = True
+            raise unavailable
 
         if audio and not ffmpeg_available():
             try:
@@ -512,29 +529,141 @@ class BilibiliParser(BaseParser):
             if pair:
                 access = analyze_play_access(raw, has_cookie=bool(cookie_header))
                 if access["status"] == STATUS_FULL:
+                    if meta_out is not None:
+                        meta_out.update({
+                            "quality": quality_label(raw.get("quality")),
+                            "width": None,
+                            "height": None,
+                            "bandwidth": None,
+                        })
                     return pair[0], pair[1], None, []
             message = "未安装 ffmpeg，无法获取可直接发送的视频，已跳过下载"
             self._append_access_warning(warnings, message)
-            raise IgnoreException(message)
+            unavailable = IgnoreException(message)
+            unavailable.unavailable = True
+            raise unavailable
 
         logger.info(
             f"[bili] 已切到自建取流备用路径（bilibili-api-python 未生效）: {bvid} p{cid}"
         )
         v_url, v_backups = video
+        if meta_out is not None:
+            meta_out.update(stream_meta((_raw or {}).get("dash") or {}, v_url))
         if audio:
             a_url, a_backups = audio
             return v_url, v_backups, a_url, a_backups
         return v_url, v_backups, None, []
 
-    async def extract_download_urls(self, video: Video | None = None, *, bvid: str | None = None,
-                                     avid: int | None = None, page_index: int = 0,
-                                     warnings: list[str] | None = None,
-                                     rights: dict | None = None,
-                                     cid: int | None = None):
-        """取视频/音频流地址。
+    # 清晰度档位 qn → 展示名。**这是「实际取到的档位」的映射**：
+    # 描述只认实际流（DASH 的 video_quality / html5 的 data.quality），
+    # 永远不把配置目标 BILI_QUALITY 当成本次实际画质。
+    _BILI_QN_LABELS = {
+        16: "360P", 32: "480P", 64: "720P", 80: "1080P",
+        112: "1080P+", 116: "1080P60", 120: "4K",
+        125: "HDR", 126: "杜比", 127: "8K",
+    }
 
-        ``bvid`` + ``cid`` 是**自建取流备用路径**的输入。缺了它们，备用路径不可用
-        （见 :meth:`_fallback_stream_urls`）——主力路径不受影响。
+    @classmethod
+    def _qn_label(cls, qn) -> str:
+        """按 qn 数值映射展示名；认不出返回空串（未知，不编造）。"""
+        try:
+            qn = int(qn)
+        except (TypeError, ValueError):
+            return ""
+        return cls._BILI_QN_LABELS.get(qn, "")
+
+    @classmethod
+    def _stream_quality(cls, stream) -> str:
+        """取 bilibili_api 流对象的**实际**清晰度展示名。
+
+        ``video_quality`` 可能是枚举（``value`` = qn）或带 id 的对象，
+        统一按 qn → label 映射；拿不到再退到 ``name``（``_1080P_PLUS`` →
+        ``1080P+``）。全部失败返回空串。
+        """
+        quality = getattr(stream, "video_quality", None)
+        if quality is None:
+            return ""
+        qn = getattr(quality, "value", None)
+        if qn is None:
+            qn = getattr(quality, "id", None)
+        label = cls._qn_label(qn)
+        if label:
+            return label
+        name = str(getattr(quality, "name", "") or "").strip()
+        if name:
+            cleaned = name.lstrip("_").replace("_PLUS", "+").replace("_", "")
+            if cleaned:
+                return cleaned
+        return ""
+
+    @classmethod
+    def _stream_dimensions(cls, stream) -> tuple[int | None, int | None]:
+        """取流对象的实际宽高；优先 width/height，缺失时看 scale 元组，未知返回 None。"""
+        width = getattr(stream, "width", None)
+        height = getattr(stream, "height", None)
+        scale = getattr(stream, "scale", None)
+        if isinstance(scale, (tuple, list)) and len(scale) >= 2:
+            try:
+                if width is None:
+                    width = int(scale[0])
+                if height is None:
+                    height = int(scale[1])
+            except (TypeError, ValueError, IndexError):
+                pass
+        try:
+            width = int(width) if width is not None else None
+        except (TypeError, ValueError):
+            width = None
+        try:
+            height = int(height) if height is not None else None
+        except (TypeError, ValueError):
+            height = None
+        return width, height
+
+    @staticmethod
+    def _selection(
+        video_url: str,
+        video_backups: list,
+        audio_url: str | None,
+        audio_backups: list,
+        kind: str,
+        quality: str,
+        width: int | None,
+        height: int | None,
+    ) -> dict:
+        """把一次选流结果整理成结构化字典（下载与描述共用同一份选流逻辑）。"""
+        return {
+            "video_url": video_url,
+            "video_backups": list(video_backups or []),
+            "audio_url": audio_url,
+            "audio_backups": list(audio_backups or []),
+            "kind": kind,
+            "quality": quality or "",
+            "width": width,
+            "height": height,
+        }
+
+    async def _select_streams(
+        self,
+        video: "Video | None" = None,
+        *,
+        bvid: str | None = None,
+        avid: int | None = None,
+        page_index: int = 0,
+        warnings: list[str] | None = None,
+        rights: dict | None = None,
+        cid: int | None = None,
+    ) -> dict:
+        """选流（主 / 备用 / html5 降档），**只取地址与元数据，不下载**。
+
+        返回值是结构化字典（见 :meth:`_selection`），供两条消费路径共用：
+
+        - :meth:`extract_download_urls` 拆出四元组给既有下载流程（行为不变）；
+        - :meth:`describe_video_streams` 读 ``quality``/``width``/``height``
+          （**实际档位**，不是 ``BILI_QUALITY`` 配置目标）并做有预算 HEAD。
+
+        异常语义与原 ``extract_download_urls`` 完全一致：受限/无权限抛
+        ``IgnoreException``，选不出流抛 ``DownloadException``。
         """
         from bilibili_api.video import (
             AudioStreamDownloadURL, VideoStreamDownloadURL, FLVStreamDownloadURL,
@@ -583,11 +712,17 @@ class BilibiliParser(BaseParser):
             # 换自建路径再试一次。**「没权限」不走这条路** —— 换个客户端去请求
             # 一样拿不到流，只会把日志搅浑。
             if not access["restriction_type"] and bvid and cid is not None:
+                fallback_meta: dict = {}
                 fb = await self._fallback_stream_urls(
-                    bvid, cid, target_quality, cookie_header=self._bili_ck or "", warnings=warnings,
+                    bvid, cid, target_quality, cookie_header=self._bili_ck or "",
+                    warnings=warnings, meta_out=fallback_meta,
                 )
                 if fb:
-                    return fb
+                    return self._selection(
+                        fb[0], fb[1], fb[2], fb[3], "fallback",
+                        fallback_meta.get("quality", ""), fallback_meta.get("width"),
+                        fallback_meta.get("height"),
+                    )
             self._append_access_warning(warnings, access["message"])
             raise IgnoreException(access["message"] or "无法获取视频流") from error
 
@@ -597,7 +732,10 @@ class BilibiliParser(BaseParser):
         self._append_access_warning(warnings, access["message"])
         if access["status"] == STATUS_BLOCKED:
             # 有响应但拿不到可播放流：同样是「知道原因的跳过」，不是 CDN 故障
-            raise IgnoreException(access["message"] or "无法获取视频流")
+            unavailable = IgnoreException(access["message"] or "无法获取视频流")
+            # 描述侧据此区分「平台明确不可用」与「网络/接口失败只能未知」。
+            unavailable.unavailable = True
+            raise unavailable
 
         detecter = VideoDownloadURLDataDetecter(download_url_data)
         streams = detecter.detect_best_streams(
@@ -640,18 +778,29 @@ class BilibiliParser(BaseParser):
                 better_than=None if ffmpeg_missing else dash_qid,
             )
             if mp4_url:
-                # html5 durl 是音视频合并好的单文件，没有独立音轨
-                return mp4_url, mp4_backups, None, []
+                # html5 durl 是音视频合并好的单文件，没有独立音轨；
+                # 实际档位由 _try_html5_mp4 记录的 served qn 决定（不是配置目标）
+                served_qn = getattr(self, "_last_html5_served_qn", None)
+                return self._selection(
+                    mp4_url, mp4_backups, None, [], "mp4",
+                    self._qn_label(served_qn), None, None,
+                )
 
         if video_stream is None:
             # 主路径调用成功但没解析出视频流：同样是 bilibili_api 侧失灵的表现，
             # 交给自建路径再试一次。
             if bvid and cid is not None:
+                fallback_meta = {}
                 fb = await self._fallback_stream_urls(
-                    bvid, cid, target_quality, cookie_header=self._bili_ck or "", warnings=warnings,
+                    bvid, cid, target_quality, cookie_header=self._bili_ck or "",
+                    warnings=warnings, meta_out=fallback_meta,
                 )
                 if fb:
-                    return fb
+                    return self._selection(
+                        fb[0], fb[1], fb[2], fb[3], "fallback",
+                        fallback_meta.get("quality", ""), fallback_meta.get("width"),
+                        fallback_meta.get("height"),
+                    )
             raise DownloadException("未找到可下载的视频流")
 
         if ffmpeg_missing:
@@ -665,15 +814,108 @@ class BilibiliParser(BaseParser):
                 "且未取到可用的单文件视频，已跳过下载"
             )
             self._append_access_warning(warnings, message)
-            raise IgnoreException(message)
+            unavailable = IgnoreException(message)
+            unavailable.unavailable = True
+            raise unavailable
 
         v_backups = video_stream.backup_url if isinstance(video_stream, VideoStreamDownloadURL) else []
         a_backups = audio_stream.backup_url if audio_stream and isinstance(audio_stream, AudioStreamDownloadURL) else []
+        actual_quality = self._stream_quality(video_stream)
+        width, height = self._stream_dimensions(video_stream)
 
         if audio_stream is None:
-            return video_stream.url, v_backups, None, []
+            return self._selection(
+                video_stream.url, v_backups, None, [], "dash",
+                actual_quality, width, height,
+            )
 
-        return video_stream.url, v_backups, audio_stream.url, a_backups
+        return self._selection(
+            video_stream.url, v_backups, audio_stream.url, a_backups, "dash",
+            actual_quality, width, height,
+        )
+
+    async def extract_download_urls(self, video: "Video | None" = None, *, bvid: str | None = None,
+                                     avid: int | None = None, page_index: int = 0,
+                                     warnings: list[str] | None = None,
+                                     rights: dict | None = None,
+                                     cid: int | None = None):
+        """取视频/音频流地址（保持原有签名、返回形状与异常语义）。
+
+        ``bvid`` + ``cid`` 是**自建取流备用路径**的输入。缺了它们，备用路径不可用
+        （见 :meth:`_fallback_stream_urls`）——主力路径不受影响。
+
+        选流逻辑收口在 :meth:`_select_streams`（主 / 备用 / html5 降档共用），
+        这里只拆出下载侧需要的四元组 ``(v_url, v_backups, a_url, a_backups)``。
+        """
+        selection = await self._select_streams(
+            video=video, bvid=bvid, avid=avid, page_index=page_index,
+            warnings=warnings, rights=rights, cid=cid,
+        )
+        return (
+            selection["video_url"], selection["video_backups"],
+            selection["audio_url"], selection["audio_backups"],
+        )
+
+    async def describe_video_streams(
+        self,
+        video: "Video | None" = None,
+        *,
+        page_index: int = 0,
+        warnings: list[str] | None = None,
+        rights: dict | None = None,
+        bvid: str | None = None,
+        cid: int | None = None,
+    ) -> dict:
+        """确认下载预览：选流但**不下载源媒体**，返回媒体描述字典。
+
+        复用 :meth:`_select_streams`（与实际下载同一份选流逻辑），再对选中
+        URL 做有预算的 HEAD（:func:`core.media_probe.probe_url`）：
+
+        - 单文件（html5 / 无独立音轨）：Content-Length 即精确大小，``estimated=False``；
+        - DASH 音视频分轨：两路长度都已知才给合计，合并后的最终体积算
+          **估算**（``estimated=True``）；任一未知则 ``size_bytes=None``；
+        - 平台明确不可下载（受限 / 缺 ffmpeg）：返回 ``unavailable_reason``，
+          网络 / HEAD 失败保持未知（不武断认定无权限）。
+
+        本方法由 ``VideoContent.info_loader`` 惰性调用；auto 模式无人调用，
+        不会改变默认网络时序。描述字典**不包含 URL / 凭据**。
+        """
+        from ...media_probe import empty_description, probe_url
+
+        desc = empty_description(1)
+        try:
+            selection = await self._select_streams(
+                video=video, page_index=page_index, warnings=warnings,
+                rights=rights, bvid=bvid, cid=cid,
+            )
+        except IgnoreException as exc:
+            # 只有显式标记为「平台明确不可下载」的异常才写 unavailable_reason；
+            # 网络/接口失败（哪怕被选流层包成 IgnoreException）只能未知。
+            if getattr(exc, "unavailable", False):
+                desc["unavailable_reason"] = (
+                    getattr(exc, "message", None) or str(exc) or "无法获取视频流"
+                )
+            return desc
+        except (DownloadException, MediaProcessException):
+            # 选不出流：视为未知，不武断认定无权限
+            return desc
+
+        desc["quality"] = selection.get("quality") or ""
+        video_url = selection.get("video_url")
+        audio_url = selection.get("audio_url")
+        if not video_url:
+            return desc
+
+        sizes: list[int | None] = []
+        v_probe = await probe_url(self.downloader, video_url, headers=self.headers)
+        sizes.append(v_probe.get("size_bytes"))
+        if audio_url:
+            a_probe = await probe_url(self.downloader, audio_url, headers=self.headers)
+            sizes.append(a_probe.get("size_bytes"))
+        if all(size is not None for size in sizes):
+            desc["size_bytes"] = int(sum(size for size in sizes if size is not None))
+            desc["estimated"] = bool(audio_url)
+        return desc
 
     # 清晰度档位 → 期望高度（用于判断 DASH 实际给到的是否够用）
     _QUALITY_HEIGHT = {
@@ -718,6 +960,9 @@ class BilibiliParser(BaseParser):
             return None, []
 
         served = data.get("quality")
+        # 记下 html5 实际提供的档位（qn），供描述侧展示「实际取到的画质」——
+        # 它可能因未登录 / 无 ffmpeg 而低于配置目标 BILI_QUALITY。
+        self._last_html5_served_qn = served
         if better_than is not None and isinstance(served, int) and served <= better_than:
             logger.debug(
                 f"[bili] html5 档位 {served} 不高于 DASH 的 {better_than}，放弃回退"

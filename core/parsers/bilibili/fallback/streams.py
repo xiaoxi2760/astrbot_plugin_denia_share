@@ -34,6 +34,8 @@ __all__ = [
     "codec_rank",
     "pick_streams",
     "pick_single_file",
+    "quality_label",
+    "stream_meta",
     "StreamPair",
 ]
 
@@ -82,6 +84,53 @@ def _urls_of(stream: Dict[str, Any]) -> List[str]:
     if isinstance(backups, str):
         backups = [backups]
     return [u for u in ([primary] + list(backups)) if u]
+
+
+#: B站实际 qn → 展示名。只用于「接口已经给出 qn」的场合，绝不拿配置目标
+#: BILI_QUALITY 顶替 —— 那会把「目标 4K、实际只给 720P」显示成 4K。
+_QUALITY_LABELS: Dict[int, str] = {
+    16: "360P", 32: "480P", 64: "720P", 80: "1080P",
+    112: "1080P+", 116: "1080P60", 120: "4K", 125: "HDR",
+    126: "杜比", 127: "8K",
+}
+
+
+def quality_label(qn: Any) -> str:
+    """把接口返回的 qn 转成展示名；认不出返回空串（未知，不编造）。"""
+    try:
+        value = int(qn)
+    except (TypeError, ValueError):
+        return ""
+    return _QUALITY_LABELS.get(value, "")
+
+
+def _dimension(value: Any) -> Optional[int]:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def stream_meta(dash: Dict[str, Any], url: str) -> Dict[str, Any]:
+    """找回 ``pick_streams`` 实际选中的那条流，返回 qn/宽高。
+
+    备用路径的 ``(url, backups)`` 没有携带元数据，而确认预览要展示**实际**
+    档位而不是配置目标。``url`` 正是 ``pick_streams`` 从响应里挑出的主地址，
+    所以按地址反查即可；找不到时各字段为空/``None``（未知），不猜。
+    """
+    for group in ("video", "audio"):
+        for stream in (dash or {}).get(group) or []:
+            if not isinstance(stream, dict):
+                continue
+            if url not in _urls_of(stream):
+                continue
+            return {
+                "quality": quality_label(stream.get("id")),
+                "width": _dimension(stream.get("width")),
+                "height": _dimension(stream.get("height")),
+                "bandwidth": _dimension(stream.get("bandwidth")),
+            }
+    return {"quality": "", "width": None, "height": None, "bandwidth": None}
 
 
 def _sort_key(stream: Dict[str, Any], order: Sequence[str], max_qn: int):

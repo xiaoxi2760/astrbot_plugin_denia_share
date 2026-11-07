@@ -142,6 +142,17 @@ class NeteaseProvider(BaseProvider):
         )
 
     @staticmethod
+    def _quality_label(bitrate: Any) -> str:
+        """按码率（bps）映射音质展示名；只有接口给了 ``br`` 才填，不认识保持空串。"""
+        try:
+            br = int(bitrate)
+        except (TypeError, ValueError):
+            return ""
+        if br > 0:
+            return f"{br // 1000}k"
+        return ""
+
+    @staticmethod
     def _play_item(payload, song):
         for raw in as_list(as_dict(payload).get('data')):
             item = as_dict(raw)
@@ -152,12 +163,19 @@ class NeteaseProvider(BaseProvider):
                 continue
             trial = as_dict(item.get('freeTrialInfo'))
             duration = float_of(item.get('time')) / 1000
+            # 接口有据才填：网易云取流响应带 br（码率 bps）与 size（字节）
+            quality = NeteaseProvider._quality_label(item.get('br'))
+            size = int_of(item.get('size'))
+            if size <= 0:
+                size = None
             if trial:
                 # freeTrialInfo uses seconds; player.time uses milliseconds.
                 span = float_of(trial.get('end')) - float_of(trial.get('start'))
                 return PlayURL(url=url, duration=span if span > 0 else duration,
-                               preview=True, message='当前仅可获取试听片段')
-            return PlayURL(url=url, duration=duration or song.duration)
+                               preview=True, message='当前仅可获取试听片段',
+                               quality=quality, size=size)
+            return PlayURL(url=url, duration=duration or song.duration,
+                           quality=quality, size=size)
         return None
 
     async def _weapi_play(self, song: Song) -> PlayURL | None:

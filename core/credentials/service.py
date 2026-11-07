@@ -63,6 +63,19 @@ CHECK_TARGETS: dict[str, dict[str, Any]] = {
 _DEFAULT_TIMEOUT = 15.0
 
 
+def _credential_check_timeout(pconfig: Any) -> float:
+    """读配置的通用凭据探针超时（秒）；读不到/非法时回退默认。
+
+    只作用于**通用探针**（:data:`CHECK_TARGETS` 的 GET 判活请求）。
+    QQ 音乐的续期式校验走 ``login.refresh`` 的独立超时，不受本配置影响。
+    """
+    try:
+        value = float(getattr(pconfig, "CREDENTIAL_CHECK_TIMEOUT_SECONDS", _DEFAULT_TIMEOUT))
+    except (TypeError, ValueError):
+        return _DEFAULT_TIMEOUT
+    return value if value > 0 else _DEFAULT_TIMEOUT
+
+
 @dataclass(frozen=True)
 class PlatformSpec:
     id: str
@@ -382,7 +395,7 @@ class CredentialManager:
             "verify": _truthy(getattr(pconfig, "HTTP_VERIFY_SSL", True)),
             "trust_env": True,
             "follow_redirects": False,  # 固定目标，不跟任意重定向
-            "timeout": _DEFAULT_TIMEOUT,
+            "timeout": _credential_check_timeout(pconfig),
         }
         try:
             proxy = pconfig.proxy_for(spec.id)
@@ -437,8 +450,13 @@ class CredentialManager:
             from ..music.netease import NeteaseProvider
             from ..music.qqmusic import QQMusicProvider
             provider_type = NeteaseProvider if spec.id == "netease" else QQMusicProvider
-            provider = provider_type(cookie=secret, proxy=self._pconfig.proxy_for(spec.id),
-                                     verify_ssl=self._pconfig.HTTP_VERIFY_SSL)
+            # 显式传超时：凭据检查走 CREDENTIAL_CHECK_TIMEOUT_SECONDS，
+            # 不与音乐搜歌/取流的 MUSIC_HTTP_TIMEOUT_SECONDS 混在一起。
+            provider = provider_type(
+                cookie=secret, proxy=self._pconfig.proxy_for(spec.id),
+                verify_ssl=self._pconfig.HTTP_VERIFY_SSL,
+                timeout=_credential_check_timeout(self._pconfig),
+            )
             try:
                 result = await provider.check_login()
                 status = result.get("status")

@@ -36,6 +36,96 @@ _KEY_PATTERNS = "_key_patterns"
 MAX_IMAGES_PER_RESULT = 50
 
 
+def _configured_image_maximum() -> int:
+    """当前「单次图片数量上限」的生效值；config 未初始化（旧测试桩）时回退 50。
+
+    主代理在 ``core/config.py`` 用只读属性 ``IMAGE_COUNT_MAXIMUM`` 提供该值
+    （默认 50，范围 1～50）。这里用 ``getattr`` 兜底，属性还没加上 / 配置对象
+    还没初始化时都不会在 import 或解析路径上炸掉。
+    """
+    try:
+        from .config import get_config
+        value = int(getattr(get_config(), "IMAGE_COUNT_MAXIMUM", MAX_IMAGES_PER_RESULT))
+    except Exception:
+        return MAX_IMAGES_PER_RESULT
+    return value if value > 0 else MAX_IMAGES_PER_RESULT
+
+
+def apply_result_image_limit(result: ParseResult, maximum: int | None = None) -> ParseResult:
+    """把一份解析结果的图集图片数统一压到全局上限内，**下载前**调用。
+
+    - ``maximum=None`` 时取 ``get_config().IMAGE_COUNT_MAXIMUM``（config 未初始化
+      时回退 :data:`MAX_IMAGES_PER_RESULT`，即旧行为）。
+    - **只截 :class:`ImageContent`**：``contents`` / ``graphics`` / ``repost`` 里的
+      图片按投递顺序（contents → graphics → repost）保留前 ``maximum`` 张，
+      视频 / 音频 / 封面 / 头像一律不动 —— 头像在 ``Author.avatar``、封面在
+      ``VideoContent.cover``，都不在 contents 里，天然不计入图集。
+    - **不 resolve 任何媒体**：纯结构裁剪，不触发下载、不读磁盘。
+    - 截断时向 ``result.extra["limit_warnings"]`` 追加一条说明（重复调用幂等：
+      已在上限内就原样返回，不再叠加警告）。
+    - 返回**同一个** ``result`` 对象（原地修改，供调用链继续使用）。
+    """
+    if maximum is None:
+        maximum = _configured_image_maximum()
+    try:
+        maximum = max(1, int(maximum))
+    except (TypeError, ValueError):
+        maximum = MAX_IMAGES_PER_RESULT
+    if maximum <= 0:
+        return result
+
+    # 先数一遍总量：在界内就原样返回（幂等，不写任何警告）。
+    total = 0
+    repost = result.repost
+    while repost is not None:
+        for cont in repost.contents:
+            if isinstance(cont, ImageContent):
+                total += 1
+        for gra in repost.graphics:
+            if isinstance(gra, ImageContent):
+                total += 1
+        repost = repost.repost
+    for cont in result.contents:
+        if isinstance(cont, ImageContent):
+            total += 1
+    for gra in result.graphics:
+        if isinstance(gra, ImageContent):
+            total += 1
+    if total <= maximum:
+        return result
+
+    def _trim(items: list, budget: int) -> tuple[list, int]:
+        """保留前 budget 张 ImageContent，非图片原样保留；返回 (新表, 剩余额度)。"""
+        kept: list = []
+        for item in items:
+            if isinstance(item, ImageContent):
+                if budget > 0:
+                    budget -= 1
+                    kept.append(item)
+                # 超出的 ImageContent 直接丢弃（不触发下载，也不会去 resolve）
+            else:
+                kept.append(item)
+        return kept, budget
+
+    budget = maximum
+    result.contents, budget = _trim(result.contents, budget)
+    result.graphics, budget = _trim(result.graphics, budget)
+    repost = result.repost
+    while repost is not None:
+        repost.contents, budget = _trim(repost.contents, budget)
+        repost.graphics, budget = _trim(repost.graphics, budget)
+        repost = repost.repost
+
+    warnings = result.extra.setdefault("limit_warnings", [])
+    message = (
+        f"⚠️ 图片数量超过上限（{maximum} 张），"
+        f"已截断为前 {maximum} 张，共省略 {total - maximum} 张"
+    )
+    if message not in warnings:
+        warnings.append(message)
+    return result
+
+
 def _retrieve_task_exception(task: "asyncio.Task") -> None:
     """把已结束任务的异常「取回」一次，避免无人 await 时 asyncio 打整段堆栈。
 
@@ -432,6 +522,24 @@ class BaseParser:
                 response.raise_for_status()
             return str(response.url)
 
+    def _probe_loader(self, url: str, quality: str = "") -> Any:
+        """构造一个**惰性**媒体描述 loader：对 URL 做有预算的 HEAD 探测。
+
+        只读响应头、**不 get 媒体本体**，也绝不调用 ``PathTask.get()``；
+        ``downloader`` 缺失（旧测试桩 / 自定义解析器的伪造 downloader）时
+        返回「未知」而不是报错。``quality`` 只接受确系平台给出的实际档位，
+        拿不到就保持未知（空串）——本插件不把配置目标档当实际值。
+        """
+        from .media_probe import probe_url
+
+        downloader = self.downloader
+        headers = self.headers
+
+        async def _loader() -> dict:
+            return await probe_url(downloader, url, headers=headers, quality=quality or "")
+
+        return _loader
+
     def create_author(self, name: str, avatar_url: str | None = None, description: str | None = None):
         author = Author(name=name, description=description)
         if avatar_url:
@@ -443,7 +551,16 @@ class BaseParser:
             )
         return author
 
-    def create_video(self, url_or_task: str | asyncio.Task[Path] | PathTask, cover_url: str | None = None, duration: float | None = None, is_gif: bool = False):
+    def create_video(self, url_or_task: str | asyncio.Task[Path] | PathTask, cover_url: str | None = None, duration: float | None = None, is_gif: bool = False, *, quality: str | None = None, info_loader: Any = None):
+        """把视频 URL / 任务包成 :class:`VideoContent`。
+
+        ``url_or_task`` 为 URL 字符串时是**惰性**的，且自动挂一个只做 HEAD
+        探测的 ``info_loader``（确认下载预览用）；外部传 Task / PathTask 的
+        急式任务**不会被改成惰性**，也不会被默认探测器触碰（它们的来源
+        不可知，描述保持未知）。``quality`` / ``info_loader`` 均为仅关键字
+        可选参数：前者只在确实知道实际档位时传，后者可覆盖默认 loader
+        （B站用自己的选流描述）。所有旧位置参数构造方式不变。
+        """
         if duration is not None:
             from .config import get_config
             from .media_utils import fmt_duration
@@ -478,6 +595,14 @@ class BaseParser:
                 video_content = VideoContent(
                     PathTask.lazy(_make_skip_task), duration=duration, is_gif=is_gif
                 )
+                # 时长超限只决定「不下载本体」，不剥夺描述能力：确认预览仍可
+                # 显示实际大小（未知就未知），由控制器按时长上限拒绝。
+                if info_loader is not None:
+                    video_content.info_loader = info_loader
+                elif isinstance(url_or_task, str):
+                    video_content.info_loader = self._probe_loader(
+                        url_or_task, quality or ""
+                    )
                 if cover_url:
                     video_content.cover = PathTask.lazy(
                         lambda url=cover_url: self.downloader.download_img(
@@ -504,6 +629,12 @@ class BaseParser:
             path_task = PathTask(url_or_task)
 
         video_content = VideoContent(path_task, duration=duration, is_gif=is_gif)
+        if info_loader is not None:
+            video_content.info_loader = info_loader
+        elif isinstance(url_or_task, str):
+            # 只给 URL 形态挂 HEAD 探测 loader：Task/PathTask 的来源不可知，
+            # 不取本体就无法描述，保持未知（也绝不能说「急式已被改成惰式」）。
+            video_content.info_loader = self._probe_loader(url_or_task, quality or "")
 
         if cover_url:
             cover_task = PathTask.lazy(
@@ -577,6 +708,9 @@ class BaseParser:
         惰性是「仅文本」不下载图片的前提：图片归富媒体一路，文本不该顺手
         把它们拉下来。超过 :data:`MAX_IMAGES_PER_RESULT` 的部分直接丢弃 ——
         远端列表长度不可控，不截断的话并发下载数与磁盘占用都跟着远端走。
+
+        每张图同时挂一个只做 HEAD 探测的 ``info_loader``（确认下载预览用，
+        不为取大小 GET 图片正文）。
         """
         contents: list[ImageContent] = []
         for url in self.cap_image_urls(image_urls):
@@ -586,7 +720,8 @@ class BaseParser:
                         lambda u=url: self.downloader.download_img(
                             u, ext_headers=self.headers
                         )
-                    )
+                    ),
+                    info_loader=self._probe_loader(url),
                 )
             )
         return contents
@@ -603,7 +738,7 @@ class BaseParser:
         )
         return image_urls[:MAX_IMAGES_PER_RESULT]
 
-    def create_image(self, url_or_task: str | asyncio.Task[Path], alt: str | None = None):
+    def create_image(self, url_or_task: str | asyncio.Task[Path], alt: str | None = None, *, info_loader: Any = None):
         if isinstance(url_or_task, str):
             path_task = PathTask.lazy(
                 lambda url=url_or_task: self.downloader.download_img(
@@ -615,15 +750,20 @@ class BaseParser:
             path_task = (
                 url_or_task if isinstance(url_or_task, PathTask) else PathTask(url_or_task)
             )
-        return ImageContent(path_task, alt=alt)
+        if info_loader is None and isinstance(url_or_task, str):
+            info_loader = self._probe_loader(url_or_task)
+        return ImageContent(path_task, alt=alt, info_loader=info_loader)
 
-    def create_audio(self, url_or_task: str | asyncio.Task[Path], duration: float = 0.0):
+    def create_audio(self, url_or_task: str | asyncio.Task[Path], duration: float = 0.0, *, quality: str | None = None, info_loader: Any = None):
         """把音频 URL / 任务包成 :class:`AudioContent`（**URL 形态是惰性的**）。
 
         时长上限复用 :attr:`VIDEO_DURATION_MAXIMUM` —— 同一个「媒体时长」旋钮，
         音频用**秒**（与 ``AudioContent.duration``、``VideoContent.duration`` 一致）。
         超限时返回的内容在 ``get()`` 时抛 ``IgnoreException``：解析结果照常返回
-        （标题/作者/封面仍在），只是不下载音频本体。
+        （标题/作者/封面仍在），只是不下载音频本体。URL 形态自动挂一个只做
+        HEAD 探测的 ``info_loader``（确认下载预览用）；``quality`` 只在确实
+        知道实际音质时传，``info_loader`` 可覆盖默认探测器。所有旧位置参数
+        构造方式不变。
         """
         from .config import get_config
         from .media_utils import fmt_duration
@@ -650,7 +790,14 @@ class BaseParser:
                 return task
 
             # 跳过分支里没有任何东西要下载，构造时就 create_task 属于纯浪费。
-            return AudioContent(PathTask.lazy(_make_skip_task), duration)
+            # 描述 loader 仍要保留：确认预览需要知道实际音质/大小，不能因为
+            # 时长超限就把已有信息丢掉（控制器会按时长上限拒绝）。
+            audio = AudioContent(PathTask.lazy(_make_skip_task), duration)
+            if info_loader is not None:
+                audio.info_loader = info_loader
+            elif isinstance(url_or_task, str):
+                audio.info_loader = self._probe_loader(url_or_task, quality or "")
+            return audio
 
         if isinstance(url_or_task, str):
             path_task = PathTask.lazy(
@@ -662,4 +809,10 @@ class BaseParser:
             path_task = (
                 url_or_task if isinstance(url_or_task, PathTask) else PathTask(url_or_task)
             )
-        return AudioContent(path_task, duration)
+        audio = AudioContent(path_task, duration)
+        if info_loader is not None:
+            audio.info_loader = info_loader
+        elif isinstance(url_or_task, str):
+            # 只给 URL 形态挂 HEAD 探测 loader；Task/PathTask 保持未知。
+            audio.info_loader = self._probe_loader(url_or_task, quality or "")
+        return audio

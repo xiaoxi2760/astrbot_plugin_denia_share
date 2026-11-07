@@ -217,7 +217,16 @@ export function createCacheView(ctx) {
               disabled: !record.card_exists,
               onClick: () => download(record),
             },
-            "下载",
+            "卡片原图",
+          ),
+          h(
+            "button",
+            {
+              class: "btn tiny", type: "button",
+              disabled: !(record.media_existing > 0),
+              onClick: (event) => downloadSources(record, event.currentTarget),
+            },
+            record.media_existing > 1 ? "源文件 ZIP" : "源文件",
           ),
           h(
             "button",
@@ -324,6 +333,7 @@ export function createCacheView(ctx) {
       ["链接", record.url || "—"],
       ["卡片文件", record.card_file || "—"],
       ["媒体文件", record.media_files && record.media_files.length ? record.media_files.join("、") : "—"],
+      ["可下载源文件", record.media_existing ? `${record.media_existing} 个${record.media_missing ? `，${record.media_missing} 个未下载或已清理` : ""}` : "未下载或已清理"],
     ];
 
     const actions = h("div", { class: "toolbar", style: { marginTop: "12px" } }, [
@@ -337,6 +347,10 @@ export function createCacheView(ctx) {
         },
         "下载卡片原图",
       ),
+      h("button", {
+        class: "btn", type: "button", disabled: !(record.media_existing > 0),
+        onClick: (event) => downloadSources(record, event.currentTarget),
+      }, record.media_existing > 1 ? "下载源文件 ZIP" : "下载源文件"),
       h(
         "button",
         {
@@ -397,6 +411,20 @@ export function createCacheView(ctx) {
       toast("已开始下载", "ok");
     } catch (error) {
       toast(`下载失败：${error.message}`, "err");
+    }
+  }
+
+  async function downloadSources(record, button) {
+    if (button) button.disabled = true;
+    try {
+      const info = await ctx.api.get("cache/media", { id: record.id });
+      if (info.missing_count) toast(`${info.missing_count} 个源文件已清理或不可用，将下载其余 ${info.file_count} 个`, "warn");
+      await ctx.api.download("cache/media/download", { id: record.id, archive: info.archive ? 1 : undefined }, info.filename);
+      toast(info.archive ? "已开始下载源文件 ZIP" : "已开始下载源文件", "ok");
+    } catch (error) {
+      toast(`源文件下载失败：${error.message}`, "err");
+    } finally {
+      if (button?.isConnected) button.disabled = false;
     }
   }
 

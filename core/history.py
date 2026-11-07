@@ -128,6 +128,43 @@ class HistoryStore:
         self.max_records = max(20, int(max_records))
         self._lock = threading.Lock()
 
+    def set_max_records(self, max_records: int, *, converge: bool = True) -> int:
+        """更新保留上限，并（默认）**立即**把既有记录收敛到新上限。
+
+        - 上限本身总是更新（``max(20, int(...))`` 钳位），让后续 ``add`` 按新值
+          裁剪；这是配置的持久目标，写盘失败也不回滚。
+        - ``converge=True`` 时同步裁掉最旧的溢出记录并落盘 —— 只删**记录**，
+          不碰任何媒体文件（媒体清理由缓存清理单独负责）。
+        - 落盘失败（Windows 上 ``os.replace`` 撞开着的文件等）返回 0 并保留新上限：
+          下一次 ``add`` 成功时仍会按新上限收敛，属于自愈而非静默丢失。
+
+        Returns:
+            实际落盘裁掉的旧记录条数；没有溢出或写盘失败返回 0。
+        """
+        new_limit = max(20, int(max_records))
+        self.max_records = new_limit
+        if not converge:
+            return 0
+        with self._lock:
+            records = self.load()
+            overflow = len(records) - self.max_records
+            if overflow <= 0:
+                return 0
+            kept = records[overflow:]
+            if not self._write(kept):
+                from astrbot.api import logger as _logger
+                _logger.warning(
+                    f"[denia_share] 历史上限收敛写盘失败，"
+                    f"新上限 {self.max_records} 将在下次写入时生效"
+                )
+                return 0
+        from astrbot.api import logger as _logger
+        _logger.info(
+            f"[denia_share] 历史保留上限调整为 {self.max_records}，"
+            f"已收敛 {overflow} 条旧记录"
+        )
+        return overflow
+
     # ---------------- 读 ---------------- #
 
     def load(self) -> list[ParseRecord]:
@@ -211,6 +248,45 @@ class HistoryStore:
         }
 
     # ---------------- 写 ---------------- #
+
+    #: 允许 ``update`` 修补的字段白名单（其余字段是身份/时间戳，一概不许动）。
+    _UPDATABLE_FIELDS: frozenset[str] = frozenset({
+        "title", "author", "content_type", "via", "card_file",
+        "media_files", "detail", "elapsed_ms",
+    })
+
+    def update(self, record_id: str, **fields) -> bool:
+        """按 id **就地修补**一条既有记录（确认下载「先记预览、后补源媒体」用）。
+
+        - 记录不存在（含被用户在 WebUI 删除）返回 ``False`` **且不新建记录** ——
+          不会把用户明确删掉的历史「复活」；
+        - 只允许修补 :data:`_UPDATABLE_FIELDS` 白名单字段，``id / url /
+          platform / created_at`` 等身份字段不可变；
+        - ``media_files`` / ``detail`` 做防御性转换（列表 / 字典），脏值抛 ``TypeError``
+          由调用方兜底（本方法不吞异常，写失败与校验失败都可被上层发现）。
+
+        Returns:
+            ``True`` 表示记录存在且成功落盘；``False`` 表示记录不存在（未写入）。
+        """
+        if not record_id:
+            return False
+        target = str(record_id)
+        with self._lock:
+            records = self.load()
+            for record in records:
+                if record.id != target:
+                    continue
+                for key, value in fields.items():
+                    if key not in type(self)._UPDATABLE_FIELDS:
+                        continue
+                    if key == "media_files":
+                        record.media_files = [str(x) for x in (value or [])]
+                    elif key == "detail":
+                        record.detail = dict(value or {})
+                    else:
+                        setattr(record, key, value)
+                return self._write(records)
+            return False
 
     def add(self, record: ParseRecord) -> bool:
         """追加一条记录，超出上限时丢弃最旧的若干条。

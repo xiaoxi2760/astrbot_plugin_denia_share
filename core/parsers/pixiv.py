@@ -22,6 +22,7 @@ from astrbot.api import logger
 from ..base_parser import (
     BaseParser, PlatformEnum, ParseException, IgnoreException, handle,
 )
+from ..config import get_config
 from ..data import Platform, platform_of
 
 AJAX_BASE = "https://www.pixiv.net/ajax"
@@ -32,9 +33,44 @@ PIXIV_UA = (
     "(KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36"
 )
 
-# 单次最多发送的图片张数，避免刷屏与发送超时
+# 单次最多发送的图片张数，避免刷屏与发送超时。
+# 这两个常量同时是**配置未初始化时**（旧单测桩 / import 期）的兜底默认值；
+# 真实解析时按配置 ``PIXIV_IMAGE_COUNT_MAXIMUM`` / ``PIXIV_SEARCH_IMAGE_COUNT``
+# 读取（见 :func:`_image_count_maximum` / :func:`_search_image_count`），
+# 默认值不变 → 未改配置时行为与旧版完全一致。
 MAX_IMAGES = 9
 MAX_SEARCH_IMAGES = 6
+
+# 全局单次图片数量上限的兜底值（配置 IMAGE_COUNT_MAXIMUM 未初始化时使用）。
+_GLOBAL_IMAGE_COUNT_MAXIMUM = 50
+
+
+def _read_tunable_int(key: str, default: int) -> int:
+    """读一个只读配置属性；配置未初始化或读取出错时回退默认。"""
+    try:
+        cfg = get_config()
+    except RuntimeError:
+        return default
+    try:
+        return max(1, int(getattr(cfg, key, default)))
+    except (TypeError, ValueError):
+        return default
+
+
+def _image_count_maximum() -> int:
+    """Pixiv 作品页最多发送的图片数（尊重全局 IMAGE_COUNT_MAXIMUM，默认 9）。"""
+    return min(
+        _read_tunable_int("PIXIV_IMAGE_COUNT_MAXIMUM", MAX_IMAGES),
+        _read_tunable_int("IMAGE_COUNT_MAXIMUM", _GLOBAL_IMAGE_COUNT_MAXIMUM),
+    )
+
+
+def _search_image_count() -> int:
+    """Pixiv 搜索最多发送的图片数（尊重全局 IMAGE_COUNT_MAXIMUM，默认 6）。"""
+    return min(
+        _read_tunable_int("PIXIV_SEARCH_IMAGE_COUNT", MAX_SEARCH_IMAGES),
+        _read_tunable_int("IMAGE_COUNT_MAXIMUM", _GLOBAL_IMAGE_COUNT_MAXIMUM),
+    )
 
 
 class PixivParser(BaseParser):
@@ -101,7 +137,7 @@ class PixivParser(BaseParser):
                 raise IgnoreException("该作品非全年龄内容，已跳过")
             pages = await self._fetch_ajax(client, f"{AJAX_BASE}/illust/{illust_id}/pages", referer)
 
-        urls = self._page_urls(pages, original=True)[:MAX_IMAGES]
+        urls = self._page_urls(pages, original=True)[:_image_count_maximum()]
         if not urls:
             raise ParseException("未取到图片地址")
 
@@ -136,15 +172,27 @@ class PixivParser(BaseParser):
 
     # ────────────── 关键词搜索 ────────────── #
 
-    async def search(self, keyword: str, limit: int = MAX_SEARCH_IMAGES) -> Any:
+    async def search(self, keyword: str, limit: int | None = None) -> Any:
         """按关键词搜索作品，返回最多 limit 张全年龄作品。
+
+        默认值与钳位一起由配置 ``PIXIV_SEARCH_IMAGE_COUNT`` 决定（同时尊重
+        全局 ``IMAGE_COUNT_MAXIMUM``）；``limit=None`` 表示用配置默认值。
+        ``limit`` 显式传入时仍会被钳到配置上限内，避免把配置值悄悄吞掉。
 
         与链接解析不同，这里没有一个"作品作者"，因此只填充标题与图片。
         """
         keyword = (keyword or "").strip()
         if not keyword:
             raise ParseException("请输入搜索关键词")
-        limit = max(1, min(int(limit), MAX_SEARCH_IMAGES))
+        maximum = _search_image_count()
+        if limit is None:
+            limit = maximum
+        else:
+            try:
+                limit = max(1, int(limit))
+            except (TypeError, ValueError):
+                limit = maximum
+        limit = min(limit, maximum)
 
         url = f"{AJAX_BASE}/search/artworks/{quote(keyword, safe='')}"
         params = {

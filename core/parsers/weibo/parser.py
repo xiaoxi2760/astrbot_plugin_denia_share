@@ -18,7 +18,36 @@ from ...base_parser import (
     ParseException,
     handle,
 )
+from ...config import get_config
 from ...data import Platform, ImageContent, platform_of
+
+# 微博视频的档位顺序（低到高字段名映射见 _WEIBO_QUALITY_FIELDS）。
+_WEIBO_QUALITY_ORDER = ("720p", "hd", "ld")
+_WEIBO_QUALITY_FIELDS = {
+    "720p": "mp4_720p_mp4",
+    "hd": "mp4_hd_mp4",
+    "ld": "mp4_ld_mp4",
+}
+
+
+def _weibo_quality_preference() -> tuple[str, ...]:
+    """读配置的微博视频清晰度偏好，返回按字段名排序的偏好序列。
+
+    用户所选档位放最前，其余替代档位按 ``720p > hd > ld`` 的标准顺序跟在后面
+    （「偏好后保留替代流」：拿不到首选仍能取到其它档，不会失败）。
+    默认 ``720p`` → ``("720p", "hd", "ld")``，与旧行为完全一致。
+    配置未初始化 / 读取出错 / 值不在白名单里时回退默认。
+    """
+    try:
+        chosen = str(getattr(get_config(), "WEIBO_VIDEO_QUALITY", "") or "").strip().lower()
+    except RuntimeError:
+        chosen = "720p"
+    if chosen not in _WEIBO_QUALITY_ORDER:
+        chosen = "720p"
+    return tuple(
+        [_WEIBO_QUALITY_FIELDS[chosen]]
+        + [_WEIBO_QUALITY_FIELDS[q] for q in _WEIBO_QUALITY_ORDER if q != chosen]
+    )
 
 
 # ============================ 微博访客身份 ============================
@@ -331,7 +360,10 @@ class WeiBoParser(BaseParser):
     def _collect_result(self, data):
         author = self.create_author(data.display_name, data.user.profile_image_url)
         result = self.result(title=data.title, text=data.text_content, author=author, timestamp=data.timestamp, url=data.url)
-        if video_url := data.video_url:
+        # 视频优先档按配置 WEIBO_VIDEO_QUALITY 选（默认 720p > hd > ld，
+        # 与模型侧 get_video_url 的短路顺序一致）；拿不到首选还有替代流兜底。
+        urls = data.page_info.urls if data.page_info else None
+        if video_url := self._preferred_video_url(urls):
             self._add_limit_warning(result, data.duration)
             result.video = self.create_video(video_url, data.cover_url, data.duration)
         if image_urls := data.image_urls:
@@ -339,6 +371,17 @@ class WeiBoParser(BaseParser):
         if data.retweeted_status:
             result.repost = self._collect_result(data.retweeted_status)
         return result
+
+    @staticmethod
+    def _preferred_video_url(urls) -> str | None:
+        """按配置的清晰度偏好顺序取第一条可用视频地址；``urls`` 为空返回 None。"""
+        if urls is None:
+            return None
+        for field in _weibo_quality_preference():
+            value = getattr(urls, field, None)
+            if value:
+                return str(value)
+        return None
 
     def _base62_encode(self, number: int) -> str:
         alphabet = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"

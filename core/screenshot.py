@@ -36,6 +36,7 @@ import httpx
 from astrbot.api import logger
 
 from .constants import COMMON_HEADER
+from .config import get_config
 
 # 本模块自建 3 个 httpx.AsyncClient，且**不经过** base_parser / download，
 # 所以兜底必须自己 import 一次 —— 否则截图会单独踩方括号 NO_PROXY 的坑。
@@ -49,6 +50,52 @@ _JPEG_MAGIC = b"\xff\xd8\xff"
 
 # CF 的 waitUntil 合法取值
 _WAIT_UNTIL_VALUES = ("load", "domcontentloaded", "networkidle0", "networkidle2")
+
+# 配置项未初始化时的兜底默认（与 CONFIG_META 里的默认值一致，行为不变）
+_DEFAULT_TIMEOUT_SECONDS: Final[float] = 60.0
+_DEFAULT_CF_WAIT_UNTIL: Final[str] = "networkidle0"
+_DEFAULT_CF_GOTO_TIMEOUT_MS: Final[int] = 45000
+
+
+def _tunable_float(key: str, default: float) -> float:
+    """读一个只读配置属性（秒）；配置未初始化或读取出错时回退默认。"""
+    try:
+        cfg = get_config()
+    except RuntimeError:
+        return default
+    try:
+        value = float(getattr(cfg, key, default))
+    except (TypeError, ValueError):
+        return default
+    return value if value > 0 else default
+
+
+def _screenshot_timeout_seconds(fallback: float) -> float:
+    """截图 HTTP 总超时（秒），配置 ``SCREENSHOT_TIMEOUT_SECONDS`` 优先。"""
+    return _tunable_float("SCREENSHOT_TIMEOUT_SECONDS", fallback)
+
+
+def _cf_wait_until() -> str:
+    """CF 页面加载判定（``SCREENSHOT_CF_WAIT_UNTIL``），脏值回退 networkidle0。"""
+    try:
+        cfg = get_config()
+    except RuntimeError:
+        return _DEFAULT_CF_WAIT_UNTIL
+    value = str(getattr(cfg, "SCREENSHOT_CF_WAIT_UNTIL", _DEFAULT_CF_WAIT_UNTIL) or "").strip().lower()
+    return value if value in _WAIT_UNTIL_VALUES else _DEFAULT_CF_WAIT_UNTIL
+
+
+def _cf_goto_timeout_ms() -> int:
+    """CF 服务端页面加载预算（毫秒）；钳到 [1000, 60000]（上游硬上限 60s）。"""
+    try:
+        cfg = get_config()
+    except RuntimeError:
+        return _DEFAULT_CF_GOTO_TIMEOUT_MS
+    try:
+        value = int(getattr(cfg, "SCREENSHOT_CF_GOTO_TIMEOUT_MS", _DEFAULT_CF_GOTO_TIMEOUT_MS))
+    except (TypeError, ValueError):
+        return _DEFAULT_CF_GOTO_TIMEOUT_MS
+    return max(1000, min(60000, value))
 
 # snake_case → Cloudflare API 的 camelCase
 _CF_KEY_MAP: Final[dict[str, str]] = {
@@ -198,8 +245,8 @@ class ScreenshotService:
         path = self.cache_dir / f"thum_{uuid.uuid4().hex[:12]}.png"
 
         async with httpx.AsyncClient(
-            proxy=self.proxy, timeout=self.timeout, follow_redirects=True,
-            verify=self.verify_ssl,
+            proxy=self.proxy, timeout=_screenshot_timeout_seconds(self.timeout),
+            follow_redirects=True, verify=self.verify_ssl,
         ) as client:
             resp = await client.get(target)
 
@@ -222,14 +269,19 @@ class ScreenshotService:
     # ────────────── Cloudflare Browser Rendering ────────────── #
 
     async def _capture_cloudflare(self, url: str, *, full_page: bool) -> Path | None:
-        wait_until = "networkidle0"
+        # 配置 SCREENSHOT_CF_WAIT_UNTIL（默认 networkidle0）；脏值回退默认。
+        # 白名单校验从「字面量必中」的死代码变成真正的输入校验。
+        wait_until = _cf_wait_until()
         if wait_until not in _WAIT_UNTIL_VALUES:
-            wait_until = "networkidle0"
+            wait_until = _DEFAULT_CF_WAIT_UNTIL
 
         body = _to_cf_keys({
             "url": url,
             "viewport": {"width": 1280, "height": 900, "device_scale_factor": 1},
-            "goto_options": {"wait_until": wait_until, "timeout": 45000},
+            "goto_options": {
+                "wait_until": wait_until,
+                "timeout": _cf_goto_timeout_ms(),
+            },
             "screenshot_options": {"type": "png", "full_page": full_page},
         })
         endpoint = f"{CF_API_BASE}/accounts/{self.cf_account_id}/browser-rendering/screenshot"
@@ -240,8 +292,8 @@ class ScreenshotService:
         path = self.cache_dir / f"cf_{uuid.uuid4().hex[:12]}.png"
 
         async with httpx.AsyncClient(
-            proxy=self.proxy, timeout=self.timeout, follow_redirects=True,
-            verify=self.verify_ssl,
+            proxy=self.proxy, timeout=_screenshot_timeout_seconds(self.timeout),
+            follow_redirects=True, verify=self.verify_ssl,
         ) as client:
             resp = await client.post(endpoint, headers=headers, json=body)
 

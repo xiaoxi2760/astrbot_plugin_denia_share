@@ -17,6 +17,7 @@ from typing import Any, AsyncIterator, Final
 import httpx
 
 from .. import http_env  # noqa: F401 -- shared NO_PROXY compatibility
+from ..config import get_config
 from .models import MusicError
 
 DEFAULT_TIMEOUT: Final[float] = 15.0
@@ -24,6 +25,24 @@ USER_AGENT: Final[str] = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
     "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 )
+
+
+def _music_http_timeout(fallback: float) -> float:
+    """读配置的音乐 HTTP 超时（秒）；配置未初始化或读取出错时回退。
+
+    只覆盖**音乐平台自身的 HTTP 请求**（搜歌 / 详情 / 取流）。
+    封面下载与登录扫码各有自己的超时（controller 的 wait_for / login 的
+    ``_timeout``），不经过这里 —— 不要用它去覆盖那些路径。
+    """
+    try:
+        cfg = get_config()
+    except RuntimeError:
+        return fallback
+    try:
+        value = float(getattr(cfg, "MUSIC_HTTP_TIMEOUT_SECONDS", fallback))
+    except (TypeError, ValueError):
+        return fallback
+    return value if value > 0 else fallback
 
 
 @contextlib.asynccontextmanager
@@ -169,22 +188,32 @@ class BaseProvider:
         cookie: str = "",
         proxy: str | None = None,
         verify_ssl: bool = True,
-        timeout: float = DEFAULT_TIMEOUT,
+        timeout: float | None = None,
         transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
         self.cookie = str(cookie or "").strip()
         self.proxy = str(proxy).strip() if proxy else None
         self.verify_ssl = bool(verify_ssl)
+        # ``timeout`` 缺省（None）时用配置 ``MUSIC_HTTP_TIMEOUT_SECONDS``，
+        # 配置未初始化回退 DEFAULT_TIMEOUT；显式传了就用显式值（如凭据探针）。
         self.timeout = timeout if isinstance(timeout, (int, float)) and timeout > 0 else DEFAULT_TIMEOUT
+        self._timeout_explicit = isinstance(timeout, (int, float)) and timeout > 0
         self.transport = transport
 
     # -- 网络 ---------------------------------------------------------------
     def client(self, *, follow_redirects: bool = False):
-        """返回本次调用专用的请求上下文（异步上下文管理器）。"""
+        """返回本次调用专用的请求上下文（异步上下文管理器）。
+
+        **在请求时读取配置**：WebUI 保存 ``MUSIC_HTTP_TIMEOUT_SECONDS`` 后，
+        下一次调用立即生效，无需重建 provider。
+        """
+        timeout = self.timeout
+        if not self._timeout_explicit:
+            timeout = _music_http_timeout(self.timeout)
         return open_client(
             proxy=self.proxy,
             verify_ssl=self.verify_ssl,
-            timeout=self.timeout,
+            timeout=timeout,
             transport=self.transport,
             follow_redirects=follow_redirects,
         )
