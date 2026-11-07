@@ -98,10 +98,15 @@ def file_response(
     filename: str | None = None,
     content_type: str | None = None,
     as_attachment: bool = True,
+    on_close: Any = None,
 ) -> Any:
     """把本地文件作为下载返回。"""
     if _BACKEND == "astrbot.api.web":
-        return _api_file_response(path, filename=filename, content_type=content_type)
+        response = _api_file_response(path, filename=filename, content_type=content_type)
+        if on_close is not None:
+            from starlette.background import BackgroundTask
+            response.background = BackgroundTask(on_close)
+        return response
     if _BACKEND != "quart":
         raise RuntimeError(_NO_BACKEND_HINT)
 
@@ -110,7 +115,41 @@ def file_response(
         kwargs["mimetype"] = content_type
     if filename:
         kwargs[_DOWNLOAD_NAME_PARAM] = filename
-    return _quart_send_file(str(path), **kwargs)
+    if on_close is None:
+        return _quart_send_file(str(path), **kwargs)
+
+    async def prepare():
+        try:
+            response = await _quart_send_file(str(path), **kwargs)
+            # Quart closes its response body through an async context manager;
+            # unlike Flask, it has no Response.call_on_close(). Keep the file
+            # open until streaming ends, then release the temporary archive.
+            from quart.wrappers.response import ResponseBody
+
+            class ClosingBody(ResponseBody):
+                def __init__(self, body):
+                    self.body = body
+
+                async def __aenter__(self):
+                    try:
+                        return await self.body.__aenter__()
+                    except BaseException:
+                        on_close()
+                        raise
+
+                async def __aexit__(self, *exc_info):
+                    try:
+                        return await self.body.__aexit__(*exc_info)
+                    finally:
+                        on_close()
+
+            response.response = ClosingBody(response.response)
+            return response
+        except BaseException:
+            on_close()
+            raise
+
+    return prepare()
 
 
 async def get_json_body() -> dict[str, Any]:

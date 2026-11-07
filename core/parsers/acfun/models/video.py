@@ -10,7 +10,28 @@ from ....exception import ParseException
 # 清晰度偏好顺序。**它是「偏好」而不是「白名单」**：取流时必须外层遍历它、
 # 内层找匹配，才能保证 1080p 优先；按远端返回顺序遍历（原实现）会让偏好形同虚设 ——
 # 实测远端给 [360p, 1080p] 时返回 360p，倒过来才返回 1080p。
+#
+# 配置 ``ACFUN_QUALITY`` 只决定**从哪一档开始**（用户选的档位放最前，其后按
+# 该档往下的顺序继续），默认值与完整偏好一致 → 未改配置时行为不变。用户选的
+# 最高偏好档不可用时仍逐档降级，不会失败（见 :func:`_quality_preference`）。
 _QUALITY_PREFERENCE = ("1080p", "720p", "480p", "360p")
+
+
+def _quality_preference() -> tuple[str, ...]:
+    """从配置读清晰度偏好起点，返回「用户所选档位 → 更低的档位」的偏好元组。
+
+    配置未初始化 / 读取出错 / 值不在白名单里时回退完整默认顺序。
+    """
+    try:
+        from ....config import get_config
+
+        chosen = str(getattr(get_config(), "ACFUN_QUALITY", "") or "").strip().lower()
+    except RuntimeError:
+        return _QUALITY_PREFERENCE
+    if chosen not in _QUALITY_PREFERENCE:
+        return _QUALITY_PREFERENCE
+    index = _QUALITY_PREFERENCE.index(chosen)
+    return _QUALITY_PREFERENCE[index:]
 
 
 class User(Struct):
@@ -85,13 +106,14 @@ class VideoInfo(Struct, kw_only=True):
     def m3u8_url(self) -> str:
         """按清晰度偏好挑一条流。
 
-        外层遍历 ``_QUALITY_PREFERENCE``、内层找匹配 —— 原实现是「按远端顺序遍历、
-        命中白名单里任意一档就返回」，所以偏好顺序形同虚设（实测见常量处的注释）。
-        偏好档位都没有时退回远端给的第一条；**一条流都没有才抛 ParseException**，
-        让三级兜底继续走，而不是裸下标 IndexError。
+        外层遍历偏好（起始档位来自配置 ``ACFUN_QUALITY``）、内层找匹配 ——
+        原实现是「按远端顺序遍历、命中白名单里任意一档就返回」，所以偏好顺序
+        形同虚设（实测见常量处的注释）。用户选的最高偏好档不可用时仍会逐档
+        降级；偏好档位都没有时退回远端给的第一条；**一条流都没有才抛
+        ParseException**，让三级兜底继续走，而不是裸下标 IndexError。
         """
         representations = self.currentVideoInfo.representations
-        for quality in _QUALITY_PREFERENCE:
+        for quality in _quality_preference():
             for item in representations:
                 if item.qualityType == quality:
                     return item.url

@@ -57,6 +57,16 @@
         "default": false,
         "invisible": false,
         "hint": "关闭则只写日志、不在群里刷报错。排查问题时可临时打开"
+      },
+      "IMAGE_COUNT_MAXIMUM": {
+        "description": "单次图片数量上限",
+        "type": "int",
+        "default": 50,
+        "invisible": false,
+        "hint": "每条结果最多处理的图集图片数，不包含头像和卡片封面；仍受平台自身数量上限限制。",
+        "min": 1,
+        "max": 50,
+        "unit": "张"
       }
     }
   },
@@ -147,6 +157,16 @@
           "H.265 优先",
           "AV1 优先"
         ]
+      },
+      "BILI_EXTRA_INFO_TIMEOUT_SECONDS": {
+        "description": "B站附加信息等待",
+        "type": "int",
+        "default": 5,
+        "invisible": true,
+        "hint": "卡片等待在线人数和 AI 摘要的上限，不是视频解析总超时；调大会延长部分卡片的等待。",
+        "min": 1,
+        "max": 30,
+        "unit": "秒"
       }
     }
   },
@@ -168,6 +188,16 @@
         "invisible": true,
         "hint": "只有想看「历史最低价」才需要，免费申请 https://isthereanydeal.com/apps 。留空时 Steam 解析照常工作，只是不显示史低",
         "secret": true
+      },
+      "STEAM_SCREENSHOT_COUNT": {
+        "description": "Steam 游戏截图数",
+        "type": "int",
+        "default": 3,
+        "invisible": true,
+        "hint": "游戏解析附带的截图数量；0 不附带截图，同时受单次图片数量上限限制。",
+        "min": 0,
+        "max": 10,
+        "unit": "张"
       }
     }
   },
@@ -220,8 +250,8 @@
         "description": "搜歌结果数量",
         "type": "int",
         "default": 5,
-        "invisible": true,
-        "hint": "结果卡片最多显示这些候选；全部时两家交错排列，编号连续。",
+        "invisible": false,
+        "hint": "每次搜歌显示 1～10 首候选；选择全部平台时，两家结果交错排列、编号连续，总数不超过此值。",
         "min": 1,
         "max": 10
       },
@@ -264,6 +294,16 @@
         "invisible": true,
         "hint": "在上方账号凭据扫码或导入包含 uin 与音乐密钥的 Cookie；可检查、续期与清除。",
         "secret": true
+      },
+      "MUSIC_HTTP_TIMEOUT_SECONDS": {
+        "description": "音乐接口请求超时",
+        "type": "int",
+        "default": 15,
+        "invisible": true,
+        "hint": "音乐搜索、详情和取流的 HTTP 等待预算；封面总预算及扫码、续期仍有独立限制。",
+        "min": 5,
+        "max": 120,
+        "unit": "秒"
       }
     }
   },
@@ -315,7 +355,7 @@
   },
   "网页截图": {
     "type": "object",
-    "description": "把任意网页截成图片发送。⚠️ 请到插件 WebUI 的「配置」页修改「网页截图」",
+    "description": "整页或首屏截图可直接在这里切换；服务后端、账号等选项请到插件 WebUI 的「设置 / 配置」页修改「网页截图」",
     "items": {
       "SCREENSHOT_BACKEND": {
         "description": "截图后端",
@@ -336,7 +376,7 @@
         "description": "截整页长图",
         "type": "bool",
         "default": true,
-        "invisible": true,
+        "invisible": false,
         "hint": "开启=截整页（长文章能看全），关闭=只截首屏视窗。实测差别很大：同一个维基长文关掉只有 900×900 的方图（约 0.3 MB，只看到顶部一小块），开完整页约 4.4 MB、高度按页面内容走（thum 上限 16000px，触顶时底部会缺）。代价是长图可能几 MB、群里发出去客户端会压缩，所以默认开启但可关。两个后端都支持整页（thum 走 /fullpage，cloudflare 走 fullPage）"
       },
       "SCREENSHOT_FALLBACK": {
@@ -360,6 +400,45 @@
         "invisible": true,
         "hint": "仅 cloudflare 后端需要，需带 Browser Rendering 写权限",
         "secret": true
+      },
+      "SCREENSHOT_TIMEOUT_SECONDS": {
+        "description": "截图请求超时",
+        "type": "int",
+        "default": 60,
+        "invisible": true,
+        "hint": "等待截图服务响应的本地请求预算；CF 页面加载预算是另一个计时器，需为截图生成和传输留出时间。",
+        "min": 10,
+        "max": 300,
+        "unit": "秒"
+      },
+      "SCREENSHOT_CF_WAIT_UNTIL": {
+        "description": "CF 页面加载等待策略",
+        "type": "string",
+        "default": "networkidle0",
+        "invisible": true,
+        "hint": "仅影响 Cloudflare 截图。提前到 DOM 就绪可能截到尚未完成的页面；等待网络空闲可能被持续请求拖慢。",
+        "options": [
+          "load",
+          "domcontentloaded",
+          "networkidle0",
+          "networkidle2"
+        ],
+        "labels": [
+          "页面加载完成",
+          "DOM 就绪",
+          "网络完全空闲",
+          "网络基本空闲"
+        ]
+      },
+      "SCREENSHOT_CF_GOTO_TIMEOUT_MS": {
+        "description": "CF 页面加载预算",
+        "type": "int",
+        "default": 45000,
+        "invisible": true,
+        "hint": "仅影响 Cloudflare 服务端页面加载，最多 60000ms；本地截图请求超时应留有余量。",
+        "min": 1000,
+        "max": 60000,
+        "unit": "毫秒"
       }
     }
   },
@@ -416,6 +495,59 @@
         "default": false,
         "invisible": true,
         "hint": "由插件维护，避免宿主补齐默认值后重复迁移用户选择。"
+      },
+      "MEDIA_DOWNLOAD_MODE": {
+        "description": "下载时机",
+        "type": "string",
+        "default": "auto",
+        "invisible": false,
+        "hint": "auto=解析后立即按现有方式下载并发送（默认，行为不变）；confirm=只先下载封面并生成信息卡，展示实际清晰度与文件大小，回复「确认下载」后才下载源文件并按现有方式自动发送——确认后仍遵守大小/时长上限与 2GB 硬上限。确认模式需开启富媒体并有文本或卡片渠道展示确认信息。",
+        "options": [
+          "auto",
+          "confirm"
+        ],
+        "labels": [
+          "自动下载（默认）",
+          "先确认再下载"
+        ]
+      },
+      "CONFIRM_ALLOW_ANYONE": {
+        "description": "任何有访问权的用户可确认",
+        "type": "bool",
+        "default": false,
+        "invisible": false,
+        "hint": "开启后，任何有插件访问权限（平台开关与白名单照常生效）的用户都可以确认待下载项；与下列角色为「或」关系，全部关闭则无人可确认。"
+      },
+      "CONFIRM_ALLOW_SENDER": {
+        "description": "原分享者可确认",
+        "type": "bool",
+        "default": true,
+        "invisible": false,
+        "hint": "开启后，原分享者可以确认自己分享的待下载项（默认开启）。"
+      },
+      "CONFIRM_ALLOW_QQ_ADMIN": {
+        "description": "QQ 群主/管理员可确认",
+        "type": "bool",
+        "default": false,
+        "invisible": false,
+        "hint": "开启后，QQ 群主/管理员可确认**本群内**的待下载项（群主算在内）；仅真实 QQ 群事件可用，私聊或无法确认身份时不适用。"
+      },
+      "CONFIRM_ALLOW_BOT_ADMIN": {
+        "description": "AstrBot 管理员可确认",
+        "type": "bool",
+        "default": false,
+        "invisible": false,
+        "hint": "开启后，AstrBot 管理员可以确认待下载项。"
+      },
+      "CONFIRM_DOWNLOAD_TTL_SECONDS": {
+        "description": "待确认项有效期",
+        "type": "int",
+        "default": 300,
+        "invisible": true,
+        "hint": "待确认项的有效期（秒，30～1800）。过期后需要重新分享链接才能再次确认。",
+        "min": 30,
+        "max": 1800,
+        "unit": "秒"
       }
     }
   },
@@ -499,7 +631,7 @@
         "description": "卡片水印文字",
         "type": "string",
         "default": "希望解析",
-        "invisible": true,
+        "invisible": false,
         "hint": "卡片右下角的水印文字，留空则不显示水印，最长 12 个字符",
         "max_length": 12
       },
@@ -637,6 +769,14 @@
         "min": 0,
         "max": 999,
         "unit": "个"
+      },
+      "FORWARD_NODE_NICKNAME": {
+        "description": "转发节点昵称",
+        "type": "string",
+        "default": "希望解析器",
+        "invisible": false,
+        "hint": "合并转发节点的显示名称，最长 32 字；留空使用希望解析器，不改变实际发送账号。",
+        "max_length": 32
       }
     }
   },
@@ -801,12 +941,118 @@
         "default": "",
         "invisible": true,
         "hint": "留空=不启用。服务器连不上 twimg 时填写"
+      },
+      "DOWNLOAD_IMAGE_CONCURRENCY": {
+        "description": "图片下载并发",
+        "type": "int",
+        "default": 8,
+        "invisible": true,
+        "hint": "每个下载池同时下载图片的数量。直连与代理分别计数；调大可能增加带宽占用和平台限流。",
+        "min": 1,
+        "max": 16,
+        "unit": "个"
+      },
+      "DOWNLOAD_MEDIA_CONCURRENCY": {
+        "description": "视频与音频下载并发",
+        "type": "int",
+        "default": 3,
+        "invisible": true,
+        "hint": "每个下载池同时下载视频或音频的数量，B站音视频可能各占一个任务；直连与代理分别计数。",
+        "min": 1,
+        "max": 8,
+        "unit": "个"
+      },
+      "DOWNLOAD_RETRY_ATTEMPTS": {
+        "description": "下载重试次数",
+        "type": "int",
+        "default": 2,
+        "invisible": true,
+        "hint": "临时网络错误时，在首次下载之外最多重建任务的次数；0 不重试。不会重试权限、磁盘或内容限制等永久错误。",
+        "min": 0,
+        "max": 5,
+        "unit": "次"
+      },
+      "CREDENTIAL_CHECK_TIMEOUT_SECONDS": {
+        "description": "凭据探针请求超时",
+        "type": "int",
+        "default": 15,
+        "invisible": true,
+        "hint": "通用凭据 HTTP 检查的请求预算，不控制全部扫码或 QQ音乐续期流程。",
+        "min": 5,
+        "max": 120,
+        "unit": "秒"
+      },
+      "PIXIV_IMAGE_COUNT_MAXIMUM": {
+        "description": "Pixiv 作品图片上限",
+        "type": "int",
+        "default": 9,
+        "invisible": true,
+        "hint": "多页作品最多发送的图片数，同时受单次图片数量上限限制。",
+        "min": 1,
+        "max": 50,
+        "unit": "张"
+      },
+      "PIXIV_SEARCH_IMAGE_COUNT": {
+        "description": "Pixiv 搜索图片数",
+        "type": "int",
+        "default": 6,
+        "invisible": true,
+        "hint": "Pixiv 搜索结果最多发送的图片数，同时受单次图片数量上限限制。",
+        "min": 1,
+        "max": 20,
+        "unit": "张"
+      },
+      "ACFUN_QUALITY": {
+        "description": "AcFun 画质偏好",
+        "type": "string",
+        "default": "1080p",
+        "invisible": true,
+        "hint": "优先尝试所选清晰度，拿不到时使用可用的替代流；不是强制锁定画质。",
+        "options": [
+          "1080p",
+          "720p",
+          "480p",
+          "360p"
+        ],
+        "labels": [
+          "1080P 优先",
+          "720P 优先",
+          "480P 优先",
+          "360P 优先"
+        ]
+      },
+      "WEIBO_VIDEO_QUALITY": {
+        "description": "微博视频画质偏好",
+        "type": "string",
+        "default": "720p",
+        "invisible": true,
+        "hint": "按接口提供的档位优先取流，缺失时仍尝试其他可用地址；HD/省流为接口档位而非固定分辨率。",
+        "options": [
+          "720p",
+          "hd",
+          "ld"
+        ],
+        "labels": [
+          "720P 优先",
+          "HD 优先",
+          "省流优先"
+        ]
+      },
+      "XHS_IMAGE_WIDTH": {
+        "description": "小红书图片缩放宽度",
+        "type": "int",
+        "default": 1080,
+        "invisible": true,
+        "hint": "默认 1080；0 不额外添加当前 CDN 缩放与 JPG 转码指令，实际图片质量和格式由源站决定。",
+        "min": 0,
+        "max": 4096,
+        "unit": "像素"
       }
     }
   },
   "维护": {
     "type": "object",
-    "description": "缓存与调试，改动后立即生效。⚠️ 请到插件 WebUI 的「配置」页修改「维护」",
+    "description": "同群去重时长可直接在这里修改；缓存与调试等更多选项请到插件 WebUI 的「设置 / 配置」页修改「维护」",
     "items": {
       "CACHE_TTL_HOURS": {
         "description": "缓存保留时长",
@@ -832,7 +1078,7 @@
         "description": "同群重复链接去重",
         "type": "int",
         "default": 60,
-        "invisible": true,
+        "invisible": false,
         "hint": "**只在群聊里生效**：同一个群里，第一个人发某链接后的此时长内，其他人再发同一条链接就**不再解析、也不再发卡片**，只回一句「这个链接刚刚已经解析过了哦」，且这句提示也只发一次。私聊不去重。设为 0 关闭。与「重复解析间隔」的区别：那个是复用上次结果**照发卡片**，这个是**不响应**——后者是为了止住群里一条热链被连着转发时刷屏",
         "min": 0,
         "max": 3600,
@@ -854,6 +1100,44 @@
         "default": true,
         "invisible": true,
         "hint": "关闭后只保留警告与错误日志，排查问题时可打开"
+      },
+      "HISTORY_MAX_RECORDS": {
+        "description": "历史保留条数",
+        "type": "int",
+        "default": 500,
+        "invisible": false,
+        "hint": "最多保留的分享记录数。调小会裁剪较旧记录，不会删除媒体文件；媒体清理由缓存设置控制。",
+        "min": 20,
+        "max": 5000,
+        "unit": "条"
+      },
+      "DEDUP_HINT_TEXT": {
+        "description": "重复链接提示文字",
+        "type": "string",
+        "default": "这个链接刚刚已经解析过了哦",
+        "invisible": false,
+        "hint": "同群重复链接被跳过时的提示，最长 200 字；留空静默跳过已确认重复，不影响投递状态不确定的提示。",
+        "max_length": 200
+      },
+      "MAX_RESULT_CACHE_ENTRIES": {
+        "description": "解析内存缓存条数",
+        "type": "int",
+        "default": 128,
+        "invisible": true,
+        "hint": "内存中解析结果的最大条数，不是磁盘历史条数。调大可能增加内存占用，原有缓存有效期仍生效。",
+        "min": 16,
+        "max": 512,
+        "unit": "条"
+      },
+      "MAX_RENDER_CACHE_ENTRIES": {
+        "description": "卡片内存索引条数",
+        "type": "int",
+        "default": 128,
+        "invisible": true,
+        "hint": "内存中渲染结果索引的最大条数；不控制磁盘卡片文件的清理。",
+        "min": 16,
+        "max": 512,
+        "unit": "条"
       }
     }
   }

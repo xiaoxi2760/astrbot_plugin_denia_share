@@ -47,6 +47,21 @@ _STEAM_UA = (
 # 简介里的 HTML 要去掉
 _TAG_RE = re.compile(r"<[^>]+>")
 
+# 卡片上默认附的游戏截图数（配置 STEAM_SCREENSHOT_COUNT 未初始化时兜底）
+_DEFAULT_SCREENSHOT_COUNT = 3
+
+
+def _screenshot_count() -> int:
+    """读配置的游戏截图数（默认 3，允许 0 = 不附截图）。"""
+    try:
+        cfg = get_config()
+    except RuntimeError:
+        return _DEFAULT_SCREENSHOT_COUNT
+    try:
+        return max(0, int(getattr(cfg, "STEAM_SCREENSHOT_COUNT", _DEFAULT_SCREENSHOT_COUNT)))
+    except (TypeError, ValueError):
+        return _DEFAULT_SCREENSHOT_COUNT
+
 
 class SteamParser(BaseParser):
     platform: ClassVar[Platform] = platform_of(PlatformEnum.STEAM)
@@ -114,10 +129,10 @@ class SteamParser(BaseParser):
         if lines or price_lines:
             result.extra["info"] = "\n".join(lines + ([""] if lines else []) + price_lines)
 
-        # 封面 + 截图
+        # 封面 + 截图（截图数按配置 STEAM_SCREENSHOT_COUNT；0 = 只发封面）
         cover = game.get("header_image")
         shots: list[str] = []
-        for shot in (game.get("screenshots") or [])[:3]:
+        for shot in (game.get("screenshots") or [])[:_screenshot_count()]:
             if isinstance(shot, dict):
                 u = shot.get("path_full") or shot.get("path_thumbnail")
                 if u:

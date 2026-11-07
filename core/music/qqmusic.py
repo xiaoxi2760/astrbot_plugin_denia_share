@@ -46,6 +46,15 @@ _QUALITY_TIERS: Final[dict[str, tuple[tuple[str, str], ...]]] = {
 }
 QUALITY_TIERS: Final[tuple[tuple[str, str], ...]] = _QUALITY_TIERS["high"]
 
+# 取流前缀 → 实际音质展示名。前缀是**本次请求成功返回的那一档**，不是配置
+# 里的目标档：MUSIC_QUALITY=lossless 但账号无权益时服务端只给 M800，描述
+# 必须显示 320k，不能显示「无损」。认不出的前缀保持空串（未知）。
+_QUALITY_LABELS: Final[dict[str, str]] = {
+    "F000": "FLAC",
+    "M800": "320k",
+    "C400": "128k",
+}
+
 
 def _quality_tiers() -> tuple[tuple[str, str], ...]:
     """按配置的音质档返回尝试顺序；未识别的值回退默认。"""
@@ -68,6 +77,11 @@ def _singers(node: Any) -> str:
         if name:
             names.append(name)
     return "/".join(names)
+
+
+def _quality_label(prefix: str) -> str:
+    """按实际取流前缀给出音质名；只认已知前缀，不把配置目标当结果。"""
+    return _QUALITY_LABELS.get(str(prefix or "").strip().upper(), "")
 
 
 def _qq_song(item: Any) -> Song | None:
@@ -225,7 +239,16 @@ class QQMusicProvider(BaseProvider):
             if purl and hosts:
                 url = safe_media_url(urljoin(hosts[0], purl))
                 if url:
-                    return PlayURL(url=url, duration=target.duration, preview=False)
+                    # 接口返回的 size 是该音源文件的字节数；缺失/非正数保持
+                    # None（未知），不编 0。
+                    size = int_of(infos[0].get("size")) if infos else 0
+                    return PlayURL(
+                        url=url,
+                        duration=target.duration,
+                        preview=False,
+                        quality=_quality_label(prefix),
+                        size=size if size > 0 else None,
+                    )
             last_code = int_of(infos[0].get("result")) if infos else last_code
         if uin == "0":
             return PlayURL(message='暂未取得音频，可登录 QQ音乐账号后重试；部分歌曲需要会员')

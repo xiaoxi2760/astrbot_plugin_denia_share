@@ -110,6 +110,46 @@ class _MusicMethods:
     async def search_songs(self, keyword, limit=5):
         return await self._provider().search(keyword, limit=limit)
 
+    async def _describe_audio(self, song):
+        """确认预览：只向 provider **取流**，不下载音频正文。
+
+        provider.play() 返回的 ``quality`` / ``size`` 只有接口确实给出时才填；
+        缺流且有明确「当前账号无播放权限」原因时给 ``unavailable_reason``。
+        网络失败、临时风控或无法判断时一律按未知处理，不武断说无权限、
+        也不编 0。试听片段仍可确认，大小标记 ``estimated``（接口的 size
+        未必等于试听片段实际字节数，不能拿去精确拒绝）。
+        """
+        from ..media_probe import empty_description
+
+        desc = empty_description(1)
+        try:
+            source = await self._provider().play(song)
+        except asyncio.CancelledError:
+            raise
+        except MusicError:
+            return desc
+        except Exception:
+            return desc
+        if not source.url:
+            reason = str(source.message or "").strip()
+            # 只有平台明确说「当前账号没有播放权限」才算不可用；「暂时取不到 /
+            # 可登录后重试 / 可能需要会员」也可能是网络或临时风控，保持未知。
+            if reason and any(
+                marker in reason
+                for marker in ("未取得这首歌的播放权限", "无权播放", "没有播放权限")
+            ):
+                desc["unavailable_reason"] = reason
+            return desc
+        desc["quality"] = str(source.quality or "").strip()
+        try:
+            size = int(source.size) if source.size is not None else 0
+        except (TypeError, ValueError):
+            size = 0
+        if size > 0:
+            desc["size_bytes"] = size
+            desc["estimated"] = bool(source.preview)
+        return desc
+
     async def song_result(self, song):
         cover = song.cover
         warnings = []
@@ -146,7 +186,11 @@ class _MusicMethods:
             return await self.downloader.download_audio(source.url, ext_headers=self.headers)
         # Permission-limited previews may be shorter than the full track.
         # Apply the duration limit only after resolving the actual playable audio.
-        audio = AudioContent(PathTask.lazy(download), duration=song.duration)
+        audio = AudioContent(
+            PathTask.lazy(download),
+            duration=song.duration,
+            info_loader=lambda: self._describe_audio(song),
+        )
         result.contents.append(audio)
         if isinstance(cover, str) and cover:
             audio.cover = self.create_image(cover).path_task

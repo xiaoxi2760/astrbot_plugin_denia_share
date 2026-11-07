@@ -616,7 +616,7 @@ async function mountSettings(gen) {
   const holder = $("#settings-classic");
   if (!holder) return;
   const { instance } = await mountClassicView(holder,
-    (context) => createConfigView(context, { showAccountPanels: false, collapsedByDefault: true }), createContext());
+    (context) => createConfigView(context, { showAccountPanels: false, collapsedByDefault: false }), createContext());
   if (gen !== viewGen) {
     instance.unmount?.();
     return;
@@ -640,11 +640,11 @@ async function openRecord(id) {
       <dt>解析时间</dt><dd>${esc(date(record.created_at))} · ${esc(ago(record.created_at))}</dd>
       <dt>来源</dt><dd>${esc({ auto: "链接自动", command: "命令", webui: "网页手动" }[record.via] || record.via || "—")}</dd>
       <dt>链接</dt><dd>${esc(record.url || "—")}</dd>
-      <dt>媒体</dt><dd>${esc(record.media_count ?? (record.media_files || []).length)} 个文件</dd>
+      <dt>媒体</dt><dd>${esc(record.media_count ?? (record.media_files || []).length)} 个文件，${esc(record.media_existing || 0)} 个源文件可下载</dd>
     </dl>
     ${record.detail?.text ? `<p class="result-text">${esc(record.detail.text)}</p>` : ""}
   </div>`;
-  const actions = `<button class="button" data-action="close">关闭</button><button class="primary" data-action="download-record" data-id="${esc(id)}" ${record.card_exists ? "" : "disabled"}>${icon("download")}下载原图</button>`;
+  const actions = `<button class="button" data-action="close">关闭</button><button class="button" data-action="download-record" data-id="${esc(id)}" ${record.card_exists ? "" : "disabled"}>${icon("download")}下载卡片原图</button><button class="primary" data-action="download-source" data-id="${esc(id)}" ${record.media_existing > 0 ? "" : "disabled"}>${icon("download")}${record.media_existing > 1 ? "下载源文件 ZIP" : "下载源文件"}</button>`;
   const ticket = dialog("分享详情", body, actions);
   if (!record.card_exists) return;
   try {
@@ -667,6 +667,21 @@ async function downloadRecord(id) {
     toast("已开始下载卡片原图");
   } catch (error) {
     toast(`下载失败：${error?.message || error}`);
+  }
+}
+
+async function downloadSources(id) {
+  const button = $(`[data-action="download-source"][data-id="${CSS.escape(id)}"]`);
+  if (button) button.disabled = true;
+  try {
+    const info = await api.get("cache/media", { id });
+    if (info.missing_count) toast(`${info.missing_count} 个源文件已清理或不可用，将下载其余 ${info.file_count} 个`);
+    await api.download("cache/media/download", { id, archive: info.archive ? 1 : undefined }, info.filename);
+    toast(info.archive ? "已开始下载源文件 ZIP" : "已开始下载源文件");
+  } catch (error) {
+    toast(`源文件下载失败：${error?.message || error}`);
+  } finally {
+    if (button?.isConnected) button.disabled = false;
   }
 }
 
@@ -795,6 +810,9 @@ async function action(button) {
       break;
     case "download-record":
       await downloadRecord(id);
+      break;
+    case "download-source":
+      await downloadSources(id);
       break;
     case "diagnostics":
       await openDiagnostics();

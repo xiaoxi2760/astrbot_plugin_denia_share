@@ -129,6 +129,30 @@ _PROXY_SWITCH_ITEMS: tuple[dict[str, Any], ...] = tuple(
     for key, meta in PLATFORMS.items()
 )
 
+_TUNABLE_ITEMS: tuple[dict[str, Any], ...] = (
+    {'key': 'IMAGE_COUNT_MAXIMUM', 'group': '解析设置', 'label': '单次图片数量上限', 'type': 'int', 'default': 50, 'hint': '每条结果最多处理的图集图片数，不包含头像和卡片封面；仍受平台自身数量上限限制。', 'min': 1, 'max': 50, 'unit': '张'},
+    {'key': 'HISTORY_MAX_RECORDS', 'group': '维护', 'label': '历史保留条数', 'type': 'int', 'default': 500, 'hint': '最多保留的分享记录数。调小会裁剪较旧记录，不会删除媒体文件；媒体清理由缓存设置控制。', 'min': 20, 'max': 5000, 'unit': '条', 'subgroup': '消息与历史'},
+    {'key': 'DEDUP_HINT_TEXT', 'group': '维护', 'label': '重复链接提示文字', 'type': 'string', 'default': '这个链接刚刚已经解析过了哦', 'hint': '同群重复链接被跳过时的提示，最长 200 字；留空静默跳过已确认重复，不影响投递状态不确定的提示。', 'max_length': 200, 'subgroup': '消息与历史'},
+    {'key': 'FORWARD_NODE_NICKNAME', 'group': '合并转发', 'label': '转发节点昵称', 'type': 'string', 'default': '希望解析器', 'hint': '合并转发节点的显示名称，最长 32 字；留空使用希望解析器，不改变实际发送账号。', 'max_length': 32},
+    {'key': 'DOWNLOAD_IMAGE_CONCURRENCY', 'group': '高级设置', 'label': '图片下载并发', 'type': 'int', 'default': 8, 'hint': '每个下载池同时下载图片的数量。直连与代理分别计数；调大可能增加带宽占用和平台限流。', 'min': 1, 'max': 16, 'unit': '个', 'subgroup': '性能与网络'},
+    {'key': 'DOWNLOAD_MEDIA_CONCURRENCY', 'group': '高级设置', 'label': '视频与音频下载并发', 'type': 'int', 'default': 3, 'hint': '每个下载池同时下载视频或音频的数量，B站音视频可能各占一个任务；直连与代理分别计数。', 'min': 1, 'max': 8, 'unit': '个', 'subgroup': '性能与网络'},
+    {'key': 'DOWNLOAD_RETRY_ATTEMPTS', 'group': '高级设置', 'label': '下载重试次数', 'type': 'int', 'default': 2, 'hint': '临时网络错误时，在首次下载之外最多重建任务的次数；0 不重试。不会重试权限、磁盘或内容限制等永久错误。', 'min': 0, 'max': 5, 'unit': '次', 'subgroup': '性能与网络'},
+    {'key': 'MAX_RESULT_CACHE_ENTRIES', 'group': '维护', 'label': '解析内存缓存条数', 'type': 'int', 'default': 128, 'hint': '内存中解析结果的最大条数，不是磁盘历史条数。调大可能增加内存占用，原有缓存有效期仍生效。', 'min': 16, 'max': 512, 'unit': '条', 'subgroup': '内存缓存'},
+    {'key': 'MAX_RENDER_CACHE_ENTRIES', 'group': '维护', 'label': '卡片内存索引条数', 'type': 'int', 'default': 128, 'hint': '内存中渲染结果索引的最大条数；不控制磁盘卡片文件的清理。', 'min': 16, 'max': 512, 'unit': '条', 'subgroup': '内存缓存'},
+    {'key': 'SCREENSHOT_TIMEOUT_SECONDS', 'group': '网页截图', 'label': '截图请求超时', 'type': 'int', 'default': 60, 'hint': '等待截图服务响应的本地请求预算；CF 页面加载预算是另一个计时器，需为截图生成和传输留出时间。', 'min': 10, 'max': 300, 'unit': '秒'},
+    {'key': 'SCREENSHOT_CF_WAIT_UNTIL', 'group': '网页截图', 'label': 'CF 页面加载等待策略', 'type': 'select', 'default': 'networkidle0', 'hint': '仅影响 Cloudflare 截图。提前到 DOM 就绪可能截到尚未完成的页面；等待网络空闲可能被持续请求拖慢。', 'options': ['load', 'domcontentloaded', 'networkidle0', 'networkidle2'], 'labels': ['页面加载完成', 'DOM 就绪', '网络完全空闲', '网络基本空闲']},
+    {'key': 'SCREENSHOT_CF_GOTO_TIMEOUT_MS', 'group': '网页截图', 'label': 'CF 页面加载预算', 'type': 'int', 'default': 45000, 'hint': '仅影响 Cloudflare 服务端页面加载，最多 60000ms；本地截图请求超时应留有余量。', 'min': 1000, 'max': 60000, 'unit': '毫秒'},
+    {'key': 'MUSIC_HTTP_TIMEOUT_SECONDS', 'group': '音乐设置', 'label': '音乐接口请求超时', 'type': 'int', 'default': 15, 'hint': '音乐搜索、详情和取流的 HTTP 等待预算；封面总预算及扫码、续期仍有独立限制。', 'min': 5, 'max': 120, 'unit': '秒'},
+    {'key': 'BILI_EXTRA_INFO_TIMEOUT_SECONDS', 'group': 'B站设置', 'label': 'B站附加信息等待', 'type': 'int', 'default': 5, 'hint': '卡片等待在线人数和 AI 摘要的上限，不是视频解析总超时；调大会延长部分卡片的等待。', 'min': 1, 'max': 30, 'unit': '秒'},
+    {'key': 'CREDENTIAL_CHECK_TIMEOUT_SECONDS', 'group': '高级设置', 'label': '凭据探针请求超时', 'type': 'int', 'default': 15, 'hint': '通用凭据 HTTP 检查的请求预算，不控制全部扫码或 QQ音乐续期流程。', 'min': 5, 'max': 120, 'unit': '秒', 'subgroup': '性能与网络'},
+    {'key': 'PIXIV_IMAGE_COUNT_MAXIMUM', 'group': '高级设置', 'label': 'Pixiv 作品图片上限', 'type': 'int', 'default': 9, 'hint': '多页作品最多发送的图片数，同时受单次图片数量上限限制。', 'min': 1, 'max': 50, 'unit': '张', 'subgroup': '平台偏好'},
+    {'key': 'PIXIV_SEARCH_IMAGE_COUNT', 'group': '高级设置', 'label': 'Pixiv 搜索图片数', 'type': 'int', 'default': 6, 'hint': 'Pixiv 搜索结果最多发送的图片数，同时受单次图片数量上限限制。', 'min': 1, 'max': 20, 'unit': '张', 'subgroup': '平台偏好'},
+    {'key': 'STEAM_SCREENSHOT_COUNT', 'group': 'Steam 设置', 'label': 'Steam 游戏截图数', 'type': 'int', 'default': 3, 'hint': '游戏解析附带的截图数量；0 不附带截图，同时受单次图片数量上限限制。', 'min': 0, 'max': 10, 'unit': '张'},
+    {'key': 'ACFUN_QUALITY', 'group': '高级设置', 'label': 'AcFun 画质偏好', 'type': 'select', 'default': '1080p', 'hint': '优先尝试所选清晰度，拿不到时使用可用的替代流；不是强制锁定画质。', 'options': ['1080p', '720p', '480p', '360p'], 'labels': ['1080P 优先', '720P 优先', '480P 优先', '360P 优先'], 'subgroup': '平台偏好'},
+    {'key': 'WEIBO_VIDEO_QUALITY', 'group': '高级设置', 'label': '微博视频画质偏好', 'type': 'select', 'default': '720p', 'hint': '按接口提供的档位优先取流，缺失时仍尝试其他可用地址；HD/省流为接口档位而非固定分辨率。', 'options': ['720p', 'hd', 'ld'], 'labels': ['720P 优先', 'HD 优先', '省流优先'], 'subgroup': '平台偏好'},
+    {'key': 'XHS_IMAGE_WIDTH', 'group': '高级设置', 'label': '小红书图片缩放宽度', 'type': 'int', 'default': 1080, 'hint': '默认 1080；0 不额外添加当前 CDN 缩放与 JPG 转码指令，实际图片质量和格式由源站决定。', 'min': 0, 'max': 4096, 'unit': '像素', 'subgroup': '平台偏好'},
+)
+
 CONFIG_META: tuple[dict[str, Any], ...] = (
     {
         "key": "WEBUI_STYLE",
@@ -168,7 +192,7 @@ CONFIG_META: tuple[dict[str, Any], ...] = (
     {
         "key": "MUSIC_SEARCH_LIMIT", "group": "音乐设置", "label": "搜歌结果数量",
         "type": "int", "default": 5, "min": 1, "max": 10,
-        "hint": "结果卡片最多显示这些候选；全部时两家交错排列，编号连续。",
+        "hint": "每次搜歌显示 1～10 首候选；选择全部平台时，两家结果交错排列、编号连续，总数不超过此值。",
     },
     {
         "key": "MUSIC_SESSION_TTL_SECONDS", "group": "音乐设置", "label": "选歌列表有效期",
@@ -460,6 +484,82 @@ CONFIG_META: tuple[dict[str, Any], ...] = (
         "default": False,
         "internal": True,
         "hint": "由插件维护，避免宿主补齐默认值后重复迁移用户选择。",
+    },
+    # ---------------- 输出模式 · 确认下载 ---------------- #
+    # 确认下载只改变「源媒体什么时候下载」，不放宽任何限额：媒体仍受现有
+    # 大小/时长上限与 2GB 硬上限约束。四个角色权限为「或」，任何人仍受原
+    # 插件访问权（平台开关与白名单）控制；QQ 群管仅真实 QQ 群事件可用并把
+    # 群主算在内，私聊不适用。
+    {
+        "key": "MEDIA_DOWNLOAD_MODE",
+        "group": "输出模式",
+        "subgroup": "确认下载",
+        "label": "下载时机",
+        "type": "select",
+        "default": "auto",
+        "options": ["auto", "confirm"],
+        "labels": ["自动下载（默认）", "先确认再下载"],
+        "hint": (
+            "auto=解析后立即按现有方式下载并发送（默认，行为不变）；"
+            "confirm=只先下载封面并生成信息卡，展示实际清晰度与文件大小，"
+            "回复「确认下载」后才下载源文件并按现有方式自动发送——确认后仍遵守"
+            "大小/时长上限与 2GB 硬上限。确认模式需开启富媒体并有文本或卡片渠道"
+            "展示确认信息。"
+        ),
+    },
+    {
+        "key": "CONFIRM_ALLOW_ANYONE",
+        "group": "输出模式",
+        "subgroup": "确认下载",
+        "label": "任何有访问权的用户可确认",
+        "type": "bool",
+        "default": False,
+        "hint": (
+            "开启后，任何有插件访问权限（平台开关与白名单照常生效）的用户"
+            "都可以确认待下载项；与下列角色为「或」关系，全部关闭则无人可确认。"
+        ),
+    },
+    {
+        "key": "CONFIRM_ALLOW_SENDER",
+        "group": "输出模式",
+        "subgroup": "确认下载",
+        "label": "原分享者可确认",
+        "type": "bool",
+        "default": True,
+        "hint": "开启后，原分享者可以确认自己分享的待下载项（默认开启）。",
+    },
+    {
+        "key": "CONFIRM_ALLOW_QQ_ADMIN",
+        "group": "输出模式",
+        "subgroup": "确认下载",
+        "label": "QQ 群主/管理员可确认",
+        "type": "bool",
+        "default": False,
+        "hint": (
+            "开启后，QQ 群主/管理员可确认**本群内**的待下载项（群主算在内）；"
+            "仅真实 QQ 群事件可用，私聊或无法确认身份时不适用。"
+        ),
+    },
+    {
+        "key": "CONFIRM_ALLOW_BOT_ADMIN",
+        "group": "输出模式",
+        "subgroup": "确认下载",
+        "label": "AstrBot 管理员可确认",
+        "type": "bool",
+        "default": False,
+        "hint": "开启后，AstrBot 管理员可以确认待下载项。",
+    },
+    {
+        "key": "CONFIRM_DOWNLOAD_TTL_SECONDS",
+        "group": "输出模式",
+        "subgroup": "确认下载",
+        "label": "待确认项有效期",
+        "type": "int",
+        "default": 300,
+        "min": 30,
+        "max": 1800,
+        "unit": "秒",
+        "hint": "待确认项的有效期（秒，30～1800）。过期后需要重新分享链接才能再次确认。",
     },
     {
         "key": "RENDER_ENABLED",
@@ -865,6 +965,7 @@ CONFIG_META: tuple[dict[str, Any], ...] = (
         "default": True,
         "hint": "关闭后只保留警告与错误日志，排查问题时可打开",
     },
+    *_TUNABLE_ITEMS,
 )
 
 _ITEM_BY_KEY: dict[str, dict[str, Any]] = {item["key"]: item for item in CONFIG_META}
@@ -1214,6 +1315,100 @@ class ParserConfig:
                     return flat_val
                 return nested_val
         return self._cfg.get(key, default)
+
+    def _tunable_value(self, key: str) -> Any:
+        """Validate hand-edited values as well as values saved through WebUI."""
+        meta = _ITEM_BY_KEY[key]
+        value, error = coerce_value(meta, self._cfg_get(key, meta["default"]))
+        if error:
+            return meta["default"]
+        if key == "FORWARD_NODE_NICKNAME":
+            return value or meta["default"]
+        return value
+
+    @property
+    def IMAGE_COUNT_MAXIMUM(self) -> int:
+        return self._tunable_value("IMAGE_COUNT_MAXIMUM")
+
+    @property
+    def HISTORY_MAX_RECORDS(self) -> int:
+        return self._tunable_value("HISTORY_MAX_RECORDS")
+
+    @property
+    def DEDUP_HINT_TEXT(self) -> str:
+        return self._tunable_value("DEDUP_HINT_TEXT")
+
+    @property
+    def FORWARD_NODE_NICKNAME(self) -> str:
+        return self._tunable_value("FORWARD_NODE_NICKNAME")
+
+    @property
+    def DOWNLOAD_IMAGE_CONCURRENCY(self) -> int:
+        return self._tunable_value("DOWNLOAD_IMAGE_CONCURRENCY")
+
+    @property
+    def DOWNLOAD_MEDIA_CONCURRENCY(self) -> int:
+        return self._tunable_value("DOWNLOAD_MEDIA_CONCURRENCY")
+
+    @property
+    def DOWNLOAD_RETRY_ATTEMPTS(self) -> int:
+        return self._tunable_value("DOWNLOAD_RETRY_ATTEMPTS")
+
+    @property
+    def MAX_RESULT_CACHE_ENTRIES(self) -> int:
+        return self._tunable_value("MAX_RESULT_CACHE_ENTRIES")
+
+    @property
+    def MAX_RENDER_CACHE_ENTRIES(self) -> int:
+        return self._tunable_value("MAX_RENDER_CACHE_ENTRIES")
+
+    @property
+    def SCREENSHOT_TIMEOUT_SECONDS(self) -> int:
+        return self._tunable_value("SCREENSHOT_TIMEOUT_SECONDS")
+
+    @property
+    def SCREENSHOT_CF_WAIT_UNTIL(self) -> str:
+        return self._tunable_value("SCREENSHOT_CF_WAIT_UNTIL")
+
+    @property
+    def SCREENSHOT_CF_GOTO_TIMEOUT_MS(self) -> int:
+        return self._tunable_value("SCREENSHOT_CF_GOTO_TIMEOUT_MS")
+
+    @property
+    def MUSIC_HTTP_TIMEOUT_SECONDS(self) -> int:
+        return self._tunable_value("MUSIC_HTTP_TIMEOUT_SECONDS")
+
+    @property
+    def BILI_EXTRA_INFO_TIMEOUT_SECONDS(self) -> int:
+        return self._tunable_value("BILI_EXTRA_INFO_TIMEOUT_SECONDS")
+
+    @property
+    def CREDENTIAL_CHECK_TIMEOUT_SECONDS(self) -> int:
+        return self._tunable_value("CREDENTIAL_CHECK_TIMEOUT_SECONDS")
+
+    @property
+    def PIXIV_IMAGE_COUNT_MAXIMUM(self) -> int:
+        return self._tunable_value("PIXIV_IMAGE_COUNT_MAXIMUM")
+
+    @property
+    def PIXIV_SEARCH_IMAGE_COUNT(self) -> int:
+        return self._tunable_value("PIXIV_SEARCH_IMAGE_COUNT")
+
+    @property
+    def STEAM_SCREENSHOT_COUNT(self) -> int:
+        return self._tunable_value("STEAM_SCREENSHOT_COUNT")
+
+    @property
+    def ACFUN_QUALITY(self) -> str:
+        return self._tunable_value("ACFUN_QUALITY")
+
+    @property
+    def WEIBO_VIDEO_QUALITY(self) -> str:
+        return self._tunable_value("WEIBO_VIDEO_QUALITY")
+
+    @property
+    def XHS_IMAGE_WIDTH(self) -> int:
+        return self._tunable_value("XHS_IMAGE_WIDTH")
 
     # ---------------- WebUI 读写 ---------------- #
 
@@ -1599,6 +1794,55 @@ class ParserConfig:
     def SEND_BACKGROUND_MUSIC(self) -> bool:
         """图文作品自带配乐时是否一并发送（解析侧读取）。"""
         return bool(self._cfg_get("SEND_BACKGROUND_MUSIC", False))
+
+    # ---------------- 输出模式 · 确认下载 ---------------- #
+
+    def _tunable(self, key: str) -> Any:
+        """用 CONFIG_META 的校验规则读一项可调配置，脏值回默认。"""
+        return self._tunable_value(key)
+
+    @property
+    def MEDIA_DOWNLOAD_MODE(self) -> str:
+        """下载时机：``auto``（默认）/ ``confirm``。
+
+        脏值（手改 JSON、旧版本残留、原生面板拼错）一律回退 ``auto``，
+        与既有 ``WEBUI_STYLE`` / ``AUDIO_SEND_MODE`` 的白名单策略一致。
+        """
+        value = str(self._cfg_get("MEDIA_DOWNLOAD_MODE", "auto") or "").strip().lower()
+        return value if value in ("auto", "confirm") else "auto"
+
+    @property
+    def CONFIRM_ALLOW_ANYONE(self) -> bool:
+        return self._tunable("CONFIRM_ALLOW_ANYONE")
+
+    @property
+    def CONFIRM_ALLOW_SENDER(self) -> bool:
+        return self._tunable("CONFIRM_ALLOW_SENDER")
+
+    @property
+    def CONFIRM_ALLOW_QQ_ADMIN(self) -> bool:
+        return self._tunable("CONFIRM_ALLOW_QQ_ADMIN")
+
+    @property
+    def CONFIRM_ALLOW_BOT_ADMIN(self) -> bool:
+        return self._tunable("CONFIRM_ALLOW_BOT_ADMIN")
+
+    def confirm_roles(self) -> dict[str, bool]:
+        """四个确认角色开关的当前生效值（控制器按「或」组合）。
+
+        全部为 False 时控制器应拒绝任何确认；任何人 / 群管角色仍受原插件
+        访问权与「仅真实 QQ 群」等条件约束，这里只回读开关本身。
+        """
+        return {
+            "anyone": self.CONFIRM_ALLOW_ANYONE,
+            "sender": self.CONFIRM_ALLOW_SENDER,
+            "qq_admin": self.CONFIRM_ALLOW_QQ_ADMIN,
+            "bot_admin": self.CONFIRM_ALLOW_BOT_ADMIN,
+        }
+
+    @property
+    def CONFIRM_DOWNLOAD_TTL_SECONDS(self) -> int:
+        return self._tunable("CONFIRM_DOWNLOAD_TTL_SECONDS")
 
     def output_modes(self) -> dict[str, bool]:
         """本次请求实际允许输出哪几路（**已计入卡片总开关**）。

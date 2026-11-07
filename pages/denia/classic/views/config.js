@@ -401,7 +401,7 @@ export function createConfigView(ctx, { showAccountPanels = true, collapsedByDef
   /* ---------------- 分组卡片（第二级） ---------------- */
 
   function renderGroup(group, items) {
-    const isCollapsed = collapsed.has(group.name) && !(collapsedByDefault && filter);
+    const isCollapsed = collapsed.has(group.name) && !filter;
     const dirtyCount = group.keys.filter(hasDraft).length;
     const section = meta.sections.find((s) => s.groups.includes(group.name));
 

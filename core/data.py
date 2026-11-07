@@ -21,6 +21,15 @@ from .exception import IgnoreException, MediaSizeExceeded
 @dataclass(repr=False, slots=True)
 class MediaContent:
     path_task: PathTask
+    #: 可选的**惰性**媒体描述加载器（确认下载预览用）。
+    #:
+    #: 只存「可调用或 awaitable」对象，**绝不放进 ``extra``**（extra 会被序列化、
+    #: 做历史详情）。只有确认流程需要展示媒体信息时，控制器才会 ``await`` 它；
+    #: 返回/await 得到与 :func:`core.media_probe.describe_result` 同形状的字典
+    #: （``quality``/``size_bytes``/``estimated``/``media_count``，未知 quality
+    #: 空串、size 为 ``None`` 而不是 0）。缺省 ``None``：所有旧的位置参数构造
+    #: 方式保持完全兼容。
+    info_loader: Any = field(default=None, kw_only=True)
 
     async def get_path(self) -> Path:
         return await self.path_task.get()
