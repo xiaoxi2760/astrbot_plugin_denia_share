@@ -18,6 +18,7 @@ import json
 import asyncio
 from pathlib import Path
 from typing import Any, AsyncGenerator, Dict
+from urllib.parse import urlsplit
 
 import aiohttp
 import httpx
@@ -932,8 +933,25 @@ class DeniaSharePlugin(Star):
 
     @filter.regex(r".*")
     async def json_card_handler(self, event: AstrMessageEvent, matched: re.Match | None = None):
-        """QQ 小程序分享卡片（Json 消息段）里的链接解析"""
+        """QQ 小程序分享卡片（Json 消息段 / 官方 B站卡片）里的链接解析"""
         if not self._has_json_component(event):
+            link = self._official_bilibili_card_link(event)
+            parser = self.parsers.get("bilibili")
+            if not link or parser is None:
+                return
+            try:
+                parser.search_url(link)
+            except (SilentException, ParseException):
+                return
+            # 正文中的 B站链接 / BV 已由 bilibili_handler 接管，避免同一事件双发。
+            try:
+                parser.search_url(event.message_str or "")
+            except (SilentException, ParseException):
+                pass
+            else:
+                return
+            async for r in self._process_url(_EventUrlWrapper(event, link), parser):
+                yield r
             return
         links = self._prioritize_card_links(self._extract_links_from_event(event))
         if not links:
@@ -2087,6 +2105,57 @@ class DeniaSharePlugin(Star):
         return await self._bili_login.notify(session, message)
 
     # ==================== JSON 卡片工具 ====================
+
+    @staticmethod
+    def _official_bilibili_card_link(event: AstrMessageEvent) -> str | None:
+        """只取官方事件当前卡片的跳转链接，不遍历引用、附件或描述文本。"""
+        get_platform_name = getattr(event, "get_platform_name", None)
+        try:
+            platform_name = get_platform_name() if callable(get_platform_name) else None
+        except Exception:
+            return None
+        if platform_name not in {"qq_official", "qq_official_webhook"}:
+            return None
+        raw = getattr(getattr(event, "message_obj", None), "raw_message", None)
+        # AstrBot 4.29.3 的 Patched*Message 在 raw_data 中保留原始事件 d。
+        data = raw.get("raw_data", raw) if isinstance(raw, dict) else getattr(raw, "raw_data", None)
+        if not isinstance(data, dict) or data.get("message_type") not in (3, "3"):
+            return None
+        ark = data.get("ark_data")
+        fields = ark.get("fields") if isinstance(ark, dict) else None
+        link = fields.get("jump_url") if isinstance(fields, dict) else None
+        if not isinstance(link, str) or not link or len(link) > 4096:
+            return None
+        # urlsplit 会忽略部分控制字符；先拒绝这些字符及浏览器歧义反斜杠。
+        if any(ch.isspace() or ord(ch) < 32 or ord(ch) == 127 for ch in link) or "\\" in link:
+            return None
+        try:
+            url = urlsplit(link)
+            host = url.hostname
+            if (
+                url.scheme not in {"http", "https"}
+                or url.username is not None
+                or url.password is not None
+                or url.port is not None
+            ):
+                return None
+        except ValueError:
+            return None
+        if host in {"b23.tv", "bili2233.cn"}:
+            valid_path = re.fullmatch(r"/[0-9A-Za-z]+/?", url.path)
+        elif host in {"bilibili.com", "www.bilibili.com", "m.bilibili.com"}:
+            valid_path = re.fullmatch(
+                r"/(?:(?:video/)?(?:BV[0-9A-Za-z]{10}|av\d{6,})|(?:dynamic|opus)/\d+|read/cv\d+)/?",
+                url.path,
+            )
+        elif host in {"t.bilibili.com", "live.bilibili.com"}:
+            valid_path = re.fullmatch(r"/\d+/?", url.path)
+        else:
+            return None
+        if not valid_path:
+            return None
+        # 规范主机大小写，供已有区分大小写的解析器匹配。
+        return url._replace(netloc=host).geturl()
 
     @staticmethod
     def _has_json_component(event: AstrMessageEvent) -> bool:

@@ -265,8 +265,8 @@ CONFIG_META: tuple[dict[str, Any], ...] = (
         "type": "string",
         "default": "",
         "list": True,
-        "placeholder": "用户 ID，回车添加",
-        "hint": "留空 = 不按用户放行（私聊也会因此被拒）。支持整串粘贴，逗号 / 空格都能自动拆开",
+        "placeholder": "用户 ID / 官方 Bot 用户 openid，回车添加",
+        "hint": "留空 = 不按用户放行（私聊也会因此被拒）。QQ 官方 Bot 请填用户 openid（可用 /sid 辅助查看），不是 QQ 号；支持逗号 / 空格分隔",
     },
     {
         "key": "WHITELIST_GROUP",
@@ -276,8 +276,8 @@ CONFIG_META: tuple[dict[str, Any], ...] = (
         "type": "string",
         "default": "",
         "list": True,
-        "placeholder": "群号，回车添加",
-        "hint": "私聊没有群号，不受这一项影响。支持整串粘贴，逗号 / 空格都能自动拆开",
+        "placeholder": "群号 / 官方 Bot 群 openid，回车添加",
+        "hint": "私聊不受群组名单影响。QQ 官方 Bot 请填群 openid（可用 /sid 辅助查看），不是群号或整串 UMO；支持逗号 / 空格分隔",
     },
     {
         "key": "BLACKLIST_ENABLE",
@@ -296,8 +296,8 @@ CONFIG_META: tuple[dict[str, Any], ...] = (
         "type": "string",
         "default": "",
         "list": True,
-        "placeholder": "用户 ID，回车添加",
-        "hint": "名单里的用户不能触发解析。支持整串粘贴，逗号 / 空格都能自动拆开",
+        "placeholder": "用户 ID / 官方 Bot 用户 openid，回车添加",
+        "hint": "名单里的用户不能触发解析。QQ 官方 Bot 请填用户 openid（可用 /sid 辅助查看），不是 QQ 号；支持逗号 / 空格分隔",
     },
     {
         "key": "BLACKLIST_GROUP",
@@ -307,8 +307,8 @@ CONFIG_META: tuple[dict[str, Any], ...] = (
         "type": "string",
         "default": "",
         "list": True,
-        "placeholder": "群号，回车添加",
-        "hint": "私聊没有群号，不受这一项影响。支持整串粘贴，逗号 / 空格都能自动拆开",
+        "placeholder": "群号 / 官方 Bot 群 openid，回车添加",
+        "hint": "私聊不受群组名单影响。QQ 官方 Bot 请填群 openid（可用 /sid 辅助查看），不是群号或整串 UMO；支持逗号 / 空格分隔",
     },
     # ---------------- B站设置 ---------------- #
     {
@@ -517,7 +517,7 @@ CONFIG_META: tuple[dict[str, Any], ...] = (
         "default": False,
         "hint": (
             "开启后，QQ 群主/管理员可确认**本群内**的待下载项（群主算在内）；"
-            "仅真实 QQ 群事件可用，私聊或无法确认身份时不适用。"
+            "仅 aiocqhttp / OneBot 群事件可用；QQ 官方 Bot 无法据此识别群管理，私聊或身份未知时也不适用。"
         ),
     },
     {
@@ -737,6 +737,16 @@ CONFIG_META: tuple[dict[str, Any], ...] = (
         "max": 86400,
         "unit": "秒",
         "hint": "到期后链接失效。视频越大、链路越慢越要留足时间，建议不低于 120 秒",
+    },
+    {
+        "key": "QQ_OFFICIAL_MEDIA_MODE",
+        "group": "媒体发送",
+        "label": "QQ 官方机器人多媒体发送",
+        "type": "select",
+        "default": "compact",
+        "options": ["compact", "direct"],
+        "labels": ["紧凑预览与源链接", "逐个发送原媒体"],
+        "hint": "仅 QQ 官方机器人生效。有源链接时，多图最多生成2页缩略预览（每页9张），动态图和多个视频请打开源链接查看；无源链接保留逐个发送。OneBot 合并转发不受影响。",
     },
     # ---------------- 合并转发 ---------------- #
     # 合并转发（一条消息里装多个节点）只有 OneBot 协议端支持，其它协议端拿不到
@@ -1773,7 +1783,7 @@ class ParserConfig:
         """下载时机：``auto``（默认）/ ``confirm``。
 
         脏值（手改 JSON、旧版本残留、原生面板拼错）一律回退 ``auto``，
-        与既有 ``WEBUI_STYLE`` / ``AUDIO_SEND_MODE`` 的白名单策略一致。
+        与既有 ``AUDIO_SEND_MODE`` 的白名单策略一致。
         """
         value = str(self._cfg_get("MEDIA_DOWNLOAD_MODE", "auto") or "").strip().lower()
         return value if value in ("auto", "confirm") else "auto"
@@ -1985,6 +1995,11 @@ class ParserConfig:
         留空始终使用插件数据目录，不自动切换到可能未挂载的共享路径。
         """
         return str(self._cfg_get("CACHE_DIR", "") or "").strip()
+
+    @property
+    def QQ_OFFICIAL_MEDIA_MODE(self) -> str:
+        value = str(self._cfg_get("QQ_OFFICIAL_MEDIA_MODE", "compact") or "").strip().lower()
+        return value if value in {"direct", "compact"} else "compact"
 
     @property
     def MEDIA_RELAY_ENABLED(self) -> bool:

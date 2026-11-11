@@ -1,20 +1,20 @@
 {
   "解析设置": {
     "type": "object",
-    "description": "日常最常用到的几项。⚠️ 请到插件 WebUI 的「配置」页修改「解析设置」",
+    "description": "日常最常用到的几项，可直接在这里修改；更多设置请到插件 WebUI 的「设置 / 配置」页修改「解析设置」",
     "items": {
       "DISABLED_PLATFORMS": {
         "description": "禁用的平台",
         "type": "string",
         "default": "",
-        "invisible": true,
-        "hint": "勾选=禁用该平台，都不勾=全部启用。「总览」页的平台开关改的是同一份（那边点一下立即生效）"
+        "invisible": false,
+        "hint": "填写禁用的平台标识，用逗号分隔，例如 bilibili,douyin；留空表示全部启用。经典界面的「总览」也可逐个平台切换，修改的是同一份配置。"
       },
       "VIDEO_DURATION_MAXIMUM": {
         "description": "视频/音频最大时长",
         "type": "int",
         "default": 480,
-        "invisible": true,
+        "invisible": false,
         "hint": "超过此时长不下载视频或音频；已选文本和卡片仍可显示内容与原因。",
         "min": 0,
         "max": 86400,
@@ -24,7 +24,7 @@
         "description": "单个视频/音频体积上限",
         "type": "int",
         "default": 100,
-        "invisible": true,
+        "invisible": false,
         "hint": "下载前按 Content-Length 判断，边下边判。QQ 大文件上传容易失败，建议不超过 60",
         "min": 1,
         "max": 4096,
@@ -34,7 +34,7 @@
         "description": "解析失败时发送错误提示",
         "type": "bool",
         "default": false,
-        "invisible": true,
+        "invisible": false,
         "hint": "关闭则只写日志、不在群里刷报错。排查问题时可临时打开"
       },
       "IMAGE_COUNT_MAXIMUM": {
@@ -65,14 +65,14 @@
         "type": "string",
         "default": "",
         "invisible": true,
-        "hint": "留空 = 不按用户放行（私聊也会因此被拒）。支持整串粘贴，逗号 / 空格都能自动拆开"
+        "hint": "留空 = 不按用户放行（私聊也会因此被拒）。QQ 官方 Bot 请填用户 openid（可用 /sid 辅助查看），不是 QQ 号；支持逗号 / 空格分隔"
       },
       "WHITELIST_GROUP": {
         "description": "白名单群组",
         "type": "string",
         "default": "",
         "invisible": true,
-        "hint": "私聊没有群号，不受这一项影响。支持整串粘贴，逗号 / 空格都能自动拆开"
+        "hint": "私聊不受群组名单影响。QQ 官方 Bot 请填群 openid（可用 /sid 辅助查看），不是群号或整串 UMO；支持逗号 / 空格分隔"
       },
       "BLACKLIST_ENABLE": {
         "description": "启用黑名单",
@@ -86,14 +86,14 @@
         "type": "string",
         "default": "",
         "invisible": true,
-        "hint": "名单里的用户不能触发解析。支持整串粘贴，逗号 / 空格都能自动拆开"
+        "hint": "名单里的用户不能触发解析。QQ 官方 Bot 请填用户 openid（可用 /sid 辅助查看），不是 QQ 号；支持逗号 / 空格分隔"
       },
       "BLACKLIST_GROUP": {
         "description": "黑名单群组",
         "type": "string",
         "default": "",
         "invisible": true,
-        "hint": "私聊没有群号，不受这一项影响。支持整串粘贴，逗号 / 空格都能自动拆开"
+        "hint": "私聊不受群组名单影响。QQ 官方 Bot 请填群 openid（可用 /sid 辅助查看），不是群号或整串 UMO；支持逗号 / 空格分隔"
       }
     }
   },
@@ -182,20 +182,20 @@
   },
   "音乐设置": {
     "type": "object",
-    "description": "QQ音乐、网易云的登录与搜歌点歌。⚠️ 请到插件 WebUI 的「配置」页修改「音乐设置」",
+    "description": "QQ音乐、网易云的登录与搜歌点歌。常用开关可直接在这里修改；账号登录与更多选项请到插件 WebUI 的「设置 / 配置」页修改「音乐设置」",
     "items": {
       "MUSIC_COMMANDS_ENABLED": {
         "description": "启用搜歌与点歌",
         "type": "bool",
         "default": true,
-        "invisible": true,
+        "invisible": false,
         "hint": "搜歌发送带编号的结果卡片，点歌或选歌后按当前语音/文件设置发送。分享链接解析由平台开关单独控制。"
       },
       "MUSIC_DEFAULT_PLATFORM": {
         "description": "默认搜歌平台",
         "type": "string",
         "default": "both",
-        "invisible": true,
+        "invisible": false,
         "hint": "也可以在指令里指定，例如：搜歌 QQ 晴天。全部时两家交错排列，编号连续。",
         "options": [
           "both",
@@ -423,34 +423,34 @@
   },
   "输出模式": {
     "type": "object",
-    "description": "选择文本、卡片与富媒体，可任意组合。⚠️ 请到插件 WebUI 的「配置」页修改「输出模式」",
+    "description": "选择文本、卡片与富媒体，可任意组合。常用输出选项可直接在这里修改；更多设置请到插件 WebUI 的「设置 / 配置」页修改「输出模式」",
     "items": {
       "OUTPUT_TEXT_ENABLED": {
         "description": "文本",
         "type": "bool",
         "default": false,
-        "invisible": true,
+        "invisible": false,
         "hint": "一条普通文字消息，包含标题、链接、简洁播放信息与必要提示。可与卡片、富媒体同时发送。"
       },
       "OUTPUT_CARD_ENABLED": {
         "description": "卡片",
         "type": "bool",
         "default": true,
-        "invisible": true,
+        "invisible": false,
         "hint": "需同时开启「启用卡片渲染」。渲染失败时只跳过卡片，不改变其他输出选项。"
       },
       "OUTPUT_MEDIA_ENABLED": {
         "description": "富媒体",
         "type": "bool",
         "default": true,
-        "invisible": true,
+        "invisible": false,
         "hint": "发送原图、视频、动图和音频。关闭后不下载视频本体，卡片仅获取需要的图片。"
       },
       "AUDIO_SEND_MODE": {
         "description": "音频发送方式",
         "type": "string",
         "default": "voice",
-        "invisible": true,
+        "invisible": false,
         "hint": "语音条发送失败时自动改发音频文件；音频文件则直接发文件。超时可能导致语音和文件同时送达；接口返回成功但客户端未收到时无法检测。分容器发送文件可使用中转、共享目录或宿主路径映射。",
         "options": [
           "voice",
@@ -465,7 +465,7 @@
         "description": "发送图文配乐",
         "type": "bool",
         "default": false,
-        "invisible": true,
+        "invisible": false,
         "hint": "图文作品自带背景音乐时，是否把配乐也一并发出。目前抖音图文支持；默认关闭，避免普通图文突然多发一段音乐。"
       },
       "OUTPUT_MODES_INITIALIZED": {
@@ -509,7 +509,7 @@
         "type": "bool",
         "default": false,
         "invisible": false,
-        "hint": "开启后，QQ 群主/管理员可确认**本群内**的待下载项（群主算在内）；仅真实 QQ 群事件可用，私聊或无法确认身份时不适用。"
+        "hint": "开启后，QQ 群主/管理员可确认**本群内**的待下载项（群主算在内）；仅 aiocqhttp / OneBot 群事件可用。QQ 官方 Bot 无法据此识别群管理，私聊或身份未知时也不适用。"
       },
       "CONFIRM_ALLOW_BOT_ADMIN": {
         "description": "AstrBot 管理员可确认",
@@ -532,20 +532,20 @@
   },
   "卡片外观": {
     "type": "object",
-    "description": "把解析结果渲染成分享卡片图片。⚠️ 请到插件 WebUI 的「配置」页修改「卡片外观」",
+    "description": "把解析结果渲染成分享卡片图片。常用卡片开关可直接在这里修改；字体、配色等更多选项请到插件 WebUI 的「设置 / 配置」页修改「卡片外观」",
     "items": {
       "RENDER_ENABLED": {
         "description": "启用卡片渲染",
         "type": "bool",
         "default": true,
-        "invisible": true,
+        "invisible": false,
         "hint": "仅控制卡片渲染。关闭后不发送卡片，不影响已选文本和富媒体。"
       },
       "RENDER_THEME": {
         "description": "卡片主题",
         "type": "string",
         "default": "dark",
-        "invisible": true,
+        "invisible": false,
         "hint": "只影响发送出去的卡片图片，与网页界面主题无关",
         "options": [
           "dark",
@@ -560,7 +560,7 @@
         "description": "卡片布局",
         "type": "string",
         "default": "standard",
-        "invisible": true,
+        "invisible": false,
         "hint": "切换后可在「解析」页立刻预览效果",
         "options": [
           "standard",
@@ -642,7 +642,7 @@
         "description": "显示 B站 AI 总结",
         "type": "bool",
         "default": false,
-        "invisible": true,
+        "invisible": false,
         "hint": "标准、杂志、信息流布局可显示；沉浸式不显示。无可用总结时隐藏。"
       },
       "RENDER_GRADIENT_TOP": {
@@ -665,6 +665,21 @@
     "type": "object",
     "description": "视频怎么送到消息平台：共享目录或中转链接。⚠️ 请到插件 WebUI 的「配置」页修改「媒体发送」",
     "items": {
+      "QQ_OFFICIAL_MEDIA_MODE": {
+        "description": "QQ 官方机器人多媒体发送",
+        "type": "string",
+        "default": "compact",
+        "invisible": false,
+        "options": [
+          "compact",
+          "direct"
+        ],
+        "labels": [
+          "紧凑预览与源链接",
+          "逐个发送原媒体"
+        ],
+        "hint": "仅 QQ 官方机器人生效。有源链接时，多图最多生成2页缩略预览（每页9张），动态图和多个视频请打开源链接查看；无源链接保留逐个发送。OneBot 合并转发不受影响。"
+      },
       "CACHE_DIR": {
         "description": "共享缓存目录",
         "type": "string",
@@ -700,13 +715,13 @@
   },
   "合并转发": {
     "type": "object",
-    "description": "选中的媒体要不要打包成一条合并转发消息。⚠️ 请到插件 WebUI 的「配置」页修改「合并转发」",
+    "description": "选中的媒体要不要打包成一条合并转发消息。聚合方式可直接在这里修改；数量阈值请到插件 WebUI 的「设置 / 配置」页修改「合并转发」",
     "items": {
       "AGGREGATION_MODE": {
         "description": "聚合方式",
         "type": "string",
         "default": "none",
-        "invisible": true,
+        "invisible": false,
         "hint": "仅 OneBot 启用。将选中的图片、视频逐条发送，或合并成一条转发消息。按条件聚合时，命中下面任一阈值才合并。语音条、音频文件独立发送，简短文字和卡片不受影响；转发明确失败时改为逐条发送。",
         "options": [
           "none",

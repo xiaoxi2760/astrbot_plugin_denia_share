@@ -31,6 +31,7 @@ from contextvars import ContextVar
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, AsyncGenerator
+from urllib.parse import urlsplit
 
 from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent, MessageChain, MessageEventResult
@@ -231,8 +232,20 @@ class DeliveryService:
         return await result.audit_missing_media(img_only=True)
 
     async def send_image(self, event: AstrMessageEvent, path: Path) -> bool:
-        """主动发送图片，绕开事件回复管线，避免被附加「引用回复 / @」。"""
+        """绕开结果装饰发送卡片；QQ 官方事件保留被动回复上下文。"""
         try:
+            try:
+                platform_name = str(event.get_platform_name() or "").lower()
+            except Exception:
+                platform_name = ""
+            if platform_name in {"qq_official", "qq_official_webhook"}:
+                # 官方群的主动消息需要额外开启权限；使用当前事件携带 msg_id，
+                # 让宿主处理被动回复与过期回退。send() 正常返回 None 也表示成功。
+                sent = await event.send(MessageChain().file_image(str(path)))
+                if sent is False:
+                    logger.warning(f"解析卡片事件发送返回失败: {path.name}")
+                    return False
+                return True
             sent = await self._plugin.context.send_message(
                 event.unified_msg_origin, MessageChain().file_image(str(path)),
             )
@@ -240,7 +253,7 @@ class DeliveryService:
                 logger.warning(f"解析卡片主动发送未找到匹配平台会话: {path.name}")
             return bool(sent)
         except Exception as e:
-            logger.warning(f"解析卡片主动发送异常: {e}")
+            logger.warning(f"解析卡片发送异常: {e}")
             return False
 
     @staticmethod
@@ -361,6 +374,18 @@ class DeliveryService:
         pconfig = get_config()
         # 每条媒体链路开始前先清标记：上一次「送达未知」不能继承到下一条链接。
         _DELIVERY_UNCERTAIN.set(False)
+        try:
+            official = str(event.get_platform_name() or "").lower() in {
+                "qq_official", "qq_official_webhook",
+            }
+        except Exception:
+            official = False
+        if official and pconfig.QQ_OFFICIAL_MEDIA_MODE == "compact":
+            async for output in self.send_official_compact(
+                event, result, on_delivered=on_delivered, on_failed=on_failed,
+            ):
+                yield output
+            return
         if not self.is_onebot(event) or pconfig.AGGREGATION_MODE == "none":
             async for parts in self.iter_media_components(result):
                 async for output in self.send_media_item(
@@ -445,7 +470,87 @@ class DeliveryService:
         elif on_failed is not None:
             on_failed()
 
-    async def iter_media_components(self, result: ParseResult):
+    @staticmethod
+    def source_url(result: ParseResult) -> str:
+        """Accept an actual HTTP(S) source URL, never a local/data/file URI."""
+        value = str(result.url or "").strip()
+        if not value or len(value) > 8192 or "\\" in value or any(
+            char.isspace() or ord(char) < 32 or ord(char) == 127 for char in value
+        ):
+            return ""
+        try:
+            parsed = urlsplit(value)
+            if parsed.scheme.lower() in {"http", "https"} and parsed.hostname and not (
+                parsed.username or parsed.password
+            ):
+                parsed.port  # Validate malformed port values too.
+                return value
+        except ValueError:
+            pass
+        return ""
+
+    async def send_official_compact(
+        self, event, result: ParseResult, *, on_delivered=None, on_failed=None,
+    ):
+        """Official API compact delivery; no Nodes and no claimed original delivery."""
+        source = self.source_url(result)
+        results = [result]
+        if result.repost is not None:
+            results.append(result.repost)
+        images = [image for item in results for image in (
+            list(item.img_contents) + [g for g in item.graphics if isinstance(g, ImageContent)]
+        )]
+        videos = sum(isinstance(c, VideoContent) for item in results for c in item.contents)
+        compact_images = bool(source and len(images) > 1)
+        compact_videos = bool(source and videos > 1)
+        notices = []
+        pages = []
+        if compact_images:
+            try:
+                from .media_collage import build_previews
+                paths = []
+                for image in images:
+                    path = await image.path_task.safe_get()
+                    if path is None or not path.is_file():
+                        raise ValueError("preview source image is missing")
+                    paths.append(path)
+                cache_root = Path(self._plugin.cache_dir) / "qq_previews"
+                pages, represented, animated = await asyncio.to_thread(build_previews, paths, cache_root)
+                notices.append(f"图片共 {len(images)} 张，已生成 {represented} 张静态图片的缩略预览（非原图）")
+                if animated:
+                    notices.append(f"其中 {animated} 张动态图片未静态化发送")
+                if represented + animated < len(images):
+                    notices.append("其余图片未在预览中展示")
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.warning("[denia_share] 官方图片预览生成失败，保留源链接，不逐张补发", exc_info=True)
+                notices.append(f"共 {len(images)} 张图片，预览生成失败，未逐张发送")
+        if compact_videos:
+            notices.append(f"共 {videos} 个视频，为避免刷屏未逐个发送")
+        if notices:
+            caption = Comp.Plain(
+                "；".join(notices) + "。查看原图、动态图或完整视频请打开源链接：\n" + source
+            )
+            if pages:
+                for index, page in enumerate(pages):
+                    parts = [Comp.Image.fromFileSystem(str(page))]
+                    if index == len(pages) - 1:
+                        parts.append(caption)
+                    yield event.chain_result(parts)
+            else:
+                yield event.chain_result([caption])
+        async for parts in self.iter_media_components(
+            result, skip_images=compact_images, skip_videos=compact_videos,
+        ):
+            async for output in self.send_media_item(
+                event, parts, on_delivered=on_delivered, on_failed=on_failed,
+            ):
+                yield output
+
+    async def iter_media_components(
+        self, result: ParseResult, *, skip_images: bool = False, skip_videos: bool = False,
+    ):
         """构建原始媒体组件，复用下载、缓存和中转规则。
 
         旧实现里图片是塞进文本节点的（``build_output``），而精简文本按设计
@@ -467,13 +572,15 @@ class DeliveryService:
 
         # 图片在 contents 里（contents/graphics 混排的平台两种都有），逐个发
         for image in result.img_contents:
+            if skip_images:
+                continue
             path = await image.path_task.safe_get()
             if path is None or not path.exists():
                 continue
             yield [Comp.Image.fromFileSystem(str(path))]
 
         for graphic in result.graphics:
-            if not isinstance(graphic, ImageContent):
+            if skip_images or not isinstance(graphic, ImageContent):
                 continue
             path = await graphic.path_task.safe_get()
             if path is None or not path.exists():
@@ -483,11 +590,15 @@ class DeliveryService:
         # 转发的原帖图片同样归富媒体（微博/NGA 那种 repost 里有图集的情况）。
         # 递归只走一层：repost 不会自己再套 repost。
         if result.repost is not None:
-            async for parts in self.iter_media_components(result.repost):
+            async for parts in self.iter_media_components(
+                result.repost, skip_images=skip_images, skip_videos=skip_videos,
+            ):
                 yield parts
 
         for cont in result.contents:
             if not isinstance(cont, (VideoContent, AudioContent)):
+                continue
+            if skip_videos and isinstance(cont, VideoContent):
                 continue
             path = await cont.path_task.safe_get()
             if path is None:
