@@ -49,6 +49,7 @@ from .core.result_cache import ResultCache
 from .core.delivery import DeliveryService, _DELIVERY_UNCERTAIN
 from .core.confirm_download import ConfirmController
 from .core.bili_login import BiliLoginManager
+from .core.telegram import current_message_links as telegram_message_links
 # 版本号只认 __init__.py 那一处：register 装饰器直接读它，
 # 不用再在装饰器里手写一遍版本字符串（以前改版本要同时改三处，漏一处就版本不一致）
 from . import __version__
@@ -934,6 +935,23 @@ class DeniaSharePlugin(Star):
             event.stop_event()
 
     @filter.regex(r".*")
+    async def telegram_link_handler(self, event: AstrMessageEvent, matched: re.Match | None = None):
+        """补齐 Telegram 隐藏链接与图集后续说明；正文仍由已有处理器接管。"""
+        links = telegram_message_links(event)
+        if not links:
+            return
+        if self._match_parser(event.message_str or "") is not None:
+            return
+        # Like JSON cards, a fallback event owns only the first supported link.
+        for link in links:
+            name = self._match_builtin_parser(link) or self._match_parser(link)
+            if name is None:
+                continue
+            async for output in self._process_url(_EventUrlWrapper(event, link), self.parsers[name]):
+                yield output
+            return
+
+    @filter.regex(r".*")
     async def json_card_handler(self, event: AstrMessageEvent, matched: re.Match | None = None):
         """QQ 小程序分享卡片（Json 消息段 / 官方 B站卡片）里的链接解析"""
         if not self._has_json_component(event):
@@ -1165,7 +1183,7 @@ class DeniaSharePlugin(Star):
                 diagnostic.finish('unknown')
                 if scope is not None and dedup_key is not None:
                     self._link_dedup.mark_uncertain(scope, dedup_key)
-                logger.info("[denia_share] 合并转发送达未知，保留本次去重窗口但不记成功历史")
+                logger.info("[denia_share] 媒体投递状态未知，保留本次去重窗口但不记成功历史")
                 return
             if not delivered:
                 diagnostic.stage('send', 'error', 'send_failed')

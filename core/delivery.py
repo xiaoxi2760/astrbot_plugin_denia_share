@@ -47,6 +47,23 @@ from .data import (
     build_concise_text,
 )
 from .relay import register_file
+from .telegram import is_telegram
+
+try:
+    from telegram.error import BadRequest as _TelegramBadRequest
+    from telegram.error import NetworkError as _TelegramNetworkError
+except ImportError:
+    _TELEGRAM_UNCERTAIN_ERRORS = (TimeoutError, ConnectionError)
+    _TELEGRAM_REJECTED_ERRORS = ()
+else:
+    _TELEGRAM_UNCERTAIN_ERRORS = (TimeoutError, ConnectionError, _TelegramNetworkError)
+    _TELEGRAM_REJECTED_ERRORS = (_TelegramBadRequest,)
+
+
+def _telegram_send_uncertain(error: Exception) -> bool:
+    # python-telegram-bot's BadRequest inherits NetworkError despite being an
+    # explicit API rejection; only transport errors need replay protection.
+    return isinstance(error, _TELEGRAM_UNCERTAIN_ERRORS) and not isinstance(error, _TELEGRAM_REJECTED_ERRORS)
 
 try:
     from aiocqhttp.exceptions import NetworkError as _OneBotNetworkError
@@ -387,7 +404,7 @@ class DeliveryService:
                 yield output
             return
         if not self.is_onebot(event) or pconfig.AGGREGATION_MODE == "none":
-            async for parts in self.iter_media_components(result):
+            async for parts in self.iter_media_components(result, local_upload=is_telegram(event)):
                 async for output in self.send_media_item(
                     event, parts, on_delivered=on_delivered, on_failed=on_failed
                 ):
@@ -457,6 +474,29 @@ class DeliveryService:
     ):
         """仅失败兜底模式主动发送，其他媒体仍交给宿主管线。"""
         if not isinstance(item, AudioFallbackItem):
+            # Telegram reads local files in the AstrBot process. RespondStage
+            # applies the shared File path_mapping without checking platform;
+            # send files directly so a OneBot container mapping cannot corrupt
+            # this local path. Images/videos do not receive that host mapping.
+            if is_telegram(event) and any(isinstance(part, Comp.File) for part in item):
+                try:
+                    sent = await event.send(event.chain_result(item))
+                    if sent is False:
+                        raise RuntimeError("Telegram 文件发送接口返回失败")
+                except asyncio.CancelledError:
+                    raise
+                except Exception as exc:
+                    if _telegram_send_uncertain(exc):
+                        _DELIVERY_UNCERTAIN.set(True)
+                        logger.warning("[denia_share] Telegram 文件送达状态未知，不自动重发", exc_info=True)
+                    else:
+                        logger.warning("[denia_share] Telegram 文件发送失败，不自动重发", exc_info=True)
+                    if on_failed is not None:
+                        on_failed()
+                else:
+                    if on_delivered is not None:
+                        on_delivered()
+                return
             yield event.chain_result(item)
             return
         pconfig = get_config()
@@ -550,6 +590,7 @@ class DeliveryService:
 
     async def iter_media_components(
         self, result: ParseResult, *, skip_images: bool = False, skip_videos: bool = False,
+        local_upload: bool = False,
     ):
         """构建原始媒体组件，复用下载、缓存和中转规则。
 
@@ -566,7 +607,9 @@ class DeliveryService:
         用 URL 发送；没开、注册失败、或地址不合法时，回退成原来的本地文件发送。
         """
         pconfig = get_config()
-        relay_enabled = pconfig.MEDIA_RELAY_ENABLED
+        # Telegram's adapter uploads local paths itself, including files. The
+        # optional relay exists for separate OneBot protocol containers.
+        relay_enabled = pconfig.MEDIA_RELAY_ENABLED and not local_upload
         callback_base = pconfig.MEDIA_RELAY_CALLBACK_URL
         ttl = pconfig.MEDIA_RELAY_TTL
 
@@ -592,6 +635,7 @@ class DeliveryService:
         if result.repost is not None:
             async for parts in self.iter_media_components(
                 result.repost, skip_images=skip_images, skip_videos=skip_videos,
+                local_upload=local_upload,
             ):
                 yield parts
 
@@ -645,6 +689,8 @@ class DeliveryService:
         这里的发送是主动 ``event.send``，不经过宿主 RespondStage，所以
         RespondStage 的文件路径映射不会自动生效，需要在这条路径上自行补上。
         """
+        if is_telegram(event):
+            relay_enabled = False
         for mode in ("voice", "file"):
             try:
                 component = await self.build_audio_component(
@@ -656,7 +702,11 @@ class DeliveryService:
                     raise RuntimeError("音频发送接口返回失败")
             except asyncio.CancelledError:
                 raise
-            except Exception:
+            except Exception as exc:
+                if is_telegram(event) and _telegram_send_uncertain(exc):
+                    _DELIVERY_UNCERTAIN.set(True)
+                    logger.warning("[denia_share] Telegram 音频送达状态未知，不自动重发", exc_info=True)
+                    return False
                 if mode == "voice":
                     logger.warning(
                         "[denia_share] 语音发送失败，尝试音频文件兜底", exc_info=True
@@ -693,6 +743,8 @@ class DeliveryService:
         失败时直接抛出，让本次发送按失败处理 —— 不能把协议端读不到的
         容器内路径当成发送成功。
         """
+        if is_telegram(event):
+            return
         file_cls = getattr(Comp, "File", None)
         if file_cls is None or not isinstance(component, file_cls):
             return
