@@ -33,6 +33,7 @@ import asyncio
 import math
 import re
 import sys
+import unicodedata
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -57,10 +58,13 @@ except AttributeError:  # Pillow < 9.1
 
 # 卡片右下角的默认水印文字。
 WATERMARK_TAG = "希望解析"
-_CARD_STYLE_VERSION = '20261021-platform-badges'
+_CARD_STYLE_VERSION = '20261112-math-alphanumeric-display'
 
 
 # ============================ 文本与统计处理 ============================
+
+# 数学字母大部分位于补充平面，少量历史花体字母位于字母式符号区。
+_STYLED_ALNUM_RE = re.compile(r"[\u2100-\u214F\U0001D400-\U0001D7FF]")
 
 # 常见 emoji 区域（含 ZWJ 序列、变体选择符、肤色修饰符）
 _EMOJI_RE = re.compile(
@@ -110,11 +114,31 @@ _STAT_LABELS = {
 }
 
 
+def _display_text(text: str) -> str:
+    """将数学花体拉丁字母/数字降级为普通字符，供卡片测量与绘制共用。
+
+    常见中文字体不覆盖此补充平面区段；只转换带 <font> 分解且结果为
+    ASCII 字母或数字的字符，避免全局 NFKC 改写中文、单位和其他符号。
+    """
+    def replace(match: re.Match[str]) -> str:
+        char = match.group()
+        plain = unicodedata.normalize("NFKC", char)
+        if (
+            unicodedata.decomposition(char).startswith("<font>")
+            and plain.isascii()
+            and plain.isalnum()
+        ):
+            return plain
+        return char
+
+    return _STYLED_ALNUM_RE.sub(replace, text)
+
+
 def strip_emoji(text: str | None) -> str:
     """移除字符串中的 emoji，避免字体缺失导致渲染成方块。"""
     if not text:
         return ""
-    cleaned = text.replace("\r\n", "\n").replace("\r", "\n")
+    cleaned = _display_text(text).replace("\r\n", "\n").replace("\r", "\n")
     cleaned = _EMOJI_RE.sub("", cleaned)
     cleaned = re.sub(r"[ \t]{2,}", " ", cleaned)
     return cleaned.strip()
@@ -592,12 +616,14 @@ class ShareCardRenderer:
     # ---------- 文本工具 ----------
 
     def _text_width(self, text: str, font: Any) -> int:
+        text = _display_text(text)
         # ImageDraw 对象非线程安全，to_thread 并发渲染时必须串行测量
         with self._font_lock:
             return math.ceil(self._measure.textlength(text, font=font))
 
     def _wrap(self, text: str, font: Any, max_width: int) -> list[str]:
         """按字符宽度换行，兼容中日韩文本。"""
+        text = _display_text(text)
         lines: list[str] = []
         for raw in text.split("\n"):
             if not raw:
@@ -644,7 +670,7 @@ class ShareCardRenderer:
         stroke = self._bold_stroke(bold)
         draw.text(
             xy,
-            text,
+            _display_text(text),
             font=font,
             fill=fill,
             stroke_width=stroke,
