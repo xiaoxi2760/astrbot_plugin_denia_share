@@ -206,8 +206,8 @@ CONFIG_META: tuple[dict[str, Any], ...] = (
         "key": "DISABLED_PLATFORMS",
         "group": "解析设置",
         "label": "禁用的平台",
-        "type": "string",
-        "default": "",
+        "type": "list",
+        "default": [],
         "list": True,
         "list_source": "platforms",
         "hint": "勾选=禁用该平台，都不勾=全部启用。「总览」页的平台开关改的是同一份（那边点一下立即生效）",
@@ -958,6 +958,35 @@ CONFIG_META: tuple[dict[str, Any], ...] = (
     *_TUNABLE_ITEMS,
 )
 
+# 原生面板用组合多选；经典 WebUI 保留旧布尔控件，由读写层同步到同一份列表。
+_CHOICE_FLAGS = {
+    "OUTPUT_CONTENTS": {
+        "text": "OUTPUT_TEXT_ENABLED", "card": "OUTPUT_CARD_ENABLED",
+        "media": "OUTPUT_MEDIA_ENABLED",
+    },
+    "CONFIRM_ROLES": {
+        "anyone": "CONFIRM_ALLOW_ANYONE", "sender": "CONFIRM_ALLOW_SENDER",
+        "qq_admin": "CONFIRM_ALLOW_QQ_ADMIN", "bot_admin": "CONFIRM_ALLOW_BOT_ADMIN",
+    },
+}
+_FLAG_CHOICE = {flag: (choice, name) for choice, flags in _CHOICE_FLAGS.items()
+                for name, flag in flags.items()}
+CONFIG_META += tuple(
+    {
+        "key": key, "group": "输出模式", "label": label,
+        "type": "list", "default": default, "internal": True,
+        "options": list(_CHOICE_FLAGS[key]), "hint": "由原生组合多选与经典 WebUI 共同维护。",
+    }
+    for key, label, default in (
+        ("OUTPUT_CONTENTS", "发送内容", ["card", "media"]),
+        ("CONFIRM_ROLES", "允许确认的角色", ["sender"]),
+    )
+) + ({
+    "key": "NATIVE_CHOICES_INITIALIZED", "group": "输出模式",
+    "label": "组合多选迁移标记", "type": "bool", "default": False,
+    "internal": True, "hint": "插件维护；避免宿主填入的默认列表覆盖旧选择。",
+},)
+
 _ITEM_BY_KEY: dict[str, dict[str, Any]] = {item["key"]: item for item in CONFIG_META}
 
 CONFIG_GROUP_KEYS: dict[str, tuple[str, ...]] = {
@@ -1043,6 +1072,17 @@ def coerce_value(item: dict[str, Any], raw: Any) -> tuple[Any, str | None]:
     label = item.get("label", key)
     kind = item["type"]
 
+    if kind == "list":
+        if isinstance(raw, str):
+            raw = re.split(r"[,，、\s]+", raw.strip()) if raw.strip() else []
+        if not isinstance(raw, list) or any(not isinstance(value, str) for value in raw):
+            return None, f"{label}：需要是列表或逗号分隔文本"
+        values = list(dict.fromkeys(value.strip().lower() for value in raw if value.strip()))
+        options = item.get("options")
+        if options and any(value not in options for value in values):
+            return None, f"{label}：包含不支持的选项"
+        return values, None
+
     if kind == "bool":
         if isinstance(raw, bool):
             return raw, None
@@ -1078,8 +1118,6 @@ def coerce_value(item: dict[str, Any], raw: Any) -> tuple[Any, str | None]:
         return None, f"{label}：不能超过 {max_length} 个字符"
     pattern = item.get("pattern")
     if pattern and text:
-        import re
-
         if not re.match(pattern, text):
             return None, f"{label}：格式不正确（需要 {pattern}）"
     return text, None
@@ -1284,6 +1322,77 @@ def migrate_output_modes(config: Any) -> bool:
     return True
 
 
+def migrate_native_choices(config: Any) -> bool:
+    """首次以旧开关迁移；标记后列表为准，包括显式空列表。
+
+    宿主会在插件运行前注入新键的默认列表，所以不能用「列表存在」判断
+    迁移完成。非默认列表可认作显式选择；默认列表首次仍以旧布尔为准。
+    """
+    group = config.get("输出模式")
+    if not isinstance(group, dict):
+        group = {}
+        config["输出模式"] = group
+    initialized = group.get("NATIVE_CHOICES_INITIALIZED") is True
+    changed = False
+    parsing = config.get("解析设置")
+    if not isinstance(parsing, dict):
+        parsing = {}
+        config["解析设置"] = parsing
+    disabled_raw = parsing.get("DISABLED_PLATFORMS", config.get("DISABLED_PLATFORMS", []))
+    if disabled_raw == [] and config.get("DISABLED_PLATFORMS", []) != []:
+        disabled_raw = config["DISABLED_PLATFORMS"]
+    disabled, error = coerce_value(_ITEM_BY_KEY["DISABLED_PLATFORMS"], disabled_raw)
+    if error is None and parsing.get("DISABLED_PLATFORMS") != disabled:
+        parsing["DISABLED_PLATFORMS"] = disabled
+        changed = True
+    if "DISABLED_PLATFORMS" in config:
+        del config["DISABLED_PLATFORMS"]
+        changed = True
+    render_group = config.get("卡片外观")
+    render_group = render_group if isinstance(render_group, dict) else {}
+    render_raw = render_group.get("RENDER_ENABLED", config.get("RENDER_ENABLED", True))
+    render_enabled, error = coerce_value(_ITEM_BY_KEY["RENDER_ENABLED"], render_raw)
+    if error:
+        render_enabled = True
+    for choice, flags in _CHOICE_FLAGS.items():
+        meta = _ITEM_BY_KEY[choice]
+        selected, error = coerce_value(meta, group.get(choice))
+        explicit = choice in group and not error and selected != meta["default"]
+        if (not initialized and not explicit) or error:
+            selected = []
+            for name, flag in flags.items():
+                default = _DEFAULTS[flag]
+                raw = group.get(flag, config.get(flag, default))
+                if raw == default and config.get(flag, default) != default:
+                    raw = config[flag]
+                value, err = coerce_value(_ITEM_BY_KEY[flag], raw)
+                if (value if err is None else default) and (name != "card" or render_enabled):
+                    selected.append(name)
+        if group.get(choice) != selected:
+            group[choice] = selected
+            changed = True
+        for name, flag in flags.items():
+            # 经典界面的卡片选择与渲染总开关仍各自保留。关闭渲染时，组合
+            # 里没有 card 并不表示用户取消了经典界面的卡片选择。
+            if name == "card" and not render_enabled and name not in selected:
+                continue
+            enabled = name in selected
+            if group.get(flag) != enabled:
+                group[flag] = enabled
+                changed = True
+            if flag in config:
+                del config[flag]
+                changed = True
+        if choice == "OUTPUT_CONTENTS" and "card" in selected and not render_enabled:
+            config.setdefault("卡片外观", {})["RENDER_ENABLED"] = True
+            config.pop("RENDER_ENABLED", None)
+            changed = True
+    if not initialized:
+        group["NATIVE_CHOICES_INITIALIZED"] = True
+        changed = True
+    return changed
+
+
 class ParserConfig:
     """解析器配置 - 由 main.py 初始化"""
 
@@ -1294,6 +1403,14 @@ class ParserConfig:
 
     def _cfg_get(self, key: str, default: Any = None) -> Any:
         """优先读分组配置，回退到扁平旧配置。"""
+        if key in _FLAG_CHOICE:
+            group_cfg = self._cfg.get("输出模式")
+            choice, name = _FLAG_CHOICE[key]
+            if (isinstance(group_cfg, dict) and group_cfg.get("NATIVE_CHOICES_INITIALIZED") is True
+                    and not (key == "OUTPUT_CARD_ENABLED" and not self.RENDER_ENABLED)):
+                selected, error = coerce_value(_ITEM_BY_KEY[choice], group_cfg.get(choice))
+                if error is None:
+                    return name in selected
         group = _KEY_GROUP_MAP.get(key)
         if group is not None:
             group_cfg = self._cfg.get(group)
@@ -1405,7 +1522,8 @@ class ParserConfig:
     def current_values(self) -> dict[str, Any]:
         """返回所有配置项的当前生效值（键 → 值）。"""
         return {
-            item["key"]: self._cfg_get(item["key"], item["default"])
+            item["key"]: (self.DISABLED_PLATFORMS if item["key"] == "DISABLED_PLATFORMS"
+                          else self._cfg_get(item["key"], item["default"]))
             for item in CONFIG_META if not item.get("internal")
         }
 
@@ -1427,6 +1545,13 @@ class ParserConfig:
         changed: list[str] = []
         errors: list[str] = []
 
+        # 在处理旧 WebUI 的布尔提交前，先固定当前有效组合，避免逐项写入时
+        # 新注入的列表默认值或扁平残留覆盖本次修改。
+        if any(key in _FLAG_CHOICE or key == "RENDER_ENABLED" for key in payload):
+            migrate_native_choices(self._cfg)
+        previous = {key: self._cfg_get(key, _ITEM_BY_KEY[key]["default"])
+                    for key in payload if key in _ITEM_BY_KEY}
+
         for key, raw in payload.items():
             item = _ITEM_BY_KEY.get(key)
             if item is None or item.get("internal"):
@@ -1436,15 +1561,38 @@ class ParserConfig:
             if error is not None:
                 errors.append(error)
                 continue
-            if self._cfg_get(key, item["default"]) == value:
+            if previous[key] == value:
                 continue
             group_cfg = self._cfg.get(_KEY_GROUP_MAP[key])
             if not isinstance(group_cfg, dict):
                 group_cfg = {}
                 self._cfg[_KEY_GROUP_MAP[key]] = group_cfg
             group_cfg[key] = value
-            self._cfg[key] = item["default"]
+            if key in _FLAG_CHOICE or key == "RENDER_ENABLED":
+                self._cfg.pop(key, None)
+            else:
+                self._cfg[key] = item["default"]
+            if key in _FLAG_CHOICE:
+                choice, name = _FLAG_CHOICE[key]
+                selected = set(group_cfg[choice])
+                if value:
+                    selected.add(name)
+                else:
+                    selected.discard(name)
+                group_cfg[choice] = [option for option in _CHOICE_FLAGS[choice] if option in selected]
             changed.append(key)
+
+        if any(key in changed for key in ("OUTPUT_CARD_ENABLED", "RENDER_ENABLED")):
+            group_cfg = self._cfg["输出模式"]
+            selected = set(group_cfg["OUTPUT_CONTENTS"])
+            # 直接读存储的旧卡片选择，不让组合列表的临时值反过来覆盖它。
+            card_raw = group_cfg.get("OUTPUT_CARD_ENABLED", self._cfg.get("OUTPUT_CARD_ENABLED", True))
+            card_selected, error = coerce_value(_ITEM_BY_KEY["OUTPUT_CARD_ENABLED"], card_raw)
+            if (card_selected if error is None else True) and self.RENDER_ENABLED:
+                selected.add("card")
+            else:
+                selected.discard("card")
+            group_cfg["OUTPUT_CONTENTS"] = [option for option in _CHOICE_FLAGS["OUTPUT_CONTENTS"] if option in selected]
 
         if changed:
             if not self.save():
@@ -1490,10 +1638,9 @@ class ParserConfig:
 
     @property
     def DISABLED_PLATFORMS(self) -> list[str]:
-        raw = self._cfg_get("DISABLED_PLATFORMS", "")
-        if not raw:
-            return []
-        return [p.strip().lower() for p in str(raw).split(",") if p.strip()]
+        values, error = coerce_value(_ITEM_BY_KEY["DISABLED_PLATFORMS"],
+                                    self._cfg_get("DISABLED_PLATFORMS", []))
+        return [] if error else values
 
     @property
     def VIDEO_DURATION_MAXIMUM(self) -> int:
@@ -1751,15 +1898,15 @@ class ParserConfig:
 
     @property
     def OUTPUT_TEXT_ENABLED(self) -> bool:
-        return bool(self._cfg_get("OUTPUT_TEXT_ENABLED", False))
+        return self._tunable("OUTPUT_TEXT_ENABLED")
 
     @property
     def OUTPUT_CARD_ENABLED(self) -> bool:
-        return bool(self._cfg_get("OUTPUT_CARD_ENABLED", True))
+        return self._tunable("OUTPUT_CARD_ENABLED")
 
     @property
     def OUTPUT_MEDIA_ENABLED(self) -> bool:
-        return bool(self._cfg_get("OUTPUT_MEDIA_ENABLED", True))
+        return self._tunable("OUTPUT_MEDIA_ENABLED")
 
     @property
     def AUDIO_SEND_MODE(self) -> str:
@@ -1900,7 +2047,7 @@ class ParserConfig:
 
     @property
     def RENDER_ENABLED(self) -> bool:
-        return bool(self._cfg_get("RENDER_ENABLED", True))
+        return self._tunable("RENDER_ENABLED")
 
     @property
     def RENDER_THEME(self) -> str:

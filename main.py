@@ -277,6 +277,7 @@ class DeniaSharePlugin(Star):
                 migrate_audio_send_mode,
                 migrate_grouped_config,
                 migrate_music_commands,
+                migrate_native_choices,
                 migrate_output_modes,
                 migrate_proxy_switches,
             )
@@ -295,6 +296,7 @@ class DeniaSharePlugin(Star):
             changed = migrate_music_commands(config) or changed
             changed = migrate_grouped_config(config) or changed
             changed = migrate_audio_send_mode(config) or changed
+            changed = migrate_native_choices(config) or changed
             if changed:
                 save = getattr(config, "save_config", None)
                 if callable(save):

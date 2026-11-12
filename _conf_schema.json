@@ -1,14 +1,47 @@
 {
   "解析设置": {
     "type": "object",
-    "description": "日常最常用到的几项，可直接在这里修改；更多设置请到插件 WebUI 的「设置 / 配置」页修改「解析设置」",
+    "description": "解析与下载限制",
     "items": {
       "DISABLED_PLATFORMS": {
         "description": "禁用的平台",
-        "type": "string",
-        "default": "",
+        "type": "list",
+        "default": [],
         "invisible": false,
-        "hint": "填写禁用的平台标识，用逗号分隔，例如 bilibili,douyin；留空表示全部启用。经典界面的「总览」也可逐个平台切换，修改的是同一份配置。"
+        "hint": "勾选要禁用的平台；全部不选表示全部启用。与经典 WebUI 的平台开关共用配置。",
+        "render_type": "checkbox",
+        "options": [
+          "bilibili",
+          "douyin",
+          "kuaishou",
+          "weibo",
+          "xiaohongshu",
+          "twitter",
+          "nga",
+          "acfun",
+          "github",
+          "pixiv",
+          "steam",
+          "xiaoheihe",
+          "netease",
+          "qqmusic"
+        ],
+        "labels": [
+          "B站",
+          "抖音",
+          "快手",
+          "微博",
+          "小红书",
+          "Twitter / X",
+          "NGA",
+          "AcFun",
+          "GitHub",
+          "Pixiv",
+          "Steam",
+          "小黑盒",
+          "网易云音乐",
+          "QQ音乐"
+        ]
       },
       "VIDEO_DURATION_MAXIMUM": {
         "description": "视频/音频最大时长",
@@ -47,11 +80,12 @@
         "max": 50,
         "unit": "张"
       }
-    }
+    },
+    "invisible": false
   },
   "权限控制": {
     "type": "object",
-    "description": "谁能触发解析：白名单 / 黑名单。⚠️ 请到插件 WebUI 的「配置」页修改「权限控制」",
+    "description": "权限控制",
     "items": {
       "WHITELIST_ENABLE": {
         "description": "启用白名单",
@@ -95,11 +129,12 @@
         "invisible": true,
         "hint": "私聊不受群组名单影响。QQ 官方 Bot 请填群 openid（可用 /sid 辅助查看），不是群号或整串 UMO；支持逗号 / 空格分隔"
       }
-    }
+    },
+    "invisible": true
   },
   "B站设置": {
     "type": "object",
-    "description": "B站 Cookie 与下载清晰度。⚠️ 请到插件 WebUI 的「配置」页修改「B站设置」",
+    "description": "B站设置",
     "items": {
       "BILI_CK": {
         "description": "哔哩哔哩 Cookie",
@@ -147,11 +182,12 @@
         "max": 30,
         "unit": "秒"
       }
-    }
+    },
+    "invisible": true
   },
   "Steam 设置": {
     "type": "object",
-    "description": "价格地区与史低数据源。⚠️ 请到插件 WebUI 的「配置」页修改「Steam 设置」",
+    "description": "Steam 设置",
     "items": {
       "STEAM_REGION": {
         "description": "价格地区代码",
@@ -178,11 +214,12 @@
         "max": 10,
         "unit": "张"
       }
-    }
+    },
+    "invisible": true
   },
   "音乐设置": {
     "type": "object",
-    "description": "QQ音乐、网易云的登录与搜歌点歌。常用开关可直接在这里修改；账号登录与更多选项请到插件 WebUI 的「设置 / 配置」页修改「音乐设置」",
+    "description": "搜歌与点歌",
     "items": {
       "MUSIC_COMMANDS_ENABLED": {
         "description": "启用搜歌与点歌",
@@ -284,11 +321,12 @@
         "max": 120,
         "unit": "秒"
       }
-    }
+    },
+    "invisible": false
   },
   "CookieCloud": {
     "type": "object",
-    "description": "从自建服务同步选定平台的浏览器登录态。⚠️ 请到插件 WebUI 的「配置」页修改「CookieCloud」",
+    "description": "CookieCloud",
     "items": {
       "COOKIECLOUD_URL": {
         "description": "服务地址",
@@ -330,11 +368,12 @@
         "max": 1440,
         "unit": "分钟"
       }
-    }
+    },
+    "invisible": true
   },
   "网页截图": {
     "type": "object",
-    "description": "整页或首屏截图可直接在这里切换；服务后端、账号等选项请到插件 WebUI 的「设置 / 配置」页修改「网页截图」",
+    "description": "网页截图范围",
     "items": {
       "SCREENSHOT_BACKEND": {
         "description": "截图后端",
@@ -419,31 +458,32 @@
         "max": 60000,
         "unit": "毫秒"
       }
-    }
+    },
+    "invisible": false
   },
   "输出模式": {
     "type": "object",
-    "description": "选择文本、卡片与富媒体，可任意组合。常用输出选项可直接在这里修改；更多设置请到插件 WebUI 的「设置 / 配置」页修改「输出模式」",
+    "description": "发送内容与下载确认",
     "items": {
       "OUTPUT_TEXT_ENABLED": {
         "description": "文本",
         "type": "bool",
         "default": false,
-        "invisible": false,
+        "invisible": true,
         "hint": "一条普通文字消息，包含标题、链接、简洁播放信息与必要提示。可与卡片、富媒体同时发送。"
       },
       "OUTPUT_CARD_ENABLED": {
         "description": "卡片",
         "type": "bool",
         "default": true,
-        "invisible": false,
+        "invisible": true,
         "hint": "需同时开启「启用卡片渲染」。渲染失败时只跳过卡片，不改变其他输出选项。"
       },
       "OUTPUT_MEDIA_ENABLED": {
         "description": "富媒体",
         "type": "bool",
         "default": true,
-        "invisible": false,
+        "invisible": true,
         "hint": "发送原图、视频、动图和音频。关闭后不下载视频本体，卡片仅获取需要的图片。"
       },
       "AUDIO_SEND_MODE": {
@@ -494,28 +534,28 @@
         "description": "任何有访问权的用户可确认",
         "type": "bool",
         "default": false,
-        "invisible": false,
+        "invisible": true,
         "hint": "开启后，任何有插件访问权限（平台开关与白名单照常生效）的用户都可以确认待下载项；与下列角色为「或」关系，全部关闭则无人可确认。"
       },
       "CONFIRM_ALLOW_SENDER": {
         "description": "原分享者可确认",
         "type": "bool",
         "default": true,
-        "invisible": false,
+        "invisible": true,
         "hint": "开启后，原分享者可以确认自己分享的待下载项（默认开启）。"
       },
       "CONFIRM_ALLOW_QQ_ADMIN": {
         "description": "QQ 群主/管理员可确认",
         "type": "bool",
         "default": false,
-        "invisible": false,
+        "invisible": true,
         "hint": "开启后，QQ 群主/管理员可确认**本群内**的待下载项（群主算在内）；仅 aiocqhttp / OneBot 群事件可用。QQ 官方 Bot 无法据此识别群管理，私聊或身份未知时也不适用。"
       },
       "CONFIRM_ALLOW_BOT_ADMIN": {
         "description": "AstrBot 管理员可确认",
         "type": "bool",
         "default": false,
-        "invisible": false,
+        "invisible": true,
         "hint": "开启后，AstrBot 管理员可以确认待下载项。"
       },
       "CONFIRM_DOWNLOAD_TTL_SECONDS": {
@@ -527,18 +567,67 @@
         "min": 30,
         "max": 1800,
         "unit": "秒"
+      },
+      "OUTPUT_CONTENTS": {
+        "description": "发送内容",
+        "type": "list",
+        "default": [
+          "card",
+          "media"
+        ],
+        "render_type": "checkbox",
+        "options": [
+          "text",
+          "card",
+          "media"
+        ],
+        "labels": [
+          "文本",
+          "卡片",
+          "富媒体"
+        ],
+        "hint": "可多选；全部不选则不解析、不下载。选择卡片会同时启用卡片渲染。"
+      },
+      "CONFIRM_ROLES": {
+        "description": "允许确认的角色",
+        "type": "list",
+        "default": [
+          "sender"
+        ],
+        "render_type": "checkbox",
+        "options": [
+          "anyone",
+          "sender",
+          "qq_admin",
+          "bot_admin"
+        ],
+        "labels": [
+          "任何有访问权的用户",
+          "原分享者",
+          "QQ 群主/管理员",
+          "AstrBot 管理员"
+        ],
+        "hint": "可多选，任一角色满足即可；全部不选则无人可确认。QQ 群管理仅适用于可识别角色的 OneBot 群事件，QQ 官方 Bot 不适用。"
+      },
+      "NATIVE_CHOICES_INITIALIZED": {
+        "description": "组合多选迁移标记",
+        "type": "bool",
+        "default": false,
+        "invisible": true,
+        "hint": "插件维护，避免默认列表覆盖旧开关选择。"
       }
-    }
+    },
+    "invisible": false
   },
   "卡片外观": {
     "type": "object",
-    "description": "把解析结果渲染成分享卡片图片。常用卡片开关可直接在这里修改；字体、配色等更多选项请到插件 WebUI 的「设置 / 配置」页修改「卡片外观」",
+    "description": "卡片样式",
     "items": {
       "RENDER_ENABLED": {
         "description": "启用卡片渲染",
         "type": "bool",
         "default": true,
-        "invisible": false,
+        "invisible": true,
         "hint": "仅控制卡片渲染。关闭后不发送卡片，不影响已选文本和富媒体。"
       },
       "RENDER_THEME": {
@@ -659,11 +748,12 @@
         "invisible": true,
         "hint": "留空=跟随卡片主题。填 #RRGGBB 覆盖卡片背景渐变的底部颜色"
       }
-    }
+    },
+    "invisible": false
   },
   "媒体发送": {
     "type": "object",
-    "description": "视频怎么送到消息平台：共享目录或中转链接。⚠️ 请到插件 WebUI 的「配置」页修改「媒体发送」",
+    "description": "媒体投递",
     "items": {
       "QQ_OFFICIAL_MEDIA_MODE": {
         "description": "QQ 官方机器人多媒体发送",
@@ -711,11 +801,12 @@
         "max": 86400,
         "unit": "秒"
       }
-    }
+    },
+    "invisible": false
   },
   "合并转发": {
     "type": "object",
-    "description": "选中的媒体要不要打包成一条合并转发消息。聚合方式可直接在这里修改；数量阈值请到插件 WebUI 的「设置 / 配置」页修改「合并转发」",
+    "description": "合并转发策略",
     "items": {
       "AGGREGATION_MODE": {
         "description": "聚合方式",
@@ -772,11 +863,12 @@
         "hint": "合并转发节点的显示名称，最长 32 字；留空使用希望解析器，不改变实际发送账号。",
         "max_length": 32
       }
-    }
+    },
+    "invisible": false
   },
   "高级设置": {
     "type": "object",
-    "description": "一般用不到，按需开启。⚠️ 请到插件 WebUI 的「配置」页修改「高级设置」",
+    "description": "高级设置",
     "items": {
       "XIAOHEIHE_CK": {
         "description": "小黑盒 Cookie",
@@ -1042,11 +1134,12 @@
         "max": 4096,
         "unit": "像素"
       }
-    }
+    },
+    "invisible": true
   },
   "维护": {
     "type": "object",
-    "description": "同群去重时长可直接在这里修改；缓存与调试等更多选项请到插件 WebUI 的「设置 / 配置」页修改「维护」",
+    "description": "缓存与调试",
     "items": {
       "CACHE_TTL_HOURS": {
         "description": "缓存保留时长",
@@ -1133,6 +1226,7 @@
         "max": 512,
         "unit": "条"
       }
-    }
+    },
+    "invisible": false
   }
 }

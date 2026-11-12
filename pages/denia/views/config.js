@@ -23,8 +23,7 @@ import {
 import { createCredentialsPanel } from "../credentials.js";
 import { createCookieCloudPanel } from "../cookiecloud.js";
 
-/* 列表型配置（黑白名单 / 禁用平台）在存储层仍是逗号分隔字符串 ——
-   _conf_schema.json 只有 string 类型，契约不能动；这里只改编辑体验。
+/* 名单兼容逗号分隔字符串，禁用平台同时支持原生面板保存的数组。
    拆分规则与后端 core/permissions.py 的 _ID_SPLIT_RE 对齐：
    逗号 / 中文逗号 / 顿号 / 任意空白都当分隔符。 */
 const LIST_SPLIT_RE = /[,，、\s]+/;
@@ -33,7 +32,7 @@ const OUTPUT_KEYS = new Set(["OUTPUT_TEXT_ENABLED", "OUTPUT_CARD_ENABLED", "OUTP
 /** 把逗号 / 空白分隔的串解析成去重后的条目数组（保序）。 */
 function parseListValue(raw) {
   const seen = new Set();
-  for (const part of String(raw ?? "").split(LIST_SPLIT_RE)) {
+  for (const part of (Array.isArray(raw) ? raw : String(raw ?? "").split(LIST_SPLIT_RE))) {
     const text = part.trim();
     if (text) seen.add(text);
   }
