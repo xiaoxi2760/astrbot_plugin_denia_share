@@ -31,7 +31,7 @@ from contextvars import ContextVar
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, AsyncGenerator
-from urllib.parse import urlsplit
+from urllib.parse import quote, urlsplit
 
 from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent, MessageChain, MessageEventResult
@@ -529,6 +529,20 @@ class DeliveryService:
             pass
         return ""
 
+    @staticmethod
+    def official_compact_source_text(source: str) -> str:
+        """Format an already validated source without changing cached result URLs."""
+        if urlsplit(source).hostname.lower() != "docs.qq.com":
+            redirect = "https://docs.qq.com/scenario/link.html?url=" + quote(source, safe="")
+            # Bound the combined link text, not the original URL: percent encoding
+            # and a copyable fallback must not amplify a long URL into a huge reply.
+            if len(redirect) + len(source) <= 2048:
+                return (
+                    "查看完整作品（腾讯文档跳转）：\n" + redirect
+                    + "\n备用原链接（中转打不开时复制）：\n" + source
+                )
+        return "查看完整作品：\n" + source
+
     async def send_official_compact(
         self, event, result: ParseResult, *, on_delivered=None, on_failed=None,
     ):
@@ -556,7 +570,7 @@ class DeliveryService:
                     paths.append(path)
                 cache_root = Path(self._plugin.cache_dir) / "qq_previews"
                 pages, represented, animated = await asyncio.to_thread(build_previews, paths, cache_root)
-                notices.append(f"图片共 {len(images)} 张，已生成 {represented} 张静态图片的缩略预览（非原图）")
+                notices.append(f"已生成 {represented} 张静态图片的缩略预览（非原图）")
                 if animated:
                     notices.append(f"其中 {animated} 张动态图片未静态化发送")
                 if represented + animated < len(images):
@@ -565,12 +579,18 @@ class DeliveryService:
                 raise
             except Exception:
                 logger.warning("[denia_share] 官方图片预览生成失败，保留源链接，不逐张补发", exc_info=True)
-                notices.append(f"共 {len(images)} 张图片，预览生成失败，未逐张发送")
+                notices.append("图片预览生成失败，未逐张发送")
         if compact_videos:
-            notices.append(f"共 {videos} 个视频，为避免刷屏未逐个发送")
+            notices.append("为避免刷屏，视频未逐个发送")
         if notices:
+            counts = []
+            if images:
+                counts.append(f"{len(images)} 张图片")
+            if videos:
+                counts.append(f"{videos} 个视频")
             caption = Comp.Plain(
-                "；".join(notices) + "。查看原图、动态图或完整视频请打开源链接：\n" + source
+                "已解析 " + "、".join(counts) + "。" + "；".join(notices)
+                + "。\n" + self.official_compact_source_text(source)
             )
             if pages:
                 for index, page in enumerate(pages):
