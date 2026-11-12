@@ -51,7 +51,8 @@ AstrBot 自带的插件配置页可直接勾选禁用的平台，用「发送内
 
 ### QQ 官方机器人使用说明
 
-- 插件收到**纯文本分享链接**即可解析，本身不要求 @。若只有 @ 时响应，先在手机 QQ 的「目标群设置 → 机器人 → 该机器人 → 机器人可获取的群聊消息范围」选择「获取群内全部消息」。Webhook 接入还需在 QQ 开放平台「开发 → 回调配置」勾选 **`GROUP_MESSAGE_CREATE`**，保存后重启 AstrBot；WebSocket 接入需保留 AstrBot 的「启用消息列表单聊」开关（`enable_group_c2c`，宿主也用它订阅群消息）。详见 [AstrBot 官方接入说明](https://github.com/AstrBotDevs/AstrBot/wiki/en-platform-qqofficial-webhook)。设置后仍无响应时，先确认 AstrBot 日志能收到不带 @ 的新消息，再检查插件开关和访问名单。
+- AstrBot **4.29.3 及更新版本**的 WebSocket、Webhook 接入均支持非 @ 群消息。要自动解析普通链接，请在**手机 QQ → 目标群设置 → 机器人 → 该机器人 → 机器人可获取的群聊消息范围**选择**「获取群内全部消息」**。
+- Webhook 还需在 QQ 开放平台「开发 → 回调配置」勾选 **`GROUP_MESSAGE_CREATE`**；WebSocket 保持 `enable_group_c2c` 开启。保存后重启 AstrBot，详见 [AstrBot 接入说明](https://docs.astrbot.app/platform/qqofficial/webhook.html)。
 - B站小程序卡片若由官方 API 提供当前卡片的 `ark_data.fields.jump_url`，插件也能识别其中的 B站链接；没有该跳转地址的卡片仍需另发文字链接。
 - 图片卡片、图集、视频、语音及文件由 AstrBot 官方适配器发送。官方 Bot 默认使用「紧凑预览与源链接」：有作品源链接时，多图最多合成两页缩略预览（每页 9 张）；多段视频不逐个发送，改为提示打开原作品链接。缩略图不是原图，动态图和未展示的图片也需到源链接查看。单张图片、单个视频及音频保持原发送方式；没有可用源链接时保留逐个发送。要收到每个原文件，可在「配置 → 媒体发送 → QQ 官方机器人多媒体发送」改为「逐个发送原媒体」。合并转发只适用于 OneBot。语音条依赖宿主的 Silk 转码能力，发送失败时可在插件设置中选「语音条（失败后发送文件）」。
 - 权限名单请填写**官方 API 的用户 openid / 群 openid**，不要填 QQ 号、群号或整串 UMO。可用 AstrBot 的 `/sid` 辅助查看会话标识，再核对所需的用户或群 openid；启用白名单后填错 ID 会让非管理员的解析请求被静默拦下。
