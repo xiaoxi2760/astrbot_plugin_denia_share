@@ -58,7 +58,7 @@ except AttributeError:  # Pillow < 9.1
 
 # 卡片右下角的默认水印文字。
 WATERMARK_TAG = "希望解析"
-_CARD_STYLE_VERSION = '20261112-math-alphanumeric-display'
+_CARD_STYLE_VERSION = '20261112-emoji-font-fallback'
 
 
 # ============================ 文本与统计处理 ============================
@@ -132,6 +132,14 @@ def _display_text(text: str) -> str:
         return char
 
     return _STYLED_ALNUM_RE.sub(replace, text)
+
+
+def _card_text(text: str | None) -> str:
+    """Prepare display text without discarding emoji or changing source data."""
+    if not text:
+        return ""
+    cleaned = _display_text(text).replace("\r\n", "\n").replace("\r", "\n")
+    return re.sub(r"[ \t]{2,}", " ", cleaned).strip()
 
 
 def strip_emoji(text: str | None) -> str:
@@ -546,6 +554,9 @@ class ShareCardRenderer:
         # 渲染跑在 to_thread 线程池里，可能并发；字体缓存与 _measure 需要锁保护
         import threading
         self._font_lock = threading.Lock()
+        if Image:
+            from .emoji_text import EmojiText
+            self._emoji_text = EmojiText()
 
     # ---------- 主题与外观覆盖 ---------- #
 
@@ -613,16 +624,22 @@ class ShareCardRenderer:
         """使用常规字体模拟粗体时的描边宽度。"""
         return 2 if bold and not self._bold_font and self._regular_font else 0
 
+    @staticmethod
+    def _text_units(text: str) -> Any:
+        from .emoji_text import text_units
+        return text_units(text)
+
     # ---------- 文本工具 ----------
 
     def _text_width(self, text: str, font: Any) -> int:
         text = _display_text(text)
         # ImageDraw 对象非线程安全，to_thread 并发渲染时必须串行测量
         with self._font_lock:
-            return math.ceil(self._measure.textlength(text, font=font))
+            return math.ceil(self._emoji_text.width(self._measure, text, font))
 
     def _wrap(self, text: str, font: Any, max_width: int) -> list[str]:
-        """按字符宽度换行，兼容中日韩文本。"""
+        """按文字单元换行，保留 emoji 组合与附加符号。"""
+        from .emoji_text import text_units
         text = _display_text(text)
         lines: list[str] = []
         for raw in text.split("\n"):
@@ -630,11 +647,12 @@ class ShareCardRenderer:
                 lines.append("")
                 continue
             current = ""
-            for ch in raw:
+            for ch in text_units(raw):
                 if self._text_width(current + ch, font) <= max_width:
                     current += ch
                 else:
-                    lines.append(current)
+                    if current:
+                        lines.append(current)
                     current = ch
             lines.append(current)
         return lines
@@ -646,10 +664,13 @@ class ShareCardRenderer:
         if len(lines) <= max_lines:
             return lines
         result = lines[: max_lines - 1]
+        from .emoji_text import text_units
         last = lines[max_lines - 1]
+        units = list(text_units(last))
         ellipsis = "…"
         while last and self._text_width(last + ellipsis, font) > max_width:
-            last = last[:-1]
+            units.pop()
+            last = "".join(units)
         result.append(last + ellipsis)
         return result
 
@@ -668,14 +689,13 @@ class ShareCardRenderer:
     ) -> None:
         font = self._font(size, bold)
         stroke = self._bold_stroke(bold)
-        draw.text(
-            xy,
-            _display_text(text),
-            font=font,
-            fill=fill,
-            stroke_width=stroke,
-            stroke_fill=fill,
-        )
+        self._draw_font(draw, xy, text, font, fill, stroke, fill)
+
+    def _draw_font(self, draw: Any, xy: tuple[int, int], text: str, font: Any,
+                   fill: Any, stroke_width: int = 0, stroke_fill: Any = None,
+                   color: bool = True) -> None:
+        self._emoji_text.draw(draw, xy, _display_text(text), font, fill,
+                              stroke_width, stroke_fill, color)
 
     # ---------- 图片工具 ----------
 
@@ -1010,14 +1030,14 @@ class ShareCardRenderer:
         status = str(result.extra.get("ai_summary_status") or "")
         if status != "ok":
             return ""
-        return strip_emoji(str(result.extra.get("ai_summary") or "")).strip()
+        return _card_text(str(result.extra.get("ai_summary") or "")).strip()
 
     def _ai_summary_lines(self, result: ParseResult, width: int) -> list[str]:
         text = self._ai_summary_text(result)
         if not text or self.layout_name == "immersive":
             return []
         # 摘要与简介高度重合时只保留一份，避免同一段话画两遍（简单归一化包含判断）。
-        desc = strip_emoji(result.text or "")
+        desc = _card_text(result.text or "")
         if desc:
             norm = lambda value: re.sub(r"\s+", "", value)
             n_text, n_desc = norm(text), norm(desc)
@@ -1106,7 +1126,7 @@ class ShareCardRenderer:
 
         # 标题
         title_font = self._font(_L.F_TITLE, bold=True)
-        title = strip_emoji(result.title)
+        title = _card_text(result.title)
         title_lines: list[str] = []
         if title:
             title_lines = self._fit_lines(
@@ -1115,7 +1135,7 @@ class ShareCardRenderer:
 
         # 简介
         desc_font = self._font(_L.F_DESC)
-        text = strip_emoji(result.text)
+        text = _card_text(result.text)
         desc_lines: list[str] = []
         if text:
             desc_lines = self._fit_lines(text, desc_font, inner_w, self._ai_desc_cap(result, 6))
@@ -1125,14 +1145,14 @@ class ShareCardRenderer:
         avatar_size = _L.AVATAR
         avatar_visible = self._avatar_visible(images)
         author_row_h = avatar_size if avatar_visible else 46
-        name = strip_emoji(author.name) or "未知作者" if author else ""
-        author_desc = strip_emoji(author.description or "")[:40] if author else ""
+        name = _card_text(author.name) or "未知作者" if author else ""
+        author_desc = "".join(list(self._text_units(_card_text(author.description or "")))[:40]) if author else ""
 
         # 统计（时长并入统计徽章）
         stats = parse_stats_line(result.extra.get("stats_line"))
         if dur := result.extra.get("duration"):
             stats.insert(0, ("时长", str(dur)))
-        online_text = strip_emoji(result.extra.get("online") or "")
+        online_text = _card_text(result.extra.get("online") or "")
         limit_warnings = result.extra.get("limit_warnings") or []
         warnings_h = self._warning_block_height(limit_warnings, inner_w)
         stat_rows = self._build_stat_rows(stats, inner_w)
@@ -1298,10 +1318,8 @@ class ShareCardRenderer:
                 sd = ImageDraw.Draw(shadow_layer)
                 sy = ty
                 for line in title_lines:
-                    sd.text(
-                        (pad, sy + 2), line, font=title_font,
-                        fill=(0, 0, 0, 140),
-                    )
+                    self._draw_font(sd, (pad, sy + 2), line, title_font,
+                                    (0, 0, 0, 140), color=False)
                     sy += _L.F_TITLE_LINE_H
                 canvas.alpha_composite(
                     shadow_layer.filter(ImageFilter.GaussianBlur(4)), (0, 0)
@@ -1310,11 +1328,8 @@ class ShareCardRenderer:
                 text_layer = Image.new("RGBA", (self.width, hero_h), (0, 0, 0, 0))
                 td = ImageDraw.Draw(text_layer)
                 for line in title_lines:
-                    td.text(
-                        (pad, ty), line, font=title_font,
-                        fill=(255, 255, 255, 255), stroke_width=1,
-                        stroke_fill=(0, 0, 0, 80),
-                    )
+                    self._draw_font(td, (pad, ty), line, title_font,
+                                    (255, 255, 255, 255), 1, (0, 0, 0, 80))
                     ty += _L.F_TITLE_LINE_H
                 canvas.alpha_composite(text_layer, (0, 0))
                 draw = ImageDraw.Draw(canvas)
@@ -1388,7 +1403,7 @@ class ShareCardRenderer:
                 )
                 placeholder.putalpha(pmask)
                 canvas.alpha_composite(placeholder, (pad, y))
-                first = name[:1].upper()
+                first = next(self._text_units(name), "").upper()
                 f_font = self._font(_L.F_INITIAL, bold=True)
                 fw = self._text_width(first, f_font)
                 self._draw_text(
@@ -1704,8 +1719,8 @@ class ShareCardRenderer:
 
     def _measure_quote(self, repost: ParseResult, inner_w: int) -> int:
         q_font = self._font(_L.F_QUOTE)
-        author = strip_emoji(repost.author.name) if repost.author else "原帖"
-        text = strip_emoji(repost.title or repost.text or "")
+        author = _card_text(repost.author.name) if repost.author else "原帖"
+        text = _card_text(repost.title or repost.text or "")
         body = f"@{author}"
         if text:
             body += f"：{text}"
@@ -1723,8 +1738,8 @@ class ShareCardRenderer:
         theme: _Theme,
     ) -> None:
         q_font = self._font(_L.F_QUOTE)
-        author = strip_emoji(repost.author.name) if repost.author else "原帖"
-        text = strip_emoji(repost.title or repost.text or "")
+        author = _card_text(repost.author.name) if repost.author else "原帖"
+        text = _card_text(repost.title or repost.text or "")
         body = f"@{author}"
         if text:
             body += f"：{text}"
@@ -1753,13 +1768,13 @@ class ShareCardRenderer:
             "platform_text": result.platform.display_name,
             "content_type": result.content_type or "动态",
             "ts": format_timestamp(result.timestamp),
-            "title": strip_emoji(result.title),
-            "text": strip_emoji(result.text),
+            "title": _card_text(result.title),
+            "text": _card_text(result.text),
             "author": author,
-            "name": (strip_emoji(author.name) or "未知作者") if author else "",
-            "author_desc": strip_emoji(author.description or "")[:40] if author else "",
+            "name": (_card_text(author.name) or "未知作者") if author else "",
+            "author_desc": "".join(list(self._text_units(_card_text(author.description or "")))[:40]) if author else "",
             "stats": stats,
-            "online_text": strip_emoji(result.extra.get("online") or ""),
+            "online_text": _card_text(result.extra.get("online") or ""),
             "warnings": result.extra.get("limit_warnings") or [],
         }
 
@@ -1850,7 +1865,7 @@ class ShareCardRenderer:
             ImageDraw.Draw(pmask).ellipse((0, 0, size - 1, size - 1), fill=255)
             placeholder.putalpha(pmask)
             canvas.alpha_composite(placeholder, (x, y))
-            first = d["name"][:1].upper()
+            first = next(self._text_units(d["name"]), "").upper()
             f_font = self._font(_L.F_INITIAL, bold=True)
             fw = self._text_width(first, f_font)
             self._draw_text(
@@ -1912,7 +1927,7 @@ class ShareCardRenderer:
         avail_w = inner_w - 46
         total_h = 0
         for raw_msg in warnings:
-            msg = strip_emoji(raw_msg)
+            msg = _card_text(raw_msg)
             lines = self._wrap(msg, font, avail_w)
             box_h = max(len(lines), 1) * line_h + 24
             total_h += box_h + 12
@@ -1954,7 +1969,7 @@ class ShareCardRenderer:
             text_color = (180, 83, 9)     # #B45309 深琥珀
 
         for raw_msg in warnings:
-            msg = strip_emoji(raw_msg)
+            msg = _card_text(raw_msg)
             lines = self._wrap(msg, font, avail_w)
             box_h = max(len(lines), 1) * line_h + 24
 
@@ -2358,13 +2373,14 @@ class ShareCardRenderer:
             td = ImageDraw.Draw(tl)
             sy = y
             for line in title_lines:
-                td.text((pad, sy + 2), line, font=title_font, fill=(0, 0, 0, 130))
+                self._draw_font(td, (pad, sy + 2), line, title_font,
+                                (0, 0, 0, 130), color=False)
                 sy += _L.F_TITLE_LINE_H
             canvas.alpha_composite(tl.filter(ImageFilter.GaussianBlur(4)), (0, 0))
             draw = ImageDraw.Draw(canvas)
             for line in title_lines:
-                draw.text((pad, y), line, font=title_font, fill=(255, 255, 255, 255),
-                          stroke_width=1, stroke_fill=(0, 0, 0, 70))
+                self._draw_font(draw, (pad, y), line, title_font,
+                                (255, 255, 255, 255), 1, (0, 0, 0, 70))
                 y += _L.F_TITLE_LINE_H
             y += 18
         if d["author"]:

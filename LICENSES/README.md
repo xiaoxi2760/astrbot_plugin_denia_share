@@ -1,12 +1,13 @@
 # LICENSES
 
-本目录存放项目所用第三方代码的许可全文。
+本目录存放项目所用第三方代码与字体的许可全文。
 
 | 文件 | 许可 | 覆盖范围 |
 | --- | --- | --- |
 | `Apache-2.0.txt` | Apache License 2.0 | B站备用取流模块，以及移植自 [Johnserf-Seed/f2](https://github.com/Johnserf-Seed/f2) 的抖音 `a_bogus` 签名实现 |
 | `MusicUID-MIT.txt` | MIT | 改造自 [Xbaiyz12/MusicUID](https://github.com/Xbaiyz12/MusicUID) 的音乐接口与账号登录相关实现 |
 | `Heybox-URL-MIT.txt` | MIT | [huandu/heybox-url](https://github.com/huandu/heybox-url) 的小黑盒移动分享签名协议参考 |
+| `NotoEmoji-OFL.txt` | SIL Open Font License 1.1 | Google Noto Emoji 单色字体，原文件随包分发；来源与校验见 `resources/fonts/SOURCES.json` |
 
 这些文件是第三方许可的**原文副本，请勿修改**。
 
