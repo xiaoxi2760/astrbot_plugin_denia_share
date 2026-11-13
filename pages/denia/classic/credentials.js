@@ -196,7 +196,9 @@ export function createCredentialsPanel(ctx, hooks = {}) {
       const isActive = button.dataset && button.dataset.credPlatform === selected;
       button.classList.toggle("is-active", Boolean(isActive));
       const flag = { on: "·已配置", valid: "·可用", invalid: "·已失效" }[button.dataset.credFlag] || "·未配置";
-      button.textContent = `${button.dataset.credLabel}${flag}`;
+      const state = button.querySelector(".cred-tab-state");
+      if (state) state.textContent = flag.replace(/^·/, "");
+      else button.textContent = `${button.dataset.credLabel}${flag}`;
       button.disabled = busy;
     }
 
@@ -276,6 +278,15 @@ export function createCredentialsPanel(ctx, hooks = {}) {
         },
         `${labelOf(platform)} · ${platform.configured ? "已配置" : "未配置"}`,
       );
+      const logo = ctx.createPlatformIcon?.(platform.id);
+      if (logo) {
+        clear(button);
+        button.appendChild(logo);
+        button.appendChild(h("span", { class: "cred-tab-copy" }, [
+          h("span", { class: "cred-tab-label" }, labelOf(platform)),
+          h("span", { class: "cred-tab-state" }, platform.configured ? "已配置" : "未配置"),
+        ]));
+      }
       tabsHost.appendChild(button);
     }
   }
@@ -474,7 +485,13 @@ export function createCredentialsPanel(ctx, hooks = {}) {
       ]),
     );
     detail.appendChild(refs.message);
-    detail.appendChild(refs.tip);
+    if (hooks.collapsibleTips) {
+      detail.appendChild(h("details", { class: "cred-guide" }, [
+        h("summary", {}, "登录态获取帮助"), refs.tip,
+      ]));
+    } else {
+      detail.appendChild(refs.tip);
+    }
     detail.appendChild(
       h("div", { class: "field cred-paste-field" }, [
         h("div", { class: "field-body" }, [

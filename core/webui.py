@@ -45,6 +45,7 @@ from .media_utils import clear_cache_dir, cleanup_cache_dir, is_docker_environme
 from .music.models import MusicError
 from .relay import resolve_callback_base
 from .screenshot import is_probably_screenshotable
+from .shared_resources import load_shared_resources
 from .history_download import (
     SourceFilesUnavailable, source_files, download_info, build_media_export,
 )
@@ -283,6 +284,9 @@ class WebUIApi:
     def register(self) -> None:
         context = self.plugin.context
         routes: tuple[tuple[str, Callable[..., Any], tuple[str, ...], str], ...] = (
+            ("/assets", self.assets, ("GET",), "共享静态资源"),
+            ("/webui/themes", self.webui_themes, ("GET",), "已安装的自设 WebUI"),
+            ("/webui/themes/install", self.install_webui_theme, ("POST",), "安装自设 WebUI"),
             ("/overview", self.overview, ("GET",), "插件总览与状态"),
             ("/config", self.get_config, ("GET",), "读取全部配置项"),
             ("/config", self.save_config, ("POST",), "保存配置项"),
@@ -367,6 +371,56 @@ class WebUIApi:
 
     # ==================== 总览 ==================== #
 
+    async def assets(self):
+        """返回固定白名单中的共享 WebUI 图片资源。"""
+        payload = await asyncio.to_thread(load_shared_resources)
+        return _json_response(payload)
+
+    def _webui_theme_manager(self):
+        from .webui_themes import WebUIThemeManager
+        manager = getattr(self.plugin, "_webui_themes", None)
+        if manager is None:
+            manager = WebUIThemeManager(Path(__file__).resolve().parent.parent, self.plugin._data_dir)
+            self.plugin._webui_themes = manager
+        return manager
+
+    async def webui_themes(self):
+        installed = await asyncio.to_thread(self._webui_theme_manager().list_installed)
+        return _json_response({"installed": installed, "builtin": ["classic"]})
+
+    async def install_webui_theme(self):
+        from .webui_themes import MAX_ARCHIVE_BYTES, WebUIThemeError
+        body = await get_json_body()
+        if not isinstance(body, dict):
+            return _error("请选择主题包或填写 HTTPS 下载地址")
+        digest = body.get("sha256", "")
+        if not isinstance(digest, str) or len(digest) > 64:
+            return _error("SHA-256 校验值无效")
+        archive = body.get("archive_base64")
+        url = body.get("url")
+        if bool(archive) == bool(url):
+            return _error("请选择一种安装来源：ZIP 安装包或 HTTPS 下载地址")
+        manager = self._webui_theme_manager()
+        try:
+            if archive:
+                if not isinstance(archive, str) or len(archive) > ((MAX_ARCHIVE_BYTES + 2) // 3) * 4:
+                    return _error("主题安装包过大", 413)
+                try:
+                    payload = base64.b64decode(archive, validate=True)
+                except (ValueError, TypeError):
+                    return _error("主题安装包编码无效")
+                theme = await asyncio.to_thread(manager.install_archive, payload, digest)
+            else:
+                if not isinstance(url, str) or len(url) > 2048:
+                    return _error("主题下载地址无效")
+                theme = await manager.install_url(url, digest)
+        except WebUIThemeError as error:
+            return _error(str(error), 422)
+        except Exception as error:
+            logger.warning("[denia_share] 自设 WebUI 安装失败: %s", type(error).__name__)
+            return _error("安装未完成，原有界面保留；请检查安装包或网络", 500)
+        return _json_response({"theme": theme, "message": "安装成功，请选择对应 WebUI 样式并保存"})
+
     async def overview(self):
         plugin = self.plugin
         pconfig = get_config()
@@ -399,6 +453,7 @@ class WebUIApi:
                     "enabled": plugin._renderer.enabled,
                     "theme": plugin._renderer.theme_name,
                     "layout": plugin._renderer.layout_name,
+                    "style": getattr(plugin._renderer, "style_name", "classic"),
                     "width": plugin._renderer.width,
                     "cover_full_size": plugin._renderer.cover_full_size,
                 },
@@ -985,6 +1040,7 @@ class WebUIApi:
             "data_url": data_url,
             "theme": renderer.theme_name,
             "layout": renderer.layout_name,
+            "style": renderer.style_name,
             "width": renderer.width,
         }
 
@@ -1003,6 +1059,9 @@ class WebUIApi:
 
         theme = str(overrides.get("theme") or opts["theme"]).strip().lower()
         layout = str(overrides.get("layout") or opts["layout"]).strip().lower()
+        # 旧页面缓存的第五布局只影响本次布局，不得借此切换全局 WebUI。
+        if layout == "denia":
+            layout = "standard"
         if theme not in {"dark", "light"}:
             raise PreviewOverridesError(f"主题只能是 dark 或 light，收到 {theme!r}")
         if layout not in LAYOUT_NAMES:
@@ -1107,6 +1166,7 @@ class WebUIApi:
                 "data_url": data_url,
                 "theme": renderer.theme_name,
                 "layout": renderer.layout_name,
+                "style": renderer.style_name,
                 "width": renderer.width,
                 "file": path.name,
             }

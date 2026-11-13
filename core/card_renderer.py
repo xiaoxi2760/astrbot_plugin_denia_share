@@ -58,7 +58,7 @@ except AttributeError:  # Pillow < 9.1
 
 # 卡片右下角的默认水印文字。
 WATERMARK_TAG = "希望解析"
-_CARD_STYLE_VERSION = '20261112-emoji-font-fallback'
+_CARD_STYLE_VERSION = '20261113-denia-four-layouts-webui-v1'
 
 
 # ============================ 文本与统计处理 ============================
@@ -501,7 +501,7 @@ def _discover_fonts(custom_path: str | None = None) -> tuple[str | None, str | N
 
 
 # 可选卡片布局：standard 标准横幅 / magazine 双栏杂志 /
-# immersive 沉浸全屏 / feed 社交动态流
+# immersive 沉浸全屏 / feed 社交动态流。皮肤独立于布局，由 WebUI 配置决定。
 LAYOUT_NAMES = ("standard", "magazine", "immersive", "feed")
 
 
@@ -517,6 +517,7 @@ class ShareCardRenderer:
         theme: str = "dark",
         font_path: str | None = None,
         layout: str = "standard",
+        style: str = "classic",
         cover_full_size: bool = False,
         accent_color: str | None = None,
         watermark: str | None = None,
@@ -532,6 +533,7 @@ class ShareCardRenderer:
         self.width = max(520, min(1080, int(width)))
         self.theme_name = theme if theme in _THEMES else "dark"
         self.layout_name = layout if layout in LAYOUT_NAMES else "standard"
+        self.style_name = style if style in {"classic", "denia"} else "classic"
         self.font_path = font_path
         self.cover_full_size = cover_full_size
         # 自定义外观（None/空 = 跟随默认行为）
@@ -863,7 +865,7 @@ class ShareCardRenderer:
         )
         digest = hashlib.md5(
             (
-                f"{_CARD_STYLE_VERSION}|{self.theme_name}|{self.width}|{self.layout_name}|{self.cover_full_size}"
+                f"{_CARD_STYLE_VERSION}|{self.style_name}|{self.theme_name}|{self.width}|{self.layout_name}|{self.cover_full_size}"
                 f"|{self.accent_color or ''}|{self.watermark}|{self.desc_max_lines}"
                 f"|{int(self.show_avatar)}|{int(self.show_play_button)}"
                 f"|{self.gradient_top or ''}|{self.gradient_bottom or ''}"
@@ -1009,6 +1011,11 @@ class ShareCardRenderer:
         out_path: Path,
     ) -> Path:
         """按 self.layout_name 分发到具体布局实现。"""
+        if self.style_name == "denia":
+            # 独立实现，避免继续把大段新布局堆进本文件。
+            from .card_denia import render_denia_card
+
+            return render_denia_card(self, result, images, out_path)
         if self.layout_name == "magazine":
             return self._render_magazine(result, images, out_path)
         if self.layout_name == "immersive":

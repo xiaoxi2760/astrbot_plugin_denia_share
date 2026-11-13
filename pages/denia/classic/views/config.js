@@ -1,7 +1,7 @@
 /* 配置页：把 CONFIG_META 描述的全部配置项按「大类 → 分组 → 子组」三级渲染成表单。
  *
- * 页面不再依赖 AstrBot 的原生插件配置面板（_conf_schema.json 里的条目都标了
- * invisible），所以这里要把全部配置项完整覆盖到，并做前端校验 + 脏值跟踪。
+ * 原生插件配置面板展示部分常用项；这里仍完整覆盖所有配置，
+ * 并提供前端校验、凭据管理和脏值跟踪。
  *
  * 三级数据都来自 GET config：
  * - sections（大类）：顶部导航条，选中后只显示该大类下的分组；搜索时跨全部大类
@@ -22,6 +22,7 @@ import {
 
 import { createCredentialsPanel } from "../credentials.js";
 import { createCookieCloudPanel } from "../cookiecloud.js";
+import { createWebUIThemesPanel } from "../webui-themes.js";
 
 /* 名单兼容逗号分隔字符串，禁用平台同时支持原生面板保存的数组。
    拆分规则与后端 core/permissions.py 的 _ID_SPLIT_RE 对齐：
@@ -39,7 +40,7 @@ function parseListValue(raw) {
   return [...seen];
 }
 
-export function createConfigView(ctx) {
+export function createConfigView(ctx, { showAccountPanels = true, collapsedByDefault = false } = {}) {
   let container = null;
   let meta = { sections: [], groups: [], items: [], platforms: [], problems: [] };
   let values = {};
@@ -64,8 +65,10 @@ export function createConfigView(ctx) {
   });
   let activeSection = null;
   let collapsed = new Set();
+  let initializedGroups = false;
   /** 底部保存栏里几个需要跟着改动数走的节点，见 syncSaveBar。 */
   let saveBar = null;
+  const webuiThemes = createWebUIThemesPanel(ctx);
 
   async function load() {
     ctx.setHead("加载中…");
@@ -81,10 +84,15 @@ export function createConfigView(ctx) {
     secretStatus = payload.secret_status || {};
     draft = {};
     pendingSecretClears.clear();
+    if (collapsedByDefault && !initializedGroups) {
+      collapsed = new Set(meta.groups.map((group) => group.name));
+      initializedGroups = true;
+    }
     if (activeSection === null) activeSection = meta.sections[0]?.key || "all";
     // 凭据状态拿不到就走回退路径，绝不让配置页整体加载失败
     await credentials.load().catch(() => false);
-    await cookiecloud.load();
+    if (showAccountPanels) await cookiecloud.load();
+    await webuiThemes.load();
     const overview = await ctx.api.get("overview").catch(() => null);
     if (overview && overview.version) ctx.setVersion(`v${overview.version}`);
     ctx.setHead("");
@@ -254,13 +262,17 @@ export function createConfigView(ctx) {
       );
     }
 
-    if (credentials.supported) {
+    if (showAccountPanels && credentials.supported) {
       // 凭据卡片节点是常驻的：整页重绘时重新挂同一个节点，内部状态不丢
       container.appendChild(credentials.node);
     }
-    if (cookiecloud.supported) container.appendChild(cookiecloud.node);
+    if (showAccountPanels && cookiecloud.supported) container.appendChild(cookiecloud.node);
 
     container.appendChild(renderToolbar());
+    if (webuiThemes.supported && visibleGroups().some((group) =>
+      group.name === "界面设置" && group.keys.map(itemOf).some((item) => item && matchesFilter(item)))) {
+      container.appendChild(webuiThemes.node);
+    }
 
     let rendered = 0;
     for (const group of visibleGroups()) {
@@ -1043,7 +1055,9 @@ export function createConfigView(ctx) {
           }),
           h("span", {
             class: "field-hint",
-            text: "请在上方「账号凭据」卡片里导入或检查。",
+            text: showAccountPanels
+              ? "请在上方「账号凭据」卡片里导入或检查。"
+              : "请前往「平台与账号」导入或检查。",
           }),
         ]);
       }

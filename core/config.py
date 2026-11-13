@@ -25,6 +25,10 @@ _HEX_COLOR_RE = re.compile(r"^#[0-9a-fA-F]{6}$")
 # 合并转发模式白名单：读侧只认这三个字面量，脏值一律回退 none（保持直发）
 AGGREGATION_MODES: frozenset[str] = frozenset({"none", "all", "conditional"})
 
+# 插件管理页样式白名单：读侧只认这两个字面量，脏值一律回退 classic。
+# 该值同时决定管理界面与分享卡片皮肤；卡片布局、明暗主题各自独立。
+WEBUI_STYLES: frozenset[str] = frozenset({"classic", "denia"})
+
 
 def _aggregation_threshold(raw: Any, default: int) -> int:
     """把合并转发阈值读成非负 int。
@@ -40,6 +44,7 @@ def _aggregation_threshold(raw: Any, default: int) -> int:
 
 # 配置分组：展示顺序即此处的顺序，常用在前、折腾在后
 CONFIG_GROUPS: tuple[tuple[str, str], ...] = (
+    ("界面设置", "选择管理页面与分享卡片的风格，布局和卡片明暗可单独设置"),
     ("解析设置", "日常最常用到的几项"),
     ("权限控制", "谁能触发解析：白名单 / 黑名单"),
     ("B站设置", "B站 Cookie 与下载清晰度"),
@@ -62,8 +67,8 @@ CONFIG_SECTIONS: tuple[dict[str, Any], ...] = (
     {
         "key": "basic",
         "label": "基础",
-        "description": "解析行为、发送策略与访问权限，日常最常改",
-        "groups": ("解析设置", "权限控制"),
+        "description": "界面、解析行为、发送策略与访问权限，日常最常改",
+        "groups": ("界面设置", "解析设置", "权限控制"),
     },
     {
         "key": "platform",
@@ -149,6 +154,20 @@ _TUNABLE_ITEMS: tuple[dict[str, Any], ...] = (
 )
 
 CONFIG_META: tuple[dict[str, Any], ...] = (
+    {
+        "key": "WEBUI_STYLE",
+        "group": "界面设置",
+        "label": "WebUI 样式",
+        "type": "select",
+        "default": "classic",
+        "options": ["classic", "denia"],
+        "labels": ["经典界面", "达妮娅的泡泡工坊"],
+        "hint": (
+            "默认只提供经典界面。泡泡工坊需先在经典界面的「配置 → 自设 WebUI」中"
+            "单独安装，再选择并保存；刷新页面生效。卡片风格跟随此选项，布局和卡片明暗独立设置。"
+            "未安装或加载失败时仅管理页面回退经典界面，不改已保存的选择"
+        ),
+    },
     {"key": "COOKIECLOUD_URL", "group": "CookieCloud", "label": "服务地址", "type": "string", "default": "", "hint": "填写你自建的 CookieCloud 地址，可包含子目录。"},
     {"key": "COOKIECLOUD_UUID", "group": "CookieCloud", "label": "用户密钥 UUID", "type": "string", "default": "", "secret": True, "hint": "与浏览器 CookieCloud 扩展中的用户密钥一致。"},
     {"key": "COOKIECLOUD_PASSWORD", "group": "CookieCloud", "label": "端到端加密密码", "type": "string", "default": "", "secret": True, "hint": "仅在机器人本地解密，不会发送给同步服务器。"},
@@ -570,7 +589,7 @@ CONFIG_META: tuple[dict[str, Any], ...] = (
         "default": "standard",
         "options": ["standard", "magazine", "immersive", "feed"],
         "labels": ["standard 标准", "magazine 杂志", "immersive 沉浸", "feed 信息流"],
-        "hint": "切换后可在「解析」页立刻预览效果",
+        "hint": "四种布局均支持当前 WebUI 对应的卡片风格，可先预览再保存；卡片明暗独立设置",
     },
     {
         "key": "RENDER_WIDTH",
@@ -1107,6 +1126,9 @@ def coerce_value(item: dict[str, Any], raw: Any) -> tuple[Any, str | None]:
         return value, None
 
     text = "" if raw is None else str(raw).strip()
+    # 兼容旧页面的临时预览/保存请求；不推断或修改 WEBUI_STYLE。
+    if key == "RENDER_LAYOUT" and text.lower() == "denia":
+        text = "standard"
     if kind == "select":
         options = item.get("options") or []
         if text and text not in options:
@@ -1393,6 +1415,24 @@ def migrate_native_choices(config: Any) -> bool:
     return changed
 
 
+def migrate_card_layout(config: Any) -> bool:
+    """将旧第五布局归一为标准布局，保留独立的 WebUI 与明暗选择。"""
+    changed = False
+    group = config.get("卡片外观")
+    if isinstance(group, dict) and str(group.get("RENDER_LAYOUT", "")).strip().lower() == "denia":
+        group["RENDER_LAYOUT"] = "standard"
+        # 分组值变为默认后，残留的非默认扁平值会被 _cfg_get 重新选中。
+        # 原先生效的是分组的 denia，因此同时清除这个旧回退，避免迁移到别的布局。
+        if "RENDER_LAYOUT" in config:
+            config["RENDER_LAYOUT"] = "standard"
+        changed = True
+    for holder in (config, group):
+        if isinstance(holder, dict) and str(holder.get("RENDER_LAYOUT", "")).strip().lower() == "denia":
+            holder["RENDER_LAYOUT"] = "standard"
+            changed = True
+    return changed
+
+
 class ParserConfig:
     """解析器配置 - 由 main.py 初始化"""
 
@@ -1522,7 +1562,9 @@ class ParserConfig:
     def current_values(self) -> dict[str, Any]:
         """返回所有配置项的当前生效值（键 → 值）。"""
         return {
-            item["key"]: (self.DISABLED_PLATFORMS if item["key"] == "DISABLED_PLATFORMS"
+            item["key"]: (self.RENDER_LAYOUT if item["key"] == "RENDER_LAYOUT"
+                          else self.WEBUI_STYLE if item["key"] == "WEBUI_STYLE"
+                          else self.DISABLED_PLATFORMS if item["key"] == "DISABLED_PLATFORMS"
                           else self._cfg_get(item["key"], item["default"]))
             for item in CONFIG_META if not item.get("internal")
         }
@@ -1633,6 +1675,19 @@ class ParserConfig:
                 "[denia_share] 配置写入磁盘失败，本次修改只存在于内存，重启后会回滚"
             )
             return False
+
+    # ---------------- 界面 ---------------- #
+
+    @property
+    def WEBUI_STYLE(self) -> str:
+        """管理页面与卡片皮肤：``classic`` / ``denia``。
+
+        和 :attr:`AUDIO_SEND_MODE`、:attr:`AGGREGATION_MODE` 一样走读侧白名单：
+        原生面板、手改 JSON 或旧版本残留都可能给出脏值，透给启动器会让它加载
+        不存在的界面。无法识别的值一律回退 ``classic``，保证管理页始终能打开。
+        """
+        value = str(self._cfg_get("WEBUI_STYLE", "classic") or "").strip().lower()
+        return value if value in WEBUI_STYLES else "classic"
 
     # ---------------- 平台 ---------------- #
 
@@ -1930,7 +1985,7 @@ class ParserConfig:
         """下载时机：``auto``（默认）/ ``confirm``。
 
         脏值（手改 JSON、旧版本残留、原生面板拼错）一律回退 ``auto``，
-        与既有 ``AUDIO_SEND_MODE`` 的白名单策略一致。
+        与既有 ``WEBUI_STYLE`` / ``AUDIO_SEND_MODE`` 的白名单策略一致。
         """
         value = str(self._cfg_get("MEDIA_DOWNLOAD_MODE", "auto") or "").strip().lower()
         return value if value in ("auto", "confirm") else "auto"
@@ -2122,6 +2177,7 @@ class ParserConfig:
             "theme": self.RENDER_THEME,
             "font_path": self.RENDER_FONT_PATH or None,
             "layout": self.RENDER_LAYOUT,
+            "style": self.WEBUI_STYLE,
             "cover_full_size": self.RENDER_COVER_FULL_SIZE,
             "accent_color": self.RENDER_ACCENT_COLOR or None,
             "watermark": self.RENDER_WATERMARK,

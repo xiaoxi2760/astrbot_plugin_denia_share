@@ -1,4 +1,26 @@
 {
+  "界面设置": {
+    "type": "object",
+    "description": "管理页面与卡片风格",
+    "items": {
+      "WEBUI_STYLE": {
+        "description": "WebUI 样式",
+        "type": "string",
+        "default": "classic",
+        "invisible": false,
+        "hint": "默认只提供经典界面。泡泡工坊需先在经典界面的「配置 → 自设 WebUI」中单独安装，再选择并保存；刷新页面生效。卡片风格跟随此选项，布局和卡片明暗独立设置。未安装或加载失败时仅管理页面回退经典界面，不改已保存的选择",
+        "options": [
+          "classic",
+          "denia"
+        ],
+        "labels": [
+          "经典界面",
+          "达妮娅的泡泡工坊"
+        ]
+      }
+    },
+    "invisible": false
+  },
   "解析设置": {
     "type": "object",
     "description": "解析与下载限制",
@@ -650,7 +672,7 @@
         "type": "string",
         "default": "standard",
         "invisible": false,
-        "hint": "切换后可在「解析」页立刻预览效果",
+        "hint": "四种布局均支持当前 WebUI 对应的卡片风格，可先预览再保存；卡片明暗独立设置",
         "options": [
           "standard",
           "magazine",

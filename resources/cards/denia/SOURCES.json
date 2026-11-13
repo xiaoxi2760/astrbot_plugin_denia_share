@@ -1,0 +1,102 @@
+{
+  "origin": "Original code-drawn ornaments and glyphs for this plugin; no wiki images or character portraits included.",
+  "reference": "https://wuwa.huijiwiki.com/wiki/达妮娅/档案; user-provided headpiece silhouette reference",
+  "assets": [
+    {
+      "file": "orange-cake.png",
+      "size": [
+        320,
+        320
+      ],
+      "bytes": 32775
+    },
+    {
+      "file": "paper-dolls.png",
+      "size": [
+        288,
+        110
+      ],
+      "bytes": 5964
+    },
+    {
+      "file": "cube.png",
+      "size": [
+        96,
+        96
+      ],
+      "bytes": 3825
+    },
+    {
+      "file": "orbit-cube.png",
+      "size": [
+        256,
+        256
+      ],
+      "bytes": 16936
+    },
+    {
+      "file": "bubble.png",
+      "size": [
+        192,
+        192
+      ],
+      "bytes": 12125
+    },
+    {
+      "file": "stat-view.png",
+      "size": [
+        64,
+        64
+      ],
+      "bytes": 984
+    },
+    {
+      "file": "stat-like.png",
+      "size": [
+        64,
+        64
+      ],
+      "bytes": 953
+    },
+    {
+      "file": "stat-coin.png",
+      "size": [
+        64,
+        64
+      ],
+      "bytes": 1738
+    },
+    {
+      "file": "stat-favorite.png",
+      "size": [
+        64,
+        64
+      ],
+      "bytes": 1249
+    },
+    {
+      "file": "stat-reply.png",
+      "size": [
+        64,
+        64
+      ],
+      "bytes": 1155
+    },
+    {
+      "file": "stat-share.png",
+      "size": [
+        64,
+        64
+      ],
+      "bytes": 1042
+    },
+    {
+      "file": "stat-danmaku.png",
+      "size": [
+        64,
+        64
+      ],
+      "bytes": 833
+    }
+  ]
+}

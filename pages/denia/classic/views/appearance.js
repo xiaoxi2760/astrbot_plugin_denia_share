@@ -27,12 +27,28 @@ const CARD_THEMES = [
   { value: "light", label: "浅色" },
 ];
 
+/* 只有四种布局。达妮娅不是第五种布局：它是「启用哪个 WebUI 皮肤」决定的卡片风格，
+ * 跟随已保存的 WEBUI_STYLE，界面里不另开风格下拉，也不从当前 URL 推断皮肤。 */
 const CARD_LAYOUTS = [
   { value: "standard", label: "standard 标准" },
   { value: "magazine", label: "magazine 杂志" },
   { value: "immersive", label: "immersive 沉浸" },
   { value: "feed", label: "feed 信息流" },
 ];
+
+/* 旧版本把达妮娅存成第五布局；界面上按标准布局处理，不因此改写 WebUI 选择。 */
+const LEGACY_LAYOUTS = { denia: "standard" };
+
+const WEBUI_STYLE_LABELS = {
+  classic: "经典皮肤",
+  denia: "达妮娅泡泡工坊皮肤",
+};
+
+/** 卡片风格跟随已启用的 WebUI（已保存值），与卡片明暗互相独立。 */
+function cardStyleLabel(values) {
+  const raw = String((values || {}).WEBUI_STYLE || "").trim().toLowerCase();
+  return WEBUI_STYLE_LABELS[raw] || WEBUI_STYLE_LABELS.classic;
+}
 
 /** 卡片配置键 → 预览接口的外观参数名。 */
 const OVERRIDE_MAP = {
@@ -77,6 +93,14 @@ export function createAppearanceView(ctx) {
       : configValues[key];
   }
 
+  /* 布局在界面上按四种之一显示；旧值 denia 归一为 standard，
+   * 但只是显示归一 —— 不因为它悄悄改写已保存的布局或 WebUI 选择。 */
+  function layoutValue() {
+    const raw = String(cardValue("RENDER_LAYOUT") || "").trim().toLowerCase();
+    const mapped = LEGACY_LAYOUTS[raw] || raw;
+    return CARD_LAYOUTS.some((item) => item.value === mapped) ? mapped : "standard";
+  }
+
   function setCard(key, value) {
     if (value === configValues[key]) {
       delete cardDraft[key];
@@ -96,6 +120,13 @@ export function createAppearanceView(ctx) {
         overrides[name] = cardDraft[key];
       }
     }
+    // 旧布局值在预览里也按标准布局下发；预览不写配置，更不会切换 WebUI。
+    if (overrides.layout !== undefined) {
+      const raw = String(overrides.layout).trim().toLowerCase();
+      overrides.layout = LEGACY_LAYOUTS[raw] || raw;
+    }
+    // 沉浸式布局不显示 AI 摘要，预览与实际出图保持一致。
+    if (overrides.layout === "immersive") overrides.show_ai_summary = false;
     return overrides;
   }
 
@@ -152,6 +183,12 @@ export function createAppearanceView(ctx) {
         elements.previewMeta.appendChild(pill(`主题 ${previewMeta.theme}`, "primary"));
         elements.previewMeta.appendChild(pill(`布局 ${previewMeta.layout}`, "primary"));
         elements.previewMeta.appendChild(pill(`宽 ${previewMeta.width}px`, ""));
+        // 老后端没有 style 字段时不显示这一项，别让界面空出未知状态。
+        if (previewMeta.style) {
+          elements.previewMeta.appendChild(
+            pill(`风格 ${cardStyleLabel({ WEBUI_STYLE: previewMeta.style })}`, ""),
+          );
+        }
       }
     }
   }
@@ -353,10 +390,16 @@ export function createAppearanceView(ctx) {
     ]);
   }
 
-  function switchField(label, key, onText, offText, hint) {
+  function switchField(label, key, onText, offText, hint, disabled = false) {
+    const control = switchControl(Boolean(cardValue(key)), (on) => setCard(key, on), onText, offText);
+    if (disabled) {
+      const input = control.querySelector("input");
+      if (input) input.disabled = true;
+      control.classList.add("is-disabled");
+    }
     return h("div", { class: "field" }, [
       h("div", { class: "field-label", text: label }),
-      switchControl(Boolean(cardValue(key)), (on) => setCard(key, on), onText, offText),
+      control,
       hint ? h("p", { class: "field-hint", text: hint }) : null,
     ]);
   }
@@ -368,7 +411,7 @@ export function createAppearanceView(ctx) {
     });
     const layoutSeg = seg(
       CARD_LAYOUTS,
-      cardValue("RENDER_LAYOUT"),
+      layoutValue(),
       (v) => {
         setCard("RENDER_LAYOUT", v);
         render();
@@ -418,6 +461,11 @@ export function createAppearanceView(ctx) {
       h("div", { class: "field" }, [
         h("div", { class: "field-label", text: "卡片布局" }),
         layoutSeg,
+        h("p", {
+          class: "field-hint",
+          text: `卡片风格跟随当前启用的 WebUI：${cardStyleLabel(configValues)}。` +
+            "四种布局都按这套风格出图；卡片明暗由「卡片主题」单独决定，与页面明暗无关。",
+        }),
       ]),
       switchField(
         "B站 AI 总结",
@@ -425,6 +473,7 @@ export function createAppearanceView(ctx) {
         "显示",
         "隐藏",
         "沉浸式布局不显示；标准、杂志、信息流布局可显示，没有可用总结时自动隐藏",
+        layoutValue() === "immersive",
       ),
       numField("卡片宽度", "RENDER_WIDTH", { min: 520, max: 1080, unit: "px（520~1080）" }),
       colorField("自定义强调色", "RENDER_ACCENT_COLOR", "留空=每个平台用自己的品牌色；填后所有卡片统一强调色"),

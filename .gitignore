@@ -25,3 +25,6 @@ DEVELOPMENT.md
 
 # 打包脚本只在维护者本地用，发布产物是 zip，不需要进仓库
 /package.py
+
+# Installed optional WebUI mount (source lives in astrbot-webui-themes).
+/pages/denia/studio/

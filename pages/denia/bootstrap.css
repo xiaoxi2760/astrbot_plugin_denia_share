@@ -1,0 +1,191 @@
+/* 启动器自己的最小样式：只负责加载态、失败提示和经典恢复说明。
+ *
+ * 不写 body / .app / .rail 等业务选择器，避免影响随后注入的经典界面；
+ * 两套界面的样式表由 bootstrap.js 按选中项单独加载。
+ */
+
+#denia-boot {
+  position: fixed;
+  inset: 0;
+  z-index: 2147483000;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: #f4f6f2;
+  color: #1e2a24;
+  font-family: "Microsoft YaHei", "PingFang SC", "Noto Sans SC", system-ui, sans-serif;
+}
+
+@media (prefers-color-scheme: dark) {
+  #denia-boot {
+    background: #101612;
+    color: #e5ecdf;
+  }
+}
+
+.denia-boot-card {
+  display: grid;
+  justify-items: center;
+  gap: 10px;
+  max-width: 360px;
+  text-align: center;
+}
+
+.denia-boot-mark {
+  width: 42px;
+  height: 42px;
+  border-radius: 14px 14px 14px 4px;
+  background: linear-gradient(135deg, #6f9d74, #314b3a);
+  box-shadow: 0 10px 24px rgb(49 75 58 / 22%);
+}
+
+.denia-boot-title {
+  margin: 2px 0 0;
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.denia-boot-text {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.6;
+  opacity: 0.72;
+}
+
+.denia-boot-spinner {
+  width: 18px;
+  height: 18px;
+  margin-top: 2px;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: denia-boot-spin 0.9s linear infinite;
+  opacity: 0.6;
+}
+
+.denia-boot-fallback {
+  margin: 6px 0 0;
+  font-size: 12px;
+  line-height: 1.6;
+  opacity: 0.7;
+}
+
+.denia-boot-fallback a {
+  color: inherit;
+  text-underline-offset: 2px;
+}
+
+@keyframes denia-boot-spin {
+  to {
+    transform: rotate(1turn);
+  }
+}
+
+.denia-boot-noscript {
+  position: fixed;
+  inset: auto 16px 16px;
+  margin: 0;
+  padding: 12px 14px;
+  border: 1px solid #c8d2c9;
+  border-radius: 10px;
+  background: #fff;
+  color: #1e2a24;
+  font: 13px/1.6 "Microsoft YaHei", "PingFang SC", system-ui, sans-serif;
+}
+
+/* 失败回退 / 临时经典提示：放在 body 末尾，远离经典界面的 #stage-body，
+ * 不会随视图刷新被清掉。 */
+.denia-boot-notice {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  left: 16px;
+  z-index: 2147483001;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px 18px;
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 12px 14px;
+  border: 1px solid #c9d3c9;
+  border-radius: 12px;
+  background: #fffef9;
+  color: #26332b;
+  box-shadow: 0 12px 34px rgb(20 34 25 / 18%);
+  font: 13px/1.55 "Microsoft YaHei", "PingFang SC", "Noto Sans SC", system-ui, sans-serif;
+}
+
+.denia-boot-notice[data-kind="warn"] {
+  border-color: #d8b46a;
+  background: #fff8e8;
+}
+
+.denia-boot-notice-copy {
+  display: grid;
+  gap: 3px;
+  min-width: 220px;
+  flex: 1 1 320px;
+}
+
+.denia-boot-notice-copy strong {
+  font-size: 13px;
+}
+
+.denia-boot-notice-copy span {
+  opacity: 0.76;
+}
+
+.denia-boot-notice-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+
+.denia-boot-notice-actions a,
+.denia-boot-notice-actions button {
+  min-height: 30px;
+  padding: 5px 12px;
+  border: 1px solid #b9c6bb;
+  border-radius: 8px;
+  background: #f7faf5;
+  color: #24422f;
+  font: inherit;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.denia-boot-notice-actions a:hover,
+.denia-boot-notice-actions button:hover {
+  background: #eef5eb;
+}
+
+@media (prefers-color-scheme: dark) {
+  .denia-boot-notice,
+  .denia-boot-noscript {
+    border-color: #3c4c40;
+    background: #162019;
+    color: #e1eadc;
+  }
+
+  .denia-boot-notice[data-kind="warn"] {
+    border-color: #7c6637;
+    background: #241f12;
+  }
+
+  .denia-boot-notice-actions a,
+  .denia-boot-notice-actions button {
+    border-color: #46594a;
+    background: #1d2a20;
+    color: #dce9d7;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .denia-boot-spinner {
+    animation: none;
+  }
+}

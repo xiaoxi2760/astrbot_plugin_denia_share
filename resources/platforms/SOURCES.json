@@ -1,0 +1,110 @@
+{
+  "bilibili": {
+    "file": "bilibili.svg",
+    "collection": "Simple Icons",
+    "ref": "e451c581fccb01b56f47e1a77292bdd1fd95b1a4",
+    "source": "https://raw.githubusercontent.com/simple-icons/simple-icons/e451c581fccb01b56f47e1a77292bdd1fd95b1a4/icons/bilibili.svg",
+    "hex": "FB7299",
+    "sha256": "97572c8972d6e43466ca602890c037b74f21ab37f6e27490e87fc64fc4606969"
+  },
+  "douyin": {
+    "file": "douyin.svg",
+    "collection": "Simple Icons",
+    "ref": "e451c581fccb01b56f47e1a77292bdd1fd95b1a4",
+    "source": "https://raw.githubusercontent.com/simple-icons/simple-icons/e451c581fccb01b56f47e1a77292bdd1fd95b1a4/icons/tiktok.svg",
+    "hex": "111111",
+    "sha256": "8f410082b8bbdc1e3c8dc15487f6c4bf466fcc112d4d359bef687450d9c87edd"
+  },
+  "kuaishou": {
+    "file": "kuaishou.svg",
+    "collection": "Simple Icons",
+    "ref": "e451c581fccb01b56f47e1a77292bdd1fd95b1a4",
+    "source": "https://raw.githubusercontent.com/simple-icons/simple-icons/e451c581fccb01b56f47e1a77292bdd1fd95b1a4/icons/kuaishou.svg",
+    "hex": "FF4906",
+    "sha256": "ed951f8f64841ba35688a28ab3b88d65ce9b25db0f06157c60e8cb6e7125e7f1"
+  },
+  "weibo": {
+    "file": "weibo.svg",
+    "collection": "Simple Icons",
+    "ref": "e451c581fccb01b56f47e1a77292bdd1fd95b1a4",
+    "source": "https://raw.githubusercontent.com/simple-icons/simple-icons/e451c581fccb01b56f47e1a77292bdd1fd95b1a4/icons/sinaweibo.svg",
+    "hex": "E6162D",
+    "sha256": "9cc890072b41eeb91ef989a4fbe36a9c25643ca82b0c89c3f867ad95560f1832"
+  },
+  "xiaohongshu": {
+    "file": "xiaohongshu.svg",
+    "collection": "Simple Icons",
+    "ref": "e451c581fccb01b56f47e1a77292bdd1fd95b1a4",
+    "source": "https://raw.githubusercontent.com/simple-icons/simple-icons/e451c581fccb01b56f47e1a77292bdd1fd95b1a4/icons/xiaohongshu.svg",
+    "hex": "FF2442",
+    "sha256": "23315f1bf4178aabeefe3a35459bd7021c79eb047ca84732294c9f1a7a0b1894"
+  },
+  "twitter": {
+    "file": "twitter.svg",
+    "collection": "Simple Icons",
+    "ref": "e451c581fccb01b56f47e1a77292bdd1fd95b1a4",
+    "source": "https://raw.githubusercontent.com/simple-icons/simple-icons/e451c581fccb01b56f47e1a77292bdd1fd95b1a4/icons/x.svg",
+    "hex": "111111",
+    "sha256": "da1f1da5d5278dd532dc2a276c3adf0c5c014de00ed6933aa60d1b7e51206b01"
+  },
+  "github": {
+    "file": "github.svg",
+    "collection": "Simple Icons",
+    "ref": "e451c581fccb01b56f47e1a77292bdd1fd95b1a4",
+    "source": "https://raw.githubusercontent.com/simple-icons/simple-icons/e451c581fccb01b56f47e1a77292bdd1fd95b1a4/icons/github.svg",
+    "hex": "181717",
+    "sha256": "476ba7aa67b86da7d6e7567b08a4bf0eb1a2fd28da5fc243f8ee39a2f1ea6773"
+  },
+  "pixiv": {
+    "file": "pixiv.svg",
+    "collection": "Simple Icons",
+    "ref": "e451c581fccb01b56f47e1a77292bdd1fd95b1a4",
+    "source": "https://raw.githubusercontent.com/simple-icons/simple-icons/e451c581fccb01b56f47e1a77292bdd1fd95b1a4/icons/pixiv.svg",
+    "hex": "0096FA",
+    "sha256": "4f42cf3bd104feead5be68459b2c3a2f80273d9a1d212dc45e86b32d34950d70"
+  },
+  "steam": {
+    "file": "steam.svg",
+    "collection": "Simple Icons",
+    "ref": "e451c581fccb01b56f47e1a77292bdd1fd95b1a4",
+    "source": "https://raw.githubusercontent.com/simple-icons/simple-icons/e451c581fccb01b56f47e1a77292bdd1fd95b1a4/icons/steam.svg",
+    "hex": "002D58",
+    "sha256": "03621786d0739674684d08cc9d0c1fd860b799c5dc0d3df70eeb118ea1e62770"
+  },
+  "acfun": {
+    "file": "acfun.png",
+    "source": "https://www.acfun.cn/favicon.ico",
+    "kind": "official website icon",
+    "sha256": "c75f8dc54efd25c48bc26a34f994e4eda38e0eec4662b523d6ba9dd9ae4c8ed4"
+  },
+  "nga": {
+    "file": "nga.png",
+    "source": "https://bbs.nga.cn/favicon.ico",
+    "kind": "official website icon",
+    "sha256": "5668759157ca2cc000e7add9311cbf207c7bbcaa160bbd6b76089529553bc66f"
+  },
+  "xiaoheihe": {
+    "file": "xiaoheihe.png",
+    "source": "https://www.xiaoheihe.cn/favicon.ico",
+    "kind": "official website icon",
+    "sha256": "627a86d49462f762a4650f2abd549778d256b1c19a70067060966a1b6ee4e60d"
+  },
+  "netease": {
+    "file": "netease.png",
+    "source": "https://s1.music.126.net/style/favicon.ico",
+    "kind": "official website icon; existing bundled asset",
+    "sha256": "f4bcd4d360bd3be31b1c1d9c8ed6426df64544d61005eb71650ffd5bce491d49"
+  },
+  "qqmusic": {
+    "file": "qqmusic.png",
+    "source": "https://y.qq.com/favicon.ico",
+    "kind": "official website icon; existing bundled asset",
+    "sha256": "129da773e4f229fab310b412a9602692cf35253c81b483a2ed98dc017f2f39a5"
+  },
+  "kugou": {
+    "file": "kugou.png",
+    "source": "https://www.kugou.com/favicon.ico",
+    "kind": "official website icon; existing bundled asset",
+    "sha256": "17ccaeb0333d855189e11563d93745d7cf96f36201e0d68b05e7f8387e99987e"
+  }
+}

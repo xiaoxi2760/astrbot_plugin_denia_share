@@ -26,10 +26,10 @@ const VIA_OPTIONS = [
 
 const LIMIT_OPTIONS = [10, 20, 50, 100];
 
-export function createCacheView(ctx) {
+export function createCacheView(ctx, { initialLimit = 20 } = {}) {
   let container = null;
   let data = null;
-  const query = { keyword: "", platform: "", via: "", limit: 20, offset: 0 };
+  const query = { keyword: "", platform: "", via: "", limit: LIMIT_OPTIONS.includes(initialLimit) ? initialLimit : 20, offset: 0 };
   let searchTimer = null;
   let requestId = 0;
   const elements = {};

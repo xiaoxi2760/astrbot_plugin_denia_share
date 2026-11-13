@@ -22,6 +22,7 @@ const THEMES = [
   { value: "light", label: "浅色" },
 ];
 
+/* 只有四种布局：达妮娅不是第五种布局，它是 WebUI 皮肤决定的卡片风格。 */
 const LAYOUTS = [
   { value: "", label: "跟随配置" },
   { value: "standard", label: "standard 标准" },
