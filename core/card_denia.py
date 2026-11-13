@@ -1369,15 +1369,19 @@ def _soft_glow(
     """Large soft light field at half resolution, composited at card size."""
     width, height = canvas.size
     scale = 0.5
-    small = Image.new("RGBA", (max(1, round(width * scale)), max(1, round(height * scale))), (0, 0, 0, 0))
-    d = ImageDraw.Draw(small)
+    mask = Image.new("L", (max(1, round(width * scale)), max(1, round(height * scale))), 0)
+    d = ImageDraw.Draw(mask)
     d.ellipse(
         tuple(round(value * scale) for value in box),
-        fill=(*_hex_to_rgb(color), max(0, min(255, alpha))),
+        fill=max(0, min(255, alpha)),
     )
-    small = small.filter(ImageFilter.GaussianBlur(max(1, blur * scale)))
-    small = small.resize((width, height), _LANCZOS)
-    canvas.alpha_composite(small)
+    # Blur coverage only: blurring straight RGBA also blends the transparent
+    # black RGB channels into the light, producing grey metallic-looking bands.
+    mask = mask.filter(ImageFilter.GaussianBlur(max(1, blur * scale)))
+    mask = mask.resize((width, height), _LANCZOS)
+    light = Image.new("RGBA", (width, height), (*_hex_to_rgb(color), 255))
+    light.putalpha(mask)
+    canvas.alpha_composite(light)
 
 
 def _draw_background(canvas: Image.Image, plan: _Plan) -> None:

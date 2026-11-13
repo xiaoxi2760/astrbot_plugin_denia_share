@@ -58,7 +58,7 @@ except AttributeError:  # Pillow < 9.1
 
 # 卡片右下角的默认水印文字。
 WATERMARK_TAG = "希望解析"
-_CARD_STYLE_VERSION = '20261113-denia-four-layouts-webui-v1'
+_CARD_STYLE_VERSION = '20261113-denia-four-layouts-soft-light-v2'
 
 
 # ============================ 文本与统计处理 ============================
