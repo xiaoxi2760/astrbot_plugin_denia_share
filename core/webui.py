@@ -388,6 +388,31 @@ class WebUIApi:
         installed = await asyncio.to_thread(self._webui_theme_manager().list_installed)
         return _json_response({"installed": installed, "builtin": ["classic"]})
 
+    async def _refresh_after_theme_install(self) -> bool:
+        """主题装好后热刷新常驻渲染器；刷新失败绝不能回滚成功的安装。"""
+        refresh = getattr(self.plugin, "apply_runtime_config", None)
+        refreshed = False
+        if callable(refresh):
+            try:
+                outcome = refresh()
+                if hasattr(outcome, "__await__"):
+                    await outcome
+                refreshed = True
+            except Exception:
+                logger.warning(
+                    "[denia_share] 主题已安装，但热刷新渲染器失败", exc_info=True
+                )
+        cache = getattr(self.plugin, "_render_cache", None)
+        clear = getattr(cache, "clear", None)
+        if callable(clear):
+            try:
+                clear()
+            except Exception:
+                logger.warning(
+                    "[denia_share] 主题已安装，但清理卡片缓存失败", exc_info=True
+                )
+        return refreshed
+
     async def install_webui_theme(self):
         from .webui_themes import MAX_ARCHIVE_BYTES, WebUIThemeError
         body = await get_json_body()
@@ -419,6 +444,7 @@ class WebUIApi:
         except Exception as error:
             logger.warning("[denia_share] 自设 WebUI 安装失败: %s", type(error).__name__)
             return _error("安装未完成，原有界面保留；请检查安装包或网络", 500)
+        await self._refresh_after_theme_install()
         return _json_response({"theme": theme, "message": "安装成功，请选择对应 WebUI 样式并保存"})
 
     async def overview(self):

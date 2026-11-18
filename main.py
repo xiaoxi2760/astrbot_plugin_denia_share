@@ -271,7 +271,9 @@ class DeniaSharePlugin(Star):
         except Exception as error:
             logger.warning("[denia_share] 自设 WebUI 恢复未完成，使用经典界面: %s", type(error).__name__)
 
-        pconfig = init_config(config, data_dir / "cache", self.config_dir)
+        pconfig = init_config(
+            config, data_dir / "cache", self.config_dir, theme_manager=self._webui_themes
+        )
 
         # 缓存目录可被「共享缓存目录」配置项接管：Docker 分容器部署时，
         # 协议端要按同一个容器内路径才能读到下载下来的视频

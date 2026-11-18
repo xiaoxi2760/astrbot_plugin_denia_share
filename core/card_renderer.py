@@ -527,6 +527,7 @@ class ShareCardRenderer:
         gradient_top: str | None = None,
         gradient_bottom: str | None = None,
         show_ai_summary: bool = False,
+        card_assets_dir: Path | str | None = None,
     ):
         self.cache_dir = cache_dir
         self.enabled = enabled and Image is not None
@@ -548,6 +549,8 @@ class ShareCardRenderer:
         self.gradient_bottom = normalize_hex_color(gradient_bottom)
         # B站 AI 摘要开关。immersive 永远不显示（由 render/_ai_summary_* 兜底）。
         self.show_ai_summary = bool(show_ai_summary)
+        # 每个渲染器保存自己的素材来源；禁止模块级可变路径或共享上下文。
+        self.card_assets_dir = Path(card_assets_dir) if card_assets_dir else None
         self._regular_font: str | None = None
         self._bold_font: str | None = None
         self._fonts_loaded = False
@@ -857,6 +860,27 @@ class ShareCardRenderer:
             logger.exception("解析卡片渲染失败，跳过卡片输出")
             return None
 
+    def _card_assets_fingerprint(self) -> str:
+        """当前卡片素材来源指纹；来源路径或任一 PNG 变化都会换 PNG 缓存。"""
+        root = self.card_assets_dir
+        if root is None:
+            return "none"
+        try:
+            resolved = root.resolve(strict=False)
+            if not resolved.is_dir():
+                return f"missing:{resolved}"
+            entries: list[str] = []
+            for path in sorted(resolved.rglob("*.png")):
+                if path.is_symlink() or not path.is_file():
+                    continue
+                stat = path.stat()
+                entries.append(
+                    f"{path.relative_to(resolved).as_posix()}:{stat.st_size}:{stat.st_mtime_ns}"
+                )
+            return f"{resolved}|" + (";".join(entries) or "empty")
+        except OSError:
+            return f"unreadable:{root}"
+
     def _output_path(self, cache_key: str | None, result: ParseResult) -> Path:
         warnings_str = "|".join(result.extra.get("limit_warnings") or [])
         payload = (
@@ -870,6 +894,7 @@ class ShareCardRenderer:
                 f"|{int(self.show_avatar)}|{int(self.show_play_button)}"
                 f"|{self.gradient_top or ''}|{self.gradient_bottom or ''}"
                 f"|{int(self.show_ai_summary)}"
+                f"|{self._card_assets_fingerprint()}"
                 f"|{result.extra.get('ai_summary') or ''}"
                 f"|{result.extra.get('ai_summary_status') or ''}"
                 f"|{payload}|{warnings_str}"

@@ -46,7 +46,6 @@ from . import card_denia_art as art
 __all__ = [
     "render_denia_card",
     "LAYOUT_VERSION",
-    "ASSET_DIR",
     "FOOTER_COPY",
     "stat_layout_summary",
 ]
@@ -61,9 +60,6 @@ FOOTER_COPY = {
     "light": "甜的留一半，喜欢的分给你。",
     "dark": "星海很远，喜欢的就在这里。",
 }
-
-#: 统计图标资源目录（资源缺失时全部退回代码绘制）。
-ASSET_DIR = Path(__file__).resolve().parent.parent / "resources" / "cards" / "denia"
 
 _LAYOUTS = ("standard", "magazine", "immersive", "feed")
 
@@ -256,7 +252,8 @@ def _accent_for(renderer: Any, palette: _Palette) -> tuple[str, tuple[int, int, 
 
 
 @lru_cache(maxsize=24)
-def _load_base(path_text: str) -> Image.Image | None:
+def _load_base(path_text: str, mtime_ns: int, file_size: int) -> Image.Image | None:
+    _ = (mtime_ns, file_size)  # 两者是缓存键的一部分，保证同路径换图后重新读取。
     try:
         with Image.open(path_text) as im:
             im.load()
@@ -266,11 +263,18 @@ def _load_base(path_text: str) -> Image.Image | None:
         return None
 
 
-def _base_asset(filename: str) -> Image.Image | None:
-    path = ASSET_DIR / filename
-    if not path.is_file():
+def _asset_source(filename: str, asset_dir: Any) -> tuple[str, int, int] | None:
+    """返回（绝对路径, mtime_ns, size）；没有可用素材时返回 None。"""
+    if not filename or asset_dir is None:
         return None
-    return _load_base(str(path))
+    try:
+        path = Path(asset_dir).resolve(strict=False) / filename
+        if path.is_symlink() or not path.is_file():
+            return None
+        info = path.stat()
+    except (OSError, TypeError, ValueError):
+        return None
+    return str(path), info.st_mtime_ns, info.st_size
 
 
 def _scale_asset(base: Image.Image, size: int) -> Image.Image:
@@ -283,8 +287,15 @@ def _scale_asset(base: Image.Image, size: int) -> Image.Image:
 
 
 @lru_cache(maxsize=24)
-def _stat_icon_base(kind: str, size: int, rgb: tuple[int, int, int]) -> Image.Image:
-    base = _base_asset(_STAT_FILE.get(kind, ""))
+def _stat_icon_base(
+    kind: str,
+    size: int,
+    rgb: tuple[int, int, int],
+    path_text: str = "",
+    mtime_ns: int = 0,
+    file_size: int = 0,
+) -> Image.Image:
+    base = _load_base(path_text, mtime_ns, file_size) if path_text else None
     if base is not None:
         im = _scale_asset(base, max(1, size))
         alpha = im.getchannel("A")
@@ -294,9 +305,18 @@ def _stat_icon_base(kind: str, size: int, rgb: tuple[int, int, int]) -> Image.Im
     return _fallback_stat_icon(kind, size, rgb)
 
 
-def stat_icon(kind: str, size: int, rgb: tuple[int, int, int]) -> Image.Image:
-    """返回独立统计图标；缓存只存基准图，调用方可以安全修改副本。"""
-    return _stat_icon_base(kind, max(1, size), rgb).copy()
+def stat_icon(
+    kind: str,
+    size: int,
+    rgb: tuple[int, int, int],
+    asset_dir: Any = None,
+) -> Image.Image:
+    """返回独立统计图标；默认无素材时使用代码绘制，并始终返回副本。"""
+    size = max(1, size)
+    source = _asset_source(_STAT_FILE.get(kind, ""), asset_dir)
+    if source is None:
+        return _stat_icon_base(kind, size, rgb).copy()
+    return _stat_icon_base(kind, size, rgb, *source).copy()
 
 
 def _fallback_stat_icon(kind: str, size: int, rgb: tuple[int, int, int]) -> Image.Image:
@@ -643,6 +663,7 @@ def _draw_stat_layout(
     accent_rgb: tuple[int, int, int],
 ) -> None:
     _ = inner_w
+    asset_dir = getattr(renderer, "card_assets_dir", None)
     value_font = renderer._font(layout.font_size, bold=True)
     label_font = renderer._font(layout.label_size, bold=True)
     value_lh = renderer._line_height(value_font)
@@ -652,7 +673,7 @@ def _draw_stat_layout(
         for item in row.items:
             x = x0 + item.x
             if item.kind and item.value:
-                icon = stat_icon(item.kind, layout.icon_size, accent_rgb)
+                icon = stat_icon(item.kind, layout.icon_size, accent_rgb, asset_dir)
                 canvas.alpha_composite(icon, (x, row_y + (layout.row_h - icon.height) // 2))
                 renderer._draw_text(
                     ImageDraw.Draw(canvas),

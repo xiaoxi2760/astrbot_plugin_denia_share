@@ -23,6 +23,7 @@ import {
 import { createCredentialsPanel } from "../credentials.js";
 import { createCookieCloudPanel } from "../cookiecloud.js";
 import { createWebUIThemesPanel } from "../webui-themes.js";
+import { STYLE_KEY, planStyleSwitch, applyStyleSwitch } from "../style-switch.js";
 
 /* 名单兼容逗号分隔字符串，禁用平台同时支持原生面板保存的数组。
    拆分规则与后端 core/permissions.py 的 _ID_SPLIT_RE 对齐：
@@ -1189,6 +1190,8 @@ export function createConfigView(ctx, { showAccountPanels = true, collapsedByDef
     const valuesToSave = {};
     for (const key of keys) valuesToSave[key] = draft[key];
 
+    // 保存前的已保存值：用来判断「生效界面」是不是真的换了。
+    const previousStyle = values[STYLE_KEY];
     const restore = withBusy(button, true, "保存中…");
     try {
       const result = await ctx.api.post("config", { values: valuesToSave });
@@ -1196,16 +1199,36 @@ export function createConfigView(ctx, { showAccountPanels = true, collapsedByDef
       secretStatus = result.secret_status || {};
       draft = {};
       pendingSecretClears.clear();
-      if (credentials.supported) await credentials.load();
-      if (cookiecloud.supported) await cookiecloud.load();
-
-      if (result.errors && result.errors.length) {
+      const failed = Boolean(result.errors && result.errors.length);
+      if (failed) {
         toast(`部分配置未保存：${result.errors.join("；")}`, "err");
       } else if (result.changed && result.changed.length) {
         toast(`已保存 ${result.changed.length} 项配置`, "ok");
       } else {
         toast("配置没有变化", "");
       }
+      // 界面形态（经典界面 / 泡泡工坊）换了 → 回到同插件入口重新载入。
+      // 只有真正改了生效值才换：保存失败、值没变、只改了别的配置都不换。
+      if (!failed) {
+        const plan = planStyleSwitch({
+          savedKeys: keys,
+          previousStyle,
+          nextStyle: values[STYLE_KEY] ?? valuesToSave[STYLE_KEY],
+          search: globalThis.location?.search || "",
+          href: globalThis.location?.href || "",
+          hash: globalThis.location?.hash || "",
+        });
+        if (plan.navigate) {
+          toast("界面已切换，正在载入…", "");
+          applyStyleSwitch(plan, {
+            navigate: typeof ctx.navigateToStyle === "function" ? ctx.navigateToStyle : undefined,
+          });
+          return;
+        }
+      }
+      // 换界面无需等待无关面板；普通保存仍更新账号与同步状态。
+      if (credentials.supported) await Promise.resolve().then(() => credentials.load()).catch(() => false);
+      if (cookiecloud.supported) await Promise.resolve().then(() => cookiecloud.load()).catch(() => false);
       render();
     } catch (error) {
       toast(`保存失败：${error.message}`, "err");
@@ -1228,6 +1251,7 @@ export function createConfigView(ctx, { showAccountPanels = true, collapsedByDef
     });
     if (!ok) return;
 
+    const previousStyle = values[STYLE_KEY];
     const restore = withBusy(button, true, "恢复中…");
     try {
       const result = await ctx.api.post("config/reset", {});
@@ -1235,15 +1259,34 @@ export function createConfigView(ctx, { showAccountPanels = true, collapsedByDef
       secretStatus = result.secret_status || {};
       draft = {};
       pendingSecretClears.clear();
-      if (credentials.supported) await credentials.load();
-      if (cookiecloud.supported) await cookiecloud.load();
-      if (result.errors && result.errors.length) {
+      const failed = Boolean(result.errors && result.errors.length);
+      if (failed) {
         toast(`恢复默认时有操作未完成：${result.errors.join("；")}`, "err");
       } else if (result.runtime_ok === false) {
         toast("默认配置已写入，但运行时更新未完成，请重试", "err");
       } else {
         toast(`已恢复默认（改动 ${result.changed ? result.changed.length : 0} 项）`, "ok");
       }
+      // 恢复默认同样可能把界面形态换掉（默认值是经典界面），规则与保存一致。
+      if (!failed && result.runtime_ok !== false) {
+        const plan = planStyleSwitch({
+          savedKeys: [STYLE_KEY],
+          previousStyle,
+          nextStyle: values[STYLE_KEY],
+          search: globalThis.location?.search || "",
+          href: globalThis.location?.href || "",
+          hash: globalThis.location?.hash || "",
+        });
+        if (plan.navigate) {
+          toast("界面已切换，正在载入…", "");
+          applyStyleSwitch(plan, {
+            navigate: typeof ctx.navigateToStyle === "function" ? ctx.navigateToStyle : undefined,
+          });
+          return;
+        }
+      }
+      if (credentials.supported) await Promise.resolve().then(() => credentials.load()).catch(() => false);
+      if (cookiecloud.supported) await Promise.resolve().then(() => cookiecloud.load()).catch(() => false);
       render();
     } catch (error) {
       toast(`恢复失败：${error.message}`, "err");

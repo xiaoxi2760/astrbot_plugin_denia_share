@@ -141,6 +141,31 @@ class WebUIThemeManager:
             row["installed"] = self._mount_is_valid(manifest)
             return row
 
+    def card_assets_path(self, theme_id: str = "denia") -> Path | None:
+        """Return a managed theme's persistent card assets directory.
+
+        Only the package copy under ``data_dir/webui_themes`` is considered, so
+        upgrading or removing the replaceable page mount cannot break existing
+        cards. Returns ``None`` when the theme or asset directory is absent.
+        """
+        if not isinstance(theme_id, str) or not _SAFE_ID.fullmatch(theme_id):
+            return None
+        with self._lock:
+            directory = self._store_root / theme_id
+            if not directory.exists():
+                return None
+            try:
+                self._load_authoritative(directory)
+                assets = directory / WEBUI_DIR / "assets" / "cards" / "denia"
+                if not assets.exists():
+                    return None
+                self._assert_directory_tree(assets, directory)
+                if assets.is_symlink() or not assets.is_dir():
+                    return None
+                return assets
+            except (OSError, WebUIThemeError):
+                return None
+
     def install_archive(
         self, payload: bytes, expected_sha256: str = ""
     ) -> dict[str, Any]:

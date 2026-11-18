@@ -15,7 +15,7 @@
       "description": "WebUI and share cards follow the saved style. Classic is bundled; custom WebUIs are installed separately. Card layout and light/dark theme stay independent.",
       "WEBUI_STYLE": {
         "description": "WebUI style",
-        "hint": "Install Bubble Workshop under Settings → Custom WebUI, then select it here, save and refresh. Cards follow this saved style; card layout and light/dark theme stay independent. If the custom page is unavailable, only the page falls back to classic; the saved selection stays unchanged.",
+        "hint": "Install Bubble Workshop under Settings → Custom WebUI, then select it here and save. Cards follow this saved style; card layout and light/dark theme stay independent. If the custom page is unavailable, only the page falls back to classic; the saved selection stays unchanged.",
         "labels": [
           "Classic interface",
           "Denia’s Bubble Workshop"

@@ -164,7 +164,7 @@ CONFIG_META: tuple[dict[str, Any], ...] = (
         "labels": ["经典界面", "达妮娅的泡泡工坊"],
         "hint": (
             "默认只提供经典界面。泡泡工坊需先在经典界面的「配置 → 自设 WebUI」中"
-            "单独安装，再选择并保存；刷新页面生效。卡片风格跟随此选项，布局和卡片明暗独立设置。"
+            "单独安装，再选择并保存；插件页面会自动切换。卡片风格跟随此选项，布局和卡片明暗独立设置。"
             "未安装或加载失败时仅管理页面回退经典界面，不改已保存的选择"
         ),
     },
@@ -1436,10 +1436,17 @@ def migrate_card_layout(config: Any) -> bool:
 class ParserConfig:
     """解析器配置 - 由 main.py 初始化"""
 
-    def __init__(self, astrbot_config: Any, cache_dir: Path, config_dir: Path):
+    def __init__(
+        self,
+        astrbot_config: Any,
+        cache_dir: Path,
+        config_dir: Path,
+        theme_manager: Any = None,
+    ):
         self._cfg = astrbot_config
         self.cache_dir = cache_dir
         self.config_dir = config_dir
+        self.theme_manager = theme_manager
 
     def _cfg_get(self, key: str, default: Any = None) -> Any:
         """优先读分组配置，回退到扁平旧配置。"""
@@ -2165,6 +2172,19 @@ class ParserConfig:
         value = str(self._cfg_get("RENDER_GRADIENT_BOTTOM", "") or "").strip()
         return value if _HEX_COLOR_RE.match(value) else ""
 
+    def _card_assets_dir(self) -> Path | None:
+        """已安装自设主题的持久卡片素材目录；未选 denia 或未安装时为 None。"""
+        if self.WEBUI_STYLE != "denia":
+            return None
+        resolver = getattr(self.theme_manager, "card_assets_path", None)
+        if not callable(resolver):
+            return None
+        try:
+            path = resolver("denia")
+        except Exception:
+            return None
+        return Path(path) if path is not None else None
+
     def renderer_options(self) -> dict[str, Any]:
         """返回构造 ShareCardRenderer 的关键字参数（配置的唯一装配点）。
 
@@ -2187,6 +2207,7 @@ class ParserConfig:
             "show_ai_summary": self.RENDER_SHOW_AI_SUMMARY,
             "gradient_top": self.RENDER_GRADIENT_TOP or None,
             "gradient_bottom": self.RENDER_GRADIENT_BOTTOM or None,
+            "card_assets_dir": self._card_assets_dir(),
         }
 
     # ---------------- 媒体发送 ---------------- #
@@ -2264,9 +2285,14 @@ class ParserConfig:
         return str(self._cfg_get("BLACKLIST_GROUP", "") or "")
 
 
-def init_config(astrbot_config: Any, cache_dir: Path, config_dir: Path) -> ParserConfig:
+def init_config(
+    astrbot_config: Any,
+    cache_dir: Path,
+    config_dir: Path,
+    theme_manager: Any = None,
+) -> ParserConfig:
     global _config
-    _config = ParserConfig(astrbot_config, cache_dir, config_dir)
+    _config = ParserConfig(astrbot_config, cache_dir, config_dir, theme_manager)
     return _config
 
 
