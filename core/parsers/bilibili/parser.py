@@ -17,7 +17,7 @@ from bilibili_api.login_v2 import QrCodeLogin, QrCodeLoginEvents
 from msgspec import convert
 
 from ...base_parser import BaseParser, PlatformEnum, ParseException, IgnoreException, DownloadException, handle
-from ...exception import MediaProcessException
+from ...exception import DownloadTotalTimeout, MediaProcessException
 from ...download import validate_cached_media
 from .access import (
     STATUS_BLOCKED,
@@ -301,8 +301,8 @@ class BilibiliParser(BaseParser):
                             v_try, file_name=output_path.name, ext_headers=self.headers,
                             slots=self.downloader._media_slots,
                         )
-                except (IgnoreException, MediaProcessException):
-                    # 这两类错误换备用地址都不会变好，直接打断、不进下一轮重试：
+                except (IgnoreException, MediaProcessException, DownloadTotalTimeout):
+                    # 这些错误无需换备用地址，直接打断、不进下一轮重试：
                     #  - IgnoreException：「体积超限 / 分片超限」是策略跳过，逐个重试只是把
                     #    同一个大文件重下若干遍，最后还报「已尝试所有CDN」（缺料审计会误判）；
                     #  - MediaProcessException：本机缺 ffmpeg 之类的环境问题 —— 备用 CDN 不会
