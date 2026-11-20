@@ -25,6 +25,14 @@ class DownloadException(ParseException):
         super().__init__(message or "媒体下载失败")
 
 
+class DownloadTotalTimeout(DownloadException):
+    """单项媒体的总时限耗尽，终止本次下载及其所有重试。"""
+
+    def __init__(self):
+        super().__init__("媒体下载超时")
+        self.logged = False
+
+
 class IgnoreException(ParseException):
     """可忽略异常"""
 

@@ -45,23 +45,48 @@ from .media_verify import (
     sniff_image_ext,
 )
 from .constants import COMMON_HEADER, DOWNLOAD_TIMEOUT
-from .exception import IgnoreException, DownloadException, MediaSizeExceeded
+from .exception import IgnoreException, DownloadException, DownloadTotalTimeout, MediaSizeExceeded
+from .budget import check_download_deadline, download_deadline, get_download_deadline, run_download
 
 # 导入即修一次 NO_PROXY：httpx 0.28 解析不了 ``[::1]`` 这种方括号写法，
 # 而下载器也走 trust_env。详见 core/http_env.py。
 from . import http_env  # noqa: F401  (import for side effect)
 
 
-async def _finish_disk_io(operation):
-    """Drain executor-backed disk operations before cancellation cleanup."""
+async def _finish_io(operation):
+    """等待 I/O 收尾完成，再传播期间收到的取消。"""
     task = asyncio.ensure_future(operation)
+    cancelled = False
     try:
-        return await asyncio.shield(task)
-    except asyncio.CancelledError:
-        try:
-            await task
-        finally:
-            raise
+        while not task.done():
+            try:
+                await asyncio.shield(task)
+            except asyncio.CancelledError:
+                cancelled = True
+        return task.result()
+    finally:
+        if cancelled:
+            # 收尾任务的异常不能覆盖调用方的取消。
+            raise asyncio.CancelledError
+
+
+class _CloseProtectedStream(httpx.AsyncByteStream):
+    """允许取消读取，等 HTTPX 完成连接和池内请求的回收再传播取消。"""
+
+    def __init__(self, stream: httpx.AsyncByteStream):
+        self._stream = stream
+
+    def __aiter__(self):
+        return self._stream.__aiter__()
+
+    async def aclose(self) -> None:
+        await _finish_io(self._stream.aclose())
+
+
+async def _protect_httpx_close(response: httpx.Response) -> None:
+    # 安装在读取响应之前，也覆盖 HTTPX 内部读取的重定向响应。
+    # HTTPX 先标记 is_closed 再关闭流，关闭被取消时再次 aclose 已无效。
+    response.stream = _CloseProtectedStream(response.stream)
 
 
 async def _open_part_file(path):
@@ -69,12 +94,14 @@ async def _open_part_file(path):
     try:
         return await asyncio.shield(opening)
     except asyncio.CancelledError:
-        try:
-            handle = await opening
-        except Exception:
-            pass
-        else:
-            await _finish_disk_io(handle.close())
+        async def close_if_opened():
+            try:
+                handle = await opening
+            except Exception:
+                return
+            await handle.close()
+
+        await _finish_io(close_if_opened())
         raise
 
 
@@ -84,7 +111,7 @@ async def _part_file(path):
     try:
         yield handle
     finally:
-        await _finish_disk_io(handle.close())
+        await _finish_io(handle.close())
 
 # 图片并发上限。
 #
@@ -206,11 +233,24 @@ class _SharedEntry:
     .part 清理完整跑完，也保证 ``aclose`` 时连接池上不再挂着下载）。
     """
 
-    __slots__ = ("task", "refs")
+    __slots__ = ("task", "refs", "_timer")
 
-    def __init__(self, task: "asyncio.Task[Path]", refs: int):
-        self.task = task
-        self.refs = refs
+    def __init__(self, factory: Callable[[], Coroutine[Any, Any, Path]], deadline: float):
+        self.refs = 1
+        self._timer: asyncio.Timeout | None = None
+        self.task = asyncio.create_task(self._run(factory, deadline))
+
+    async def _run(self, factory: Callable[[], Coroutine[Any, Any, Path]], deadline: float) -> Path:
+        self._timer = asyncio.timeout_at(deadline)
+        return await run_download(factory, deadline, timer=self._timer)
+
+    def cancel(self) -> None:
+        if self.task.done() or self.task.cancelling():
+            return
+        # 主动取消先发生时撤掉计时器，防止它再次取消正在回收连接的任务。
+        if self._timer is not None:
+            self._timer.reschedule(None)
+        self.task.cancel()
 
 
 class StreamDownloader:
@@ -246,11 +286,13 @@ class StreamDownloader:
         # 兼容部分单测用 object.__new__ 造出的只有少量字段的实例。
         self._registry: dict[str, _SharedEntry] = {}
         self._registry_lock = asyncio.Lock()
+        self._draining_downloads: set[_SharedEntry] = set()
         self._closing = False
 
     def _new_client(self, proxy: str | None) -> httpx.AsyncClient:
         return httpx.AsyncClient(
             timeout=DOWNLOAD_TIMEOUT, verify=self.verify_ssl, proxy=proxy,
+            event_hooks={"response": [_protect_httpx_close]},
         )
 
     async def aclose(self):
@@ -263,12 +305,12 @@ class StreamDownloader:
         self._closing = True
         registry, lock = self._shared_state()
         async with lock:
-            tasks = [e.task for e in list(registry.values()) if not e.task.done()]
+            entries = set(registry.values()) | self._draining_downloads
             registry.clear()
-        for task in tasks:
-            task.cancel()
-        if tasks:
-            await asyncio.gather(*tasks, return_exceptions=True)
+        for entry in entries:
+            entry.cancel()
+        if entries:
+            await asyncio.gather(*(entry.task for entry in entries), return_exceptions=True)
         await self.client.aclose()
 
     async def reconfigure(
@@ -444,12 +486,12 @@ class StreamDownloader:
         part = self._part_path(file_path)
         # 不传就是媒体上限；图片由 download_img 显式传图片上限（见 _image_max_bytes）
         limit = self._max_bytes if max_bytes is None else max_bytes
-        async with self.client.stream("GET", url, headers=headers, follow_redirects=True) as response:
-            response.raise_for_status()
-            self._validate_content_length(response, limit)
-            received_bytes = 0
-            head = b""
-            try:
+        try:
+            async with self.client.stream("GET", url, headers=headers, follow_redirects=True) as response:
+                response.raise_for_status()
+                self._validate_content_length(response, limit)
+                received_bytes = 0
+                head = b""
                 async with _part_file(part) as file:
                     async for chunk in response.aiter_bytes(chunk_size):
                         if not chunk:
@@ -459,7 +501,7 @@ class StreamDownloader:
                             # 所以不需要多一次请求，也不影响流式写入
                             head = chunk[:HEAD_PROBE_BYTES]
                             self._reject_if_not_media(response, head)
-                        await _finish_disk_io(file.write(chunk))
+                        await _finish_io(file.write(chunk))
                         received_bytes += len(chunk)
                         # chunked 场景没有 Content-Length，边下边判大小
                         if limit > 0 and received_bytes > limit:
@@ -473,15 +515,12 @@ class StreamDownloader:
                             # except 在句柄关闭后统一删（对照 _validate_downloaded_bytes：
                             # 它在句柄外，删得掉）。
                             raise MediaSizeExceeded(received_bytes=received_bytes, limit_bytes=limit)
-            except BaseException:
-                # 句柄已关闭，这里删得掉。必须写 BaseException：CancelledError 不是
-                # Exception 的子类，只捕 Exception 时「任务被取消」留下的半截 .part
-                # 会一直躺在缓存目录里（TTL 兜底是事后补救，不如当场删）。
-                await safe_unlink(part)
-                raise
-            await self._validate_downloaded_bytes(part, str(response.url), received_bytes, limit)
-        os.replace(part, file_path)
-        return file_path
+                await self._validate_downloaded_bytes(part, str(response.url), received_bytes, limit)
+            check_download_deadline()
+            os.replace(part, file_path)
+            return file_path
+        finally:
+            await safe_unlink(part)
 
     async def _download_file_with_curl_cffi(
         self,
@@ -492,7 +531,7 @@ class StreamDownloader:
         max_bytes: int | None = None,
     ) -> Path:
         try:
-            import curl_cffi
+            from curl_cffi.requests import AsyncSession
         except ImportError:
             raise DownloadException("curl_cffi 未安装")
 
@@ -507,38 +546,56 @@ class StreamDownloader:
 
         part = self._part_path(file_path)
         limit = self._max_bytes if max_bytes is None else max_bytes
-        async with curl_cffi.AsyncSession(**session_kwargs) as session:
-            response: curl_cffi.Response = await session.get(
-                url, headers=headers, timeout=DOWNLOAD_TIMEOUT, stream=True,
-            )
-            response.raise_for_status()
-            self._validate_content_length(response, limit)
-            received_bytes = 0
-            head = b""
-            try:
+        try:
+            session = AsyncSession(**session_kwargs)
+            async with self._curl_response(session, url, headers) as response:
+                response.raise_for_status()
+                self._validate_content_length(response, limit)
+                received_bytes = 0
+                head = b""
                 async with _part_file(part) as file:
-                    async for chunk in response.aiter_content(chunk_size=8192):
+                    async for chunk in response.aiter_content():
                         if not chunk:
                             continue
                         if not head:
                             # 与 httpx 通道同形：只探开头一段
                             head = chunk[:HEAD_PROBE_BYTES]
                             self._reject_if_not_media(response, head)
-                        await _finish_disk_io(file.write(chunk))
+                        await _finish_io(file.write(chunk))
                         received_bytes += len(chunk)
                         if limit > 0 and received_bytes > limit:
                             # 同 httpx 通道：**不能在句柄内删**（Windows 上
                             # unlink 会 PermissionError(WinError 32) 并被 safe_unlink
                             # 吞掉），抛出去交给下面的 except 在句柄关闭后删。
                             raise MediaSizeExceeded(received_bytes=received_bytes, limit_bytes=limit)
-            except BaseException:
-                # 与 httpx 通道保持一致：必须捕 BaseException，
-                # CancelledError 不是 Exception 的子类，取消时的半截 .part 也要清。
-                await safe_unlink(part)
-                raise
-            await self._validate_downloaded_bytes(part, str(response.url), received_bytes, limit)
-        os.replace(part, file_path)
-        return file_path
+                await self._validate_downloaded_bytes(part, str(response.url), received_bytes, limit)
+            check_download_deadline()
+            os.replace(part, file_path)
+            return file_path
+        finally:
+            await safe_unlink(part)
+
+    @staticmethod
+    @asynccontextmanager
+    async def _curl_response(session, url, headers):
+        # curl 只接受数值或 (connect, read)，沿用下载器原有的两个值。
+        request = asyncio.create_task(session.get(
+            url, headers=headers, timeout=(DOWNLOAD_TIMEOUT.connect, DOWNLOAD_TIMEOUT.read), stream=True,
+        ))
+
+        async def close():
+            # 先关闭独占 session，未收到响应时也能中止 libcurl 的传输。
+            # 随后回收请求和流任务；Response.aclose 只等待，不能代替停止传输。
+            await session.close()
+            (response,) = await asyncio.gather(request, return_exceptions=True)
+            stream = getattr(response, "astream_task", None)
+            if stream is not None:
+                await asyncio.gather(stream, return_exceptions=True)
+
+        try:
+            yield await asyncio.shield(request)
+        finally:
+            await _finish_io(close())
 
     def _media_limit(self) -> int | None:
         """当前媒体上限；未指定用户上限时仍保留硬上限。"""
@@ -583,6 +640,8 @@ class StreamDownloader:
         lock = getattr(self, "_registry_lock", None)
         if lock is None:
             lock = self._registry_lock = asyncio.Lock()
+        if not hasattr(self, "_draining_downloads"):
+            self._draining_downloads = set()
         return registry, lock
 
     @staticmethod
@@ -677,9 +736,9 @@ class StreamDownloader:
             if getattr(self, "_closing", False):
                 raise RuntimeError("下载器已关闭")
             entry = registry.get(key)
-            if entry is not None and not entry.task.done():
+            joining = entry is not None and not entry.task.done()
+            if joining:
                 entry.refs += 1
-                task = entry.task
                 logger.debug(
                     f"[denia_share] 命中进行中下载（共用）| {kind} {self._key_digest(key)}"
                 )
@@ -690,37 +749,37 @@ class StreamDownloader:
                     cached = precheck()
                     if cached is not None:
                         return cached
-                task = asyncio.create_task(factory())
-                registry[key] = _SharedEntry(task=task, refs=1)
+                entry = registry[key] = _SharedEntry(factory, get_download_deadline())
                 logger.debug(
                     f"[denia_share] 成为共享下载执行者 | {kind} {self._key_digest(key)}"
                 )
         try:
-            return await asyncio.shield(task)
+            if joining and download_deadline.get() is None:
+                return await run_download(lambda: asyncio.shield(entry.task), get_download_deadline())
+            return await asyncio.shield(entry.task)
         finally:
-            await self._release_shared(key, task)
+            await _finish_io(self._release_shared(key, entry))
 
-    async def _release_shared(self, key: str, task: "asyncio.Task[Path]") -> None:
+    async def _release_shared(self, key: str, entry: _SharedEntry) -> None:
         """参与者退出：扣引用；最后一个退出者取消并 await 底层下载。"""
         registry, lock = self._shared_state()
-        cancel_task = False
         async with lock:
-            entry = registry.get(key)
-            if entry is None or entry.task is not task:
+            if registry.get(key) is not entry:
                 # aclose 已清空注册表，或该任务已被换掉：不再处理
                 return
             entry.refs -= 1
-            if entry.refs <= 0:
-                registry.pop(key, None)
-                cancel_task = not task.done()
-        if cancel_task:
-            task.cancel()
-            try:
-                # 等 .part 清理与异常路径完整跑完再返回；取消语义由调用方传播，
-                # 这里一律吞掉（包括重新抛出的 CancelledError）。
-                await task
-            except BaseException:
-                pass
+            if entry.refs > 0:
+                return
+            registry.pop(key, None)
+            if entry.task.done():
+                return
+            # 不再接受共享，但关闭下载器时仍需等它回收连接。
+            self._draining_downloads.add(entry)
+        try:
+            entry.cancel()
+            await asyncio.gather(entry.task, return_exceptions=True)
+        finally:
+            self._draining_downloads.discard(entry)
 
     async def _download_file(
         self,
@@ -776,18 +835,20 @@ class StreamDownloader:
         async with (slots or self._image_slots):
             if file_path.exists():
                 return self._cached_within_limit(file_path, limit)
+            check_download_deadline()
             try:
                 return await self._download_file_with_httpx(
                     url, file_path=file_path, headers=headers,
                     max_bytes=limit, chunk_size=chunk_size,
                 )
             except httpx.HTTPError as primary_error:
+                check_download_deadline()
                 from .config import get_config
                 try:
                     return await self._download_file_with_curl_cffi(
                         url, file_path=file_path, headers=headers, max_bytes=limit,
                     )
-                except IgnoreException:
+                except (IgnoreException, DownloadTotalTimeout):
                     # 「体积超限 / 分片超限」这类**策略跳过**不是下载失败。
                     # 包装成 DownloadException 会让缺料审计把它当成真失败 ——
                     # 审计正是靠异常类型区分「按策略跳过」与「真失败」的，
@@ -870,6 +931,7 @@ class StreamDownloader:
                 slices: list[str] = []
                 for _ in range(MAX_M3U8_PLAYLIST_DEPTH):
                     seen_playlists.add(playlist_url)
+                    check_download_deadline()
                     response = await self.client.get(playlist_url, headers=headers)
                     response.raise_for_status()
                     init, segments, variants = parse_m3u8_playlist(
@@ -903,6 +965,7 @@ class StreamDownloader:
 
                 async def _write_stream(target, url: str) -> int:
                     """把一个 URL 的字节流写进 target，返回累计字节数。"""
+                    check_download_deadline()
                     written = 0
                     async with self.client.stream("GET", url, headers=headers) as resp:
                         resp.raise_for_status()
@@ -912,7 +975,7 @@ class StreamDownloader:
                             candidate = received_bytes + written + len(chunk)
                             if limit and candidate > limit:
                                 raise MediaSizeExceeded(received_bytes=candidate, limit_bytes=limit)
-                            await _finish_disk_io(target.write(chunk))
+                            await _finish_io(target.write(chunk))
                             written += len(chunk)
                     return written
 
@@ -943,7 +1006,7 @@ class StreamDownloader:
                     # 静默留在缓存目录里（自检的 m3u8 取消用例就是这样间歇性失败）。
                     # 用 finally 而不是放在 except 里：正常结束与异常路径都要关。
                     try:
-                        await _finish_disk_io(f.close())
+                        await _finish_io(f.close())
                     except Exception:  # noqa: BLE001 —— 关闭失败不该盖住原始异常
                         logger.warning(f"关闭 m3u8 临时文件失败: {part}", exc_info=True)
 
@@ -981,8 +1044,10 @@ class StreamDownloader:
             #    （-c copy -movflags +faststart），没装 ffmpeg 就用裸拼接兜底。
             remuxed = part.with_suffix(".remux.mp4")
             try:
+                check_download_deadline()
                 ready = remuxed if await remux_to_mp4(part, remuxed) else part
                 self._cached_within_limit(ready, limit)
+                check_download_deadline()
                 os.replace(ready, video_path)
             finally:
                 # Also covers remux cancellation and failed final replacement.
@@ -1247,11 +1312,14 @@ class StreamDownloader:
                 v_path, a_path = await asyncio.gather(*downloads)
             except BaseException:
                 for task in downloads:
-                    task.cancel()
-                await asyncio.gather(*downloads, return_exceptions=True)
+                    if not task.done() and not task.cancelling():
+                        task.cancel()
+                await _finish_io(asyncio.gather(*downloads, return_exceptions=True))
                 raise
+            check_download_deadline()
             await merge_av(v_path=v_path, a_path=a_path, output_path=merge_tmp)
             self._cached_within_limit(merge_tmp, limit)
+            check_download_deadline()
             os.replace(merge_tmp, output_path)
         except BaseException:
             # merge 失败/取消时 merge_av 已经清掉半成品，这里再兜底一次

@@ -15,7 +15,7 @@ from collections.abc import Iterator, Awaitable
 
 from .task import PathTask
 from .constants import PlatformEnum, platform_meta
-from .exception import IgnoreException, MediaSizeExceeded
+from .exception import DownloadTotalTimeout, IgnoreException, MediaSizeExceeded
 
 
 @dataclass(repr=False, slots=True)
@@ -342,6 +342,7 @@ class ParseResult:
         )
 
         missing: dict[str, int] = {}
+        timed_out: dict[str, int] = {}
         size_messages: list[str] = []
         for (kind, task), result in zip(tasks, results):
             if isinstance(result, MediaSizeExceeded):
@@ -358,6 +359,8 @@ class ParseResult:
             # get() 失败时不会缓存 _path，所以 resolved 为 None 就等于「没落盘」
             if task.resolved is None:
                 missing[kind] = missing.get(kind, 0) + 1
+                if isinstance(result, DownloadTotalTimeout):
+                    timed_out[kind] = timed_out.get(kind, 0) + 1
 
         # 体积超限的提示：写在缺料汇总**之前**，这样「为什么少了这个视频」紧挨着
         # 上下文（缺料汇总只统计真失败，两者几乎不会同时出现，但顺序固定下来
@@ -367,11 +370,15 @@ class ParseResult:
             self.extra[self._SIZE_WARNING_KEY] = list(size_messages)
 
         if missing:
-            parts = [
-                f"{count} {self._MEDIA_UNITS.get(kind, '个')}{kind}"
-                for kind, count in missing.items()
-            ]
-            message = f"⚠️ {'、'.join(parts)}下载失败，未包含在本次内容中"
+            parts = []
+            for kind, count in missing.items():
+                unit = self._MEDIA_UNITS.get(kind, '个')
+                timeouts = timed_out.get(kind, 0)
+                if timeouts:
+                    parts.append(f"{timeouts} {unit}{kind}下载超时")
+                if count > timeouts:
+                    parts.append(f"{count - timeouts} {unit}{kind}下载失败")
+            message = f"⚠️ {'、'.join(parts)}，未包含在本次内容中"
             warnings.append(message)
             # 记下原文，供下一次调用撤回（幂等的关键）
             self.extra[self._AUDIT_WARNING_KEY] = message

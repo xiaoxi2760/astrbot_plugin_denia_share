@@ -41,7 +41,7 @@ from ..access import (
     video_dedup_identity,
 )
 from ....data import Platform, platform_of
-from ....exception import MediaProcessException
+from ....exception import DownloadTotalTimeout, MediaProcessException
 from ....download import validate_cached_media
 from ....media_utils import ffmpeg_available
 from ....task import PathTask
@@ -447,7 +447,7 @@ class FallbackBilibiliParser(BaseParser):
                     v_try, file_name=output_path.name, ext_headers=self.headers,
                     slots=self.downloader._media_slots,
                 )
-            except (IgnoreException, MediaProcessException):
+            except (IgnoreException, MediaProcessException, DownloadTotalTimeout):
                 # 策略跳过 / 本机环境问题：换地址也不会变好，直接打断
                 raise
             except Exception as error:
@@ -525,7 +525,7 @@ class FallbackBilibiliParser(BaseParser):
                     ext_headers=self.headers,
                     slots=self.downloader._media_slots,
                 )
-            except (IgnoreException, MediaProcessException):
+            except (IgnoreException, MediaProcessException, DownloadTotalTimeout):
                 raise
             except Exception as error:
                 last_error = error

@@ -1048,6 +1048,16 @@
         "max": 8,
         "unit": "个"
       },
+      "DOWNLOAD_MEDIA_TIMEOUT_SECONDS": {
+        "description": "媒体下载总时限",
+        "type": "int",
+        "default": 180,
+        "invisible": true,
+        "hint": "图片、封面、头像、视频和音频共用此时限。从单项媒体开始获取时计时，包含取流、等待下载槽、下载、重试和必要合并。新启动的任务使用保存后的值。",
+        "min": 10,
+        "max": 1800,
+        "unit": "秒"
+      },
       "DOWNLOAD_RETRY_ATTEMPTS": {
         "description": "下载重试次数",
         "type": "int",

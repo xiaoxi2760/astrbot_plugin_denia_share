@@ -12,9 +12,11 @@ import shutil
 import time
 from pathlib import Path
 from urllib.parse import urljoin, urlparse
+from uuid import uuid4
 
 from astrbot.api import logger
 
+from .budget import check_download_deadline
 from .exception import MediaProcessException
 
 # 防解压炸弹：PIL 的默认上限约 89M 像素，且只在超过**两倍**时才抛错，
@@ -26,7 +28,7 @@ try:
 
     _PILImage.MAX_IMAGE_PIXELS = 64 * 1024 * 1024
 except Exception:  # PIL 缺失时本模块的其他功能仍要可用
-    pass
+    _PILImage = None
 
 
 def fmt_duration(duration: float) -> str:
@@ -432,12 +434,26 @@ async def encode_video_to_h264(video_path: Path) -> Path:
     return output_path
 
 
+def _cached_frame_decodes(path: Path) -> bool:
+    if _PILImage is None:
+        return False
+    try:
+        with _PILImage.open(path, formats=["JPEG"]) as frame:
+            # 旧版可能写完 JPEG 头后就被取消。仅能打开不代表像素数据完整。
+            frame.load()
+    except (OSError, _PILImage.DecompressionBombError):
+        return False
+    return True
+
+
 async def extract_video_first_frame(video_path: Path) -> Path:
     """从视频中提取第一帧"""
     first_frame_path = video_path.with_suffix(".jpg")
-    if first_frame_path.exists():
+    if first_frame_path.exists() and await asyncio.to_thread(_cached_frame_decodes, first_frame_path):
         return first_frame_path
 
+    # ffmpeg 根据后缀选择 JPEG 格式。每次抽帧单独写入，成功后才提交。
+    temporary_frame = first_frame_path.with_name(f"{first_frame_path.stem}.{uuid4().hex}.part.jpg")
     cmd = [
         "ffmpeg",
         "-y",
@@ -447,11 +463,16 @@ async def extract_video_first_frame(video_path: Path) -> Path:
         "00:00:01",
         "-vframes",
         "1",
-        str(first_frame_path),
+        str(temporary_frame),
     ]
 
-    await exec_ffmpeg_cmd(cmd)
-    return first_frame_path
+    try:
+        await exec_ffmpeg_cmd(cmd)
+        check_download_deadline()
+        os.replace(temporary_frame, first_frame_path)
+        return first_frame_path
+    finally:
+        await safe_unlink(temporary_frame)
 
 
 def fmt_size(file_path: Path) -> str:
