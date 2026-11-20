@@ -28,3 +28,4 @@ DEVELOPMENT.md
 
 # Installed optional WebUI mount (source lives in astrbot-webui-themes).
 /pages/denia/studio/
+/pages/denia/theme-*/

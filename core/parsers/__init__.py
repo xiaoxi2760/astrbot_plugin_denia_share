@@ -21,6 +21,7 @@ from .kuaishou.parser import KuaiShouParser
 from .weibo.parser import WeiBoParser
 from .xiaohongshu.parser import XiaoHongShuParser
 from .twitter import TwitterParser
+from .youtube import YouTubeParser
 from .nga import NGAParser
 from .acfun.parser import AcfunParser
 from .github import GitHubParser
@@ -78,6 +79,7 @@ __all__ = [
     "WeiBoParser",
     "XiaoHongShuParser",
     "TwitterParser",
+    "YouTubeParser",
     "NGAParser",
     "AcfunParser",
     "GitHubParser",

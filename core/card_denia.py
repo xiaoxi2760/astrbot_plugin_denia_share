@@ -51,7 +51,7 @@ __all__ = [
 ]
 
 #: 布局 / 装饰调整后递增，保证旧 PNG 缓存不会混入新设计。
-LAYOUT_VERSION = "denia-20261113-four-layouts-v4"
+LAYOUT_VERSION = "denia-20261119-painted-workshop-v5"
 
 BRAND_CN = "达妮娅的泡泡工坊"
 BRAND_EN = "DENIA’S BUBBLE WORKSHOP"
@@ -259,7 +259,7 @@ def _load_base(path_text: str, mtime_ns: int, file_size: int) -> Image.Image | N
             im.load()
             return im.convert("RGBA")
     except Exception:
-        logger.warning("达妮娅卡片统计图标读取失败: %s", path_text, exc_info=True)
+        logger.warning("达妮娅卡片素材读取失败: %s", path_text, exc_info=True)
         return None
 
 
@@ -1405,7 +1405,44 @@ def _soft_glow(
     canvas.alpha_composite(light)
 
 
-def _draw_background(canvas: Image.Image, plan: _Plan) -> None:
+def _paint_ornament(
+    canvas: Image.Image, asset_dir: Any, name: str, box: tuple[int, int, int, int],
+    *, opacity: float = 1.0,
+) -> bool:
+    source = _asset_source(name, asset_dir)
+    artwork = _load_base(*source) if source else None
+    if artwork is None:
+        return False
+    left, top, right, bottom = box
+    if right <= left or bottom <= top:
+        return False
+    piece = ImageOps.contain(artwork, (right - left, bottom - top), method=_LANCZOS)
+    if opacity != 1.0:
+        piece.putalpha(piece.getchannel("A").point(lambda a: round(a * opacity)))
+    canvas.alpha_composite(piece, (right - piece.width, top + (bottom - top - piece.height) // 2))
+    return True
+
+
+def _draw_header_ornament(canvas: Image.Image, plan: _Plan, renderer: Any) -> bool:
+    directory = getattr(renderer, "card_assets_dir", None)
+    if directory is None:
+        return False
+    name = "eclipse-halo.png" if plan.dark else "bubble-staff.png"
+    w, pad = plan.width, plan.pad
+    # Center the compact edition between the two wordmarks.
+    box = (round(w * .32), 2, round(w * .60), plan.brand_line_y - 3)
+    if plan.layout == "standard" and plan.title_y:
+        left = round(w * .61)
+        name_font = renderer._font(plan.name_size, bold=True)
+        meta_font = renderer._font(plan.meta_size)
+        name_right = max((plan.name_x + renderer._text_width(s, name_font) for s in plan.name_lines), default=0)
+        meta_right = max((plan.meta_x + renderer._text_width(s, meta_font) for s in plan.meta_lines), default=0)
+        if max(name_right, meta_right) + pad // 2 < left:
+            box = (left, plan.brand_line_y + 3, w - pad, plan.title_y - 3)
+    return _paint_ornament(canvas, directory, name, box, opacity=.92)
+
+
+def _draw_background(canvas: Image.Image, plan: _Plan, renderer: Any = None) -> None:
     width, height, u = plan.width, plan.card_h, plan.u
     if plan.dark:
         _soft_glow(canvas, (width * 0.56, -height * 0.11, width * 1.16, height * 0.42), "#6A4A97", 158, 110 * u)
@@ -1432,6 +1469,9 @@ def _draw_background(canvas: Image.Image, plan: _Plan) -> None:
     else:
         _soft_glow(canvas, (-width * 0.26, -height * 0.10, width * 0.58, height * 0.34), "#FFF6E8", 205, 138 * u)
         _soft_glow(canvas, (width * 0.58, height * 0.60, width * 1.14, height * 1.02), "#F9CBB7", 128, 125 * u)
+    if _draw_header_ornament(canvas, plan, renderer):
+        return
+    if not plan.dark:
         # 透明泡泡：贴近页边和封面，不压住正文。
         bubbles = [
             (width - 96 * u, 156 * u, 132 * u, 0.92),
@@ -1880,33 +1920,53 @@ def _draw_ending(canvas: Image.Image, renderer: Any, plan: _Plan) -> None:
         phrase_size -= 1
         phrase_font = renderer._font(phrase_size)
 
+    page_bottom = plan.page_box[3] if plan.page_box else plan.content_end
+    ornament_box = (width - pad - art_w, page_bottom + _space(6, u, 3),
+                    width - pad, plan.footer_y - _space(8, u, 4))
+    directory = getattr(renderer, "card_assets_dir", None)
+    if not plan.dark:
+        # A few floating bubbles bridge the space beside the cake, clear of the closing words.
+        left = max(ornament_box[0] - art_w // 2,
+                   pad + round(renderer._text_width(phrase, phrase_font)) + _space(12, u, 6))
+        _paint_ornament(canvas, directory, "ribbon-bubbles.png",
+                        (left, ornament_box[1], ornament_box[0] + art_w // 2, ornament_box[3]), opacity=.78)
+    painted = _paint_ornament(canvas, directory, "orbit-cube.png" if plan.dark else "orange-cake.png",
+                              ornament_box)
     if plan.dark:
         # 底部星座线与右侧虚质方块 / 带环星球属于同一套结构。
+        rail_y = y + renderer._line_height(phrase_font) + _space(14, u, 7)
         points = [
-            (pad, y + _space(10, u, 4)),
-            (pad + _space(190, u, 90), y + _space(10, u, 4)),
-            (pad + _space(214, u, 102), y - _space(7, u, 3)),
-            (pad + _space(360, u, 160), y - _space(7, u, 3)),
-            (pad + _space(384, u, 170), y + _space(10, u, 4)),
+            (pad, rail_y),
+            (pad + _space(80, u, 38), rail_y + _space(6, u, 3)),
+            (pad + _space(155, u, 74), rail_y - _space(4, u, 2)),
+            (pad + _space(238, u, 114), rail_y + _space(9, u, 4)),
+            (pad + _space(384, u, 170), rail_y),
         ]
         d.line(points, fill=(*_hex_to_rgb(plan.palette.border), 190), width=max(1, round(1.2 * u)), joint="curve")
+        branch = (pad + _space(188, u, 90), rail_y + _space(17, u, 8))
+        d.line([points[2], branch, points[3]], fill=plan.palette.border)
+        points.append(branch)
         for px, py in points:
             d.ellipse(
                 (px - 2.2 * u, py - 2.2 * u, px + 2.2 * u, py + 2.2 * u),
                 fill=_hex_to_rgb(plan.palette.accent),
             )
+        renderer._draw_text(d, (pad, y), phrase, phrase_size, plan.accent)
+        if painted:
+            return
         cx = width - pad - _space(100, u, 50)
         cy = y + _space(34, u, 16)
         art.orbit(canvas, cx, cy, _space(100, u, 48), _space(25, u, 12), -18,
                   (*_hex_to_rgb("#85709F"), 220), max(1.0, 1.4 * u))
         art.cube(canvas, cx, y + _space(18, u, 8), _space(50, u, 24))
-        renderer._draw_text(d, (pad, y), phrase, phrase_size, plan.accent)
     else:
         d.line(
             (pad, y - _space(12, u, 5), pad + _space(600, u, 260), y - _space(12, u, 5)),
             fill=(*_hex_to_rgb("#E5C2CA"), 230), width=1,
         )
         renderer._draw_text(d, (pad, y), phrase, phrase_size, plan.accent)
+        if painted:
+            return
         cake_z = max(0.46, 1.16 * u)
         cake_x = width - pad - 145 * cake_z - _space(8, u, 4)
         art.cake(canvas, cake_x, y - _space(60, u, 28), cake_z)
@@ -1961,7 +2021,7 @@ def _render_denia_sync(
         (plan.width, plan.card_h), plan.theme.gradient_top, plan.theme.gradient_bottom
     ).convert("RGBA")
 
-    _draw_background(canvas, plan)
+    _draw_background(canvas, plan, renderer)
     _draw_page(canvas, plan)
     _draw_cover_mount(canvas, plan)
     _draw_cover(canvas, renderer, plan)

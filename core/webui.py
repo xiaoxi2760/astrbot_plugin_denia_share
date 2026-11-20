@@ -388,31 +388,6 @@ class WebUIApi:
         installed = await asyncio.to_thread(self._webui_theme_manager().list_installed)
         return _json_response({"installed": installed, "builtin": ["classic"]})
 
-    async def _refresh_after_theme_install(self) -> bool:
-        """主题装好后热刷新常驻渲染器；刷新失败绝不能回滚成功的安装。"""
-        refresh = getattr(self.plugin, "apply_runtime_config", None)
-        refreshed = False
-        if callable(refresh):
-            try:
-                outcome = refresh()
-                if hasattr(outcome, "__await__"):
-                    await outcome
-                refreshed = True
-            except Exception:
-                logger.warning(
-                    "[denia_share] 主题已安装，但热刷新渲染器失败", exc_info=True
-                )
-        cache = getattr(self.plugin, "_render_cache", None)
-        clear = getattr(cache, "clear", None)
-        if callable(clear):
-            try:
-                clear()
-            except Exception:
-                logger.warning(
-                    "[denia_share] 主题已安装，但清理卡片缓存失败", exc_info=True
-                )
-        return refreshed
-
     async def install_webui_theme(self):
         from .webui_themes import MAX_ARCHIVE_BYTES, WebUIThemeError
         body = await get_json_body()
@@ -444,8 +419,18 @@ class WebUIApi:
         except Exception as error:
             logger.warning("[denia_share] 自设 WebUI 安装失败: %s", type(error).__name__)
             return _error("安装未完成，原有界面保留；请检查安装包或网络", 500)
-        await self._refresh_after_theme_install()
-        return _json_response({"theme": theme, "message": "安装成功，请选择对应 WebUI 样式并保存"})
+        active = get_config().WEBUI_STYLE == theme["id"]
+        message = "安装成功，请选择对应 WebUI 样式并保存"
+        refresh_failed = False
+        if active:
+            try:
+                self.plugin.refresh_card_renderer()
+                message = "当前主题已更新，重新打开页面即可载入新版界面"
+            except Exception:
+                logger.warning("[denia_share] 主题已安装，但卡片刷新失败", exc_info=True)
+                message = "主题已安装，卡片刷新失败，请重载插件后再试"
+                refresh_failed = True
+        return _json_response({"theme": theme, "message": message, "refresh_failed": refresh_failed})
 
     async def overview(self):
         plugin = self.plugin
@@ -531,6 +516,7 @@ class WebUIApi:
         pconfig = get_config()
         payload = config_meta_payload()
         payload["values"], payload["secret_status"] = self._public_config(pconfig)
+        payload["card_style"] = getattr(getattr(self.plugin, "_renderer", None), "style_name", None)
         payload["platforms"] = [
             {"name": name, "label": PLATFORM_DISPLAY_NAMES.get(name, name)}
             for name in platform_order()

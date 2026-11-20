@@ -77,6 +77,7 @@ KNOWN_PLATFORMS: frozenset[str] = frozenset(
         "weibo",
         "xiaohongshu",
         "twitter",
+        "youtube",
         "nga",
         "acfun",
         "github",

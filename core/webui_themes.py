@@ -31,6 +31,7 @@ import httpx
 
 
 PLUGIN_ID = "astrbot_plugin_denia_share"
+CARD_STYLES = frozenset({"classic", "denia", "lily"})
 MANIFEST_FILE = "theme.json"
 WEBUI_DIR = "webui"
 THEME_STORE_NAME = "webui_themes"
@@ -156,7 +157,7 @@ class WebUIThemeManager:
                 return None
             try:
                 self._load_authoritative(directory)
-                assets = directory / WEBUI_DIR / "assets" / "cards" / "denia"
+                assets = directory / WEBUI_DIR / "assets" / "cards" / theme_id
                 if not assets.exists():
                     return None
                 self._assert_directory_tree(assets, directory)
@@ -194,6 +195,23 @@ class WebUIThemeManager:
             self._mkdir_owned_stage(store_stage, self._store_root)
             try:
                 manifest = self._extract_validated_archive(payload, store_stage)
+                store_target = self._store_root / manifest["id"]
+                if store_target.exists():
+                    previous, _marker = self._load_authoritative(store_target)
+                    if previous["mount"] not in {manifest["mount"], f"theme-{manifest['id']}"}:
+                        raise WebUIThemeError("已安装主题的挂载目录不能在升级时变更")
+                    manifest["mount"] = previous["mount"]
+                else:
+                    # Preserve the original Bubble Workshop path and its legacy
+                    # adoption rules, unless another old theme already owns it.
+                    studio = self._mount_parent / "studio"
+                    marker = studio / MOUNT_MARKER
+                    keep_studio = manifest["id"] == "denia" and manifest["mount"] == "studio" and (
+                        not (marker.exists() or marker.is_symlink())
+                        or self._mount_is_managed_by(studio, "denia", "studio")
+                    )
+                    if not keep_studio:
+                        manifest["mount"] = f"theme-{manifest['id']}"
                 self._write_json(
                     store_stage / STORE_MARKER,
                     self._marker(manifest, archive_hash, transaction_id),
@@ -586,7 +604,7 @@ class WebUIThemeManager:
 
     @staticmethod
     def _validate_manifest(value: Any) -> dict[str, Any]:
-        if not isinstance(value, dict) or set(value) != _MANIFEST_KEYS:
+        if not isinstance(value, dict) or set(value) - {"card_style"} != _MANIFEST_KEYS:
             raise WebUIThemeError("theme.json 字段不符合主题包规范")
         if type(value.get("schema_version")) is not int or value["schema_version"] != 1:
             raise WebUIThemeError("主题包清单版本不兼容")
@@ -597,12 +615,15 @@ class WebUIThemeManager:
 
         theme_id = value.get("id")
         mount = value.get("mount")
-        if not isinstance(theme_id, str) or not _SAFE_ID.fullmatch(theme_id):
+        if not isinstance(theme_id, str) or not _SAFE_ID.fullmatch(theme_id) or theme_id == "classic":
             raise WebUIThemeError("主题包 ID 无效")
         if not isinstance(mount, str) or not _SAFE_ID.fullmatch(mount):
             raise WebUIThemeError("主题包挂载目录无效")
         if mount.casefold() in _RESERVED_MOUNTS or mount in {".", ".."}:
             raise WebUIThemeError("主题包不能占用保留挂载目录")
+        card_style = value.get("card_style", theme_id if theme_id in CARD_STYLES else "classic")
+        if not isinstance(card_style, str) or card_style not in CARD_STYLES:
+            raise WebUIThemeError("主题包卡片皮肤无效")
 
         name = value.get("name")
         if (
@@ -627,6 +648,7 @@ class WebUIThemeManager:
             "mount": mount,
             "template": template,
             "entry": entry,
+            "card_style": card_style,
         }
 
     @staticmethod
@@ -904,12 +926,14 @@ class WebUIThemeManager:
         manifest = self._validate_manifest(manifest_object)
         if directory.name != manifest["id"]:
             raise WebUIThemeError("主题持久副本 ID 与目录不一致")
+        mount = marker.get("mount")
         if (
             marker.get("theme_id") != manifest["id"]
-            or marker.get("mount") != manifest["mount"]
+            or mount not in (manifest["mount"], f"theme-{manifest['id']}")
             or marker.get("version") != manifest["version"]
         ):
             raise WebUIThemeError("主题持久副本管理标记不匹配")
+        manifest["mount"] = mount
         self._validate_webui_files(directory / WEBUI_DIR, manifest)
         return manifest, marker
 
@@ -922,6 +946,7 @@ class WebUIThemeManager:
             "mount": manifest["mount"],
             "template": manifest["template"],
             "entry": manifest["entry"],
+            "card_style": manifest["card_style"],
         }
 
     @staticmethod

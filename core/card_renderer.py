@@ -534,7 +534,7 @@ class ShareCardRenderer:
         self.width = max(520, min(1080, int(width)))
         self.theme_name = theme if theme in _THEMES else "dark"
         self.layout_name = layout if layout in LAYOUT_NAMES else "standard"
-        self.style_name = style if style in {"classic", "denia"} else "classic"
+        self.style_name = style if style in {"classic", "denia", "lily"} else "classic"
         self.font_path = font_path
         self.cover_full_size = cover_full_size
         # 自定义外观（None/空 = 跟随默认行为）
@@ -882,6 +882,15 @@ class ShareCardRenderer:
             return f"unreadable:{root}"
 
     def _output_path(self, cache_key: str | None, result: ParseResult) -> Path:
+        version = _CARD_STYLE_VERSION
+        if self.style_name == "denia":
+            from .card_denia import LAYOUT_VERSION
+
+            version = LAYOUT_VERSION
+        elif self.style_name == "lily":
+            from .card_lily import LAYOUT_VERSION
+
+            version = LAYOUT_VERSION
         warnings_str = "|".join(result.extra.get("limit_warnings") or [])
         payload = (
             cache_key
@@ -889,7 +898,7 @@ class ShareCardRenderer:
         )
         digest = hashlib.md5(
             (
-                f"{_CARD_STYLE_VERSION}|{self.style_name}|{self.theme_name}|{self.width}|{self.layout_name}|{self.cover_full_size}"
+                f"{version}|{self.style_name}|{self.theme_name}|{self.width}|{self.layout_name}|{self.cover_full_size}"
                 f"|{self.accent_color or ''}|{self.watermark}|{self.desc_max_lines}"
                 f"|{int(self.show_avatar)}|{int(self.show_play_button)}"
                 f"|{self.gradient_top or ''}|{self.gradient_bottom or ''}"
@@ -1041,6 +1050,10 @@ class ShareCardRenderer:
             from .card_denia import render_denia_card
 
             return render_denia_card(self, result, images, out_path)
+        if self.style_name == "lily":
+            from .card_lily import render_lily_card
+
+            return render_lily_card(self, result, images, out_path)
         if self.layout_name == "magazine":
             return self._render_magazine(result, images, out_path)
         if self.layout_name == "immersive":

@@ -42,6 +42,7 @@ class PlatformEnum(str, Enum):
     PIXIV = "pixiv"
     STEAM = "steam"
     TWITTER = "twitter"
+    YOUTUBE = "youtube"
     WEIBO = "weibo"
     XIAOHONGSHU = "xiaohongshu"
     XIAOHEIHE = "xiaoheihe"
@@ -88,6 +89,7 @@ PLATFORMS: Final[dict[str, PlatformMeta]] = {
     "weibo": PlatformMeta("weibo", "微博"),
     "xiaohongshu": PlatformMeta("xiaohongshu", "小红书"),
     "twitter": PlatformMeta("twitter", "Twitter / X", "小蓝鸟"),
+    "youtube": PlatformMeta("youtube", "YouTube"),
     "nga": PlatformMeta("nga", "NGA"),
     "acfun": PlatformMeta("acfun", "AcFun", "猴山"),
     "github": PlatformMeta("github", "GitHub"),

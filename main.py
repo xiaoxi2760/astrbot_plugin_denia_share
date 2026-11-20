@@ -66,8 +66,10 @@ from .core.parsers import (
     NeteaseMusicParser, QQMusicParser,
     BilibiliParser, DouyinParser, KuaiShouParser, WeiBoParser,
     XiaoHongShuParser, TwitterParser, NGAParser, AcfunParser,
-    GitHubParser, PixivParser, SteamParser, XiaoheiheParser,
+    GitHubParser, PixivParser, SteamParser, XiaoheiheParser, YouTubeParser,
 )
+from .core.parsers.youtube import YOUTUBE_LINK
+from .core.parsers.twitter import STATUS_PATTERN
 from .core.custom_parsers import (
     SUBDIR_NAME as CUSTOM_PARSERS_SUBDIR,
     CustomParserLoader,
@@ -88,7 +90,7 @@ DOUYIN_PATTERN = re.compile(r"(v\.douyin\.com|douyin\.com|iesdouyin\.com|m\.douy
 KUAISHOU_PATTERN = re.compile(r"(v\.kuaishou\.com|kuaishou\.com|chenzhongtech\.com)")
 WEIBO_PATTERN = re.compile(r"(weibo\.com|weibo\.cn|m\.weibo\.cn|video\.weibo\.com|mapp\.api\.weibo\.cn)")
 XHS_PATTERN = re.compile(r"(xhslink\.com|xhslink\.cn|xiaohongshu\.com)")
-TWITTER_PATTERN = re.compile(r"(?:^|[\s./@])x\.com(?:[/:\s]|$)|twitter\.com")
+TWITTER_PATTERN = re.compile(STATUS_PATTERN)
 NGA_PATTERN = re.compile(r"(nga\.178\.com|ngabbs\.com|bbs\.nga\.cn)")
 ACFUN_PATTERN = re.compile(r"acfun\.cn")
 GITHUB_PATTERN = re.compile(r"github\.com/[\w.\-]+/[\w.\-]+")
@@ -497,6 +499,8 @@ class DeniaSharePlugin(Star):
             )
         if "twitter" not in disabled:
             self.parsers["twitter"] = TwitterParser(self._downloader_for("twitter"))
+        if "youtube" not in disabled:
+            self.parsers["youtube"] = YouTubeParser(self._downloader_for("youtube"))
         if "nga" not in disabled:
             self.parsers["nga"] = NGAParser(self._downloader_for("nga"))
         if "acfun" not in disabled:
@@ -698,6 +702,12 @@ class DeniaSharePlugin(Star):
     async def twitter_handler(self, event: AstrMessageEvent, matched: re.Match | None = None):
         """Twitter / X 链接解析（图片 / 视频）"""
         async for r in self._dispatch(event, "twitter"):
+            yield r
+
+    @filter.regex(re.compile(YOUTUBE_LINK))
+    async def youtube_handler(self, event: AstrMessageEvent, matched: re.Match | None = None):
+        """YouTube 视频及 Shorts 分享解析与下载"""
+        async for r in self._dispatch(event, "youtube"):
             yield r
 
     @filter.regex(NGA_PATTERN)
@@ -1598,6 +1608,11 @@ class DeniaSharePlugin(Star):
 
     # ==================== 配置热生效 ====================
 
+    def refresh_card_renderer(self) -> None:
+        renderer = ShareCardRenderer(self.cache_dir, **get_config().renderer_options())
+        self._renderer = renderer
+        self._render_cache.clear()
+
     async def apply_runtime_config(self) -> dict[str, Any]:
         """按最新配置重建运行时组件。
 
@@ -1699,9 +1714,7 @@ class DeniaSharePlugin(Star):
                 # 与 bili_cookie.json 一起清掉，否则「看起来清了、实际还在用」。
                 await self.bili_logout()
 
-        self._renderer = ShareCardRenderer(self.cache_dir, **pconfig.renderer_options())
-        # 渲染参数进了产物文件名，配置变了就得让旧缓存失效
-        self._render_cache.clear()
+        self.refresh_card_renderer()
 
         # 解析结果缓存**同样要清**：B站编码 / 清晰度 / 代理 / 限长这些配置项
         # 都影响解析结果。不清的话，用户在配置页把编码从 AV1 换成 H.264，
@@ -1823,7 +1836,7 @@ class DeniaSharePlugin(Star):
         return ParseResult(
             platform=platform_of(PlatformEnum.BILIBILI),
             author=Author(
-                name="达妮娅 · 样例",
+                name="希望解析器 · 样例",
                 avatar=PathTask(_static(avatar_path)),
                 description="这是一张用于预览的样例卡片",
             ),

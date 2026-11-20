@@ -1,46 +1,24 @@
 /* 希望解析器 · 管理页面启动器
  *
  * 这个文件只有一个职责：在宿主 bridge 就绪后读取 WEBUI_STYLE，按需加载
- * 内置「经典界面」或单独安装的「达妮娅的泡泡工坊」。它不导入 app.js / studio.js 的
- * 任何业务模块，也不写配置；界面模块本身仍保持原来的启动方式。
+ * 内置经典界面或已安装主题。主题的挂载目录、模板和入口取自安装清单。
  *
  * 失败策略：
  *   - ?ui=classic 是临时恢复入口：完全不读配置，也不改写已保存的设置；
  *   - 配置读取失败、值非法、新版模板/样式/模块加载失败 → 回退 classic/index.html；
  *   - 经典界面也失败时才显示致命提示。
  *
- * 注意：两处 import("./classic/app.js") / import("./studio/studio.js") 必须保持字面量。
- * 保留字面量路径以兼容宿主的资源处理；当前宿主使用路径 token，
- * 嵌套 CSS 与 ES 模块通过相对 URL 自然继承同一页面的资源权限。
+ * 主题资源相对 bootstrap.js 的宿主地址解析，保留路径里的资源授权。
  */
 
-const STYLE_CLASSIC = "classic";
-const STYLE_DENIA = "denia";
+import { normalizeStyleValue, STYLE_CLASSIC, styleOverrideFromSearch } from "./classic/style-switch.js";
+export { normalizeStyleValue, styleOverrideFromSearch };
 const WEBUI_STYLE_KEY = "WEBUI_STYLE";
 const API_PREFIX = "/api/plug/astrbot_plugin_denia_share";
 const BRIDGE_READY_TIMEOUT_MS = 8000;
 const CONFIG_TIMEOUT_MS = 8000;
 const TEMPLATE_TIMEOUT_MS = 10000;
 const STYLE_TIMEOUT_MS = 10000;
-
-/** 两种界面各自的模板与入口模块；启动器也以这份表为准。 */
-export const STYLE_TEMPLATES = Object.freeze({
-  classic: Object.freeze({ template: "./classic/index.html", module: "./classic/app.js", label: "经典界面" }),
-  denia: Object.freeze({ template: "./studio/index.html", module: "./studio/studio.js", label: "达妮娅的泡泡工坊" }),
-});
-
-/** 把配置值收敛成启动器认识的两个字面量；非法值返回 null。 */
-export function normalizeStyleValue(raw) {
-  if (typeof raw !== "string") return null;
-  const value = raw.trim().toLowerCase();
-  return value === STYLE_CLASSIC || value === STYLE_DENIA ? value : null;
-}
-
-/** ?ui=classic 临时覆盖；只认 classic，其他 ui 值一律忽略。 */
-export function styleOverrideFromSearch(search = "") {
-  const value = new URLSearchParams(search).get("ui");
-  return value && value.trim().toLowerCase() === STYLE_CLASSIC ? STYLE_CLASSIC : null;
-}
 
 /** 生成/保留当前页面所有查询参数与 hash 的经典恢复地址。 */
 export function classicRecoveryUrl(href) {
@@ -70,11 +48,15 @@ export function templateUrl(relative, moduleHref = import.meta.url) {
 
 /** 开发态配置接口；与 app.js 的既有约定完全一致（含 ?api= 覆盖）。 */
 export function configEndpoint(search = "") {
+  return pluginEndpoint("config", search);
+}
+
+function pluginEndpoint(endpoint, search) {
   const override = new URLSearchParams(search).get("api");
   const base = override
     ? `${override.replace(/\/+$/, "")}${API_PREFIX}`
     : API_PREFIX;
-  return `${base}/config`;
+  return `${base}/${endpoint}`;
 }
 
 /** 宿主可能用新名字 AstrBotPluginView；经典 app.js 只认旧名字，这里做一次兼容别名。 */
@@ -105,9 +87,17 @@ export async function waitForBridge({
 /**
  * 读取配置值。bridge 存在时走宿主 apiGet；没有 bridge 时走现有
  * /api/plug/astrbot_plugin_denia_share/config，并支持 ?api= 覆盖。
- * 两条路径共用 extractConfigValues 的错误判据。
+ * 两条路径共用接口的错误判据。
  */
-export async function readConfigValues({
+export async function readConfigValues(options = {}) {
+  const body = await readPluginJson("config", options);
+  if (!body?.values || typeof body.values !== "object") {
+    throw new Error("配置接口没有返回 values");
+  }
+  return body.values;
+}
+
+async function readPluginJson(endpoint, {
   bridge = null,
   fetchImpl = globalThis.fetch,
   search = "",
@@ -116,19 +106,19 @@ export async function readConfigValues({
 } = {}) {
   if (bridge && typeof bridge.apiGet === "function") {
     const payload = await withTimeout(
-      Promise.resolve(bridge.apiGet("config")),
+      Promise.resolve(bridge.apiGet(endpoint)),
       timeoutMs,
-      "读取界面设置",
+      "读取界面信息",
     );
-    return extractConfigValues(payload);
+    return unwrapPayload(payload);
   }
 
   if (typeof fetchImpl !== "function") {
     throw new Error("当前环境没有可用的配置接口");
   }
-  const endpoint = configEndpoint(search);
+  const address = pluginEndpoint(endpoint, search);
   const base = origin || globalThis.location?.origin || "http://localhost";
-  const url = /^https?:\/\//i.test(endpoint) ? endpoint : new URL(endpoint, base).toString();
+  const url = /^https?:\/\//i.test(address) ? address : new URL(address, base).toString();
   const response = await withTimeout(
     Promise.resolve(
       fetchImpl(url, {
@@ -153,11 +143,11 @@ export async function readConfigValues({
   if (!response.ok) {
     throw new Error(message || `读取界面设置失败（HTTP ${response.status}）`);
   }
-  return extractConfigValues(body);
+  return unwrapPayload(body);
 }
 
 /** 统一解包：bridge 可能已拆信封，开发态可能是裸对象；错误依据只有 status/HTTP。 */
-function extractConfigValues(payload) {
+function unwrapPayload(payload) {
   let body = payload;
   if (body && body.status === "error") {
     throw new Error(body.message || "读取界面设置失败");
@@ -165,10 +155,7 @@ function extractConfigValues(payload) {
   if (body && body.status === "ok" && body.data && typeof body.data === "object") {
     body = body.data;
   }
-  if (!body || typeof body !== "object" || !body.values || typeof body.values !== "object") {
-    throw new Error("配置接口没有返回 values");
-  }
-  return body.values;
+  return body;
 }
 
 export async function resolveStyleChoice({
@@ -200,9 +187,20 @@ export async function resolveStyleChoice({
   return { style, source: "config" };
 }
 
-/** 默认模块加载器：两个 import 必须是字面量，宿主才能重写并带上 asset_token。 */
-export function defaultImport(style) {
-  return style === STYLE_DENIA ? import("./studio/studio.js") : import("./classic/app.js");
+export function defaultImport(style, entryUrl) {
+  return style === STYLE_CLASSIC ? import("./classic/app.js") : import(entryUrl);
+}
+
+function themeAssetPath(mount, name, suffix) {
+  if (typeof mount !== "string" || !/^[a-z][a-z0-9_-]{0,37}$/.test(mount)
+      || typeof name !== "string" || !name.toLowerCase().endsWith(suffix)) {
+    throw new Error("主题入口无效");
+  }
+  const parts = name.split("/");
+  if (parts.some((part) => !part || part === "." || part === ".." || /[\\:]/.test(part))) {
+    throw new Error("主题入口无效");
+  }
+  return `./${mount}/${parts.map(encodeURIComponent).join("/")}`;
 }
 
 export async function boot({
@@ -256,12 +254,19 @@ export async function boot({
 
   const choice = await resolveStyleChoice({ bridge, fetchImpl, search, origin });
 
-  if (choice.style === STYLE_DENIA) {
+  if (choice.style !== STYLE_CLASSIC) {
+    let label = choice.style;
     try {
-      await showDenia({ documentObject, fetchImpl, importModule, moduleHref, href });
+      const payload = await readPluginJson("webui/themes", { bridge, fetchImpl, search, origin });
+      const installed = Array.isArray(payload?.installed) ? payload.installed : [];
+      const theme = installed.find((item) => item?.id === choice.style && item.installed === true);
+      if (!theme) throw new Error("尚未安装主题，或主题的页面文件不可用");
+      label = theme.name || label;
+      await showTheme({ theme, documentObject, fetchImpl, importModule, moduleHref, href });
       return;
     } catch (error) {
-      console.error("[denia] 达妮娅的泡泡工坊加载失败，回退经典界面", error);
+      removeStyles(documentObject, choice.style);
+      console.error("[denia] 自设界面加载失败，回退经典界面", error);
       await showClassic({
         documentObject,
         fetchImpl,
@@ -271,8 +276,8 @@ export async function boot({
         initialTheme,
         notice: {
           kind: "warn",
-          title: "达妮娅的泡泡工坊未能载入，已切回经典界面",
-          text: `${describeError(error)}。泡泡工坊需单独安装，可在经典界面「配置 → 自设 WebUI」导入主题包；已保存的界面选择没有被改写。`,
+          title: `${label}未能载入，已切回经典界面`,
+          text: `${describeError(error)}。可在「配置 → 自设 WebUI」导入主题包。`,
         },
       });
       return;
@@ -290,7 +295,7 @@ export async function boot({
     notice = {
       kind: "warn",
       title: "界面设置值无效，已使用经典界面",
-      text: `WEBUI_STYLE 只能是 classic 或 denia，当前值：${safeValue(choice.value)}。可在原生配置的「界面设置」中重新选择。`,
+      text: `当前 WebUI 样式无效：${safeValue(choice.value)}。可在「界面设置」中重新选择。`,
     };
   }
 
@@ -314,17 +319,18 @@ async function showClassic({
   initialTheme = "",
   notice,
 }) {
-  removeStyles(documentObject, STYLE_DENIA);
-  const parsed = await fetchTemplate(STYLE_TEMPLATES.classic.template, { fetchImpl, moduleHref });
+  const parsed = await fetchTemplate("./classic/index.html", { fetchImpl, moduleHref });
   await loadStyles(parsed, documentObject, STYLE_CLASSIC);
   installTemplate(parsed, documentObject, initialTheme);
   await importModule(STYLE_CLASSIC);
   if (notice) showNotice(documentObject, notice);
 }
 
-async function showDenia({ documentObject, fetchImpl, importModule, moduleHref, href }) {
-  const parsed = await fetchTemplate(STYLE_TEMPLATES.denia.template, { fetchImpl, moduleHref });
-  await loadStyles(parsed, documentObject, STYLE_DENIA);
+async function showTheme({ theme, documentObject, fetchImpl, importModule, moduleHref, href }) {
+  const template = themeAssetPath(theme.mount, theme.template, ".html");
+  const entryUrl = templateUrl(themeAssetPath(theme.mount, theme.entry, ".js"), moduleHref);
+  const parsed = await fetchTemplate(template, { fetchImpl, moduleHref });
+  await loadStyles(parsed, documentObject, theme.id);
   installTemplate(parsed, documentObject);
 
   // 不依赖 studio.js 成功执行：它若在绑定事件前崩溃，这个链接仍然可用。
@@ -332,7 +338,7 @@ async function showDenia({ documentObject, fetchImpl, importModule, moduleHref, 
     anchor.setAttribute("href", classicRecoveryUrl(href));
   });
 
-  await importModule(STYLE_DENIA);
+  await importModule(theme.id, entryUrl.href);
 }
 
 export async function fetchTemplate(relative, { fetchImpl, moduleHref }) {

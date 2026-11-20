@@ -5,9 +5,12 @@
     {
       "file": "NotoEmoji.ttf",
       "source": "https://raw.githubusercontent.com/google/fonts/main/ofl/notoemoji/NotoEmoji%5Bwght%5D.ttf",
-      "bytes": 1982596,
-      "sha256": "de6c18832938afc99caf132b39d6a30a19bac7f2e812e28db2535b4608d27551",
-      "license": "SIL Open Font License 1.1"
+      "bytes": 886620,
+      "sha256": "7d28cd09bc266f32e4b42aa79f9ad81a30ff70c61a6958c7f68e85165ad7ea43",
+      "license": "SIL Open Font License 1.1",
+      "upstream_bytes": 1982596,
+      "upstream_sha256": "de6c18832938afc99caf132b39d6a30a19bac7f2e812e28db2535b4608d27551",
+      "derivation": "fontTools 4.68.0 instantiateVariableFont(font, {\"wght\": 400}, overlap=0), recalcTimestamp=False"
     },
     {
       "file": "../../LICENSES/NotoEmoji-OFL.txt",

@@ -42,6 +42,7 @@ const LEGACY_LAYOUTS = { denia: "standard" };
 const WEBUI_STYLE_LABELS = {
   classic: "经典皮肤",
   denia: "达妮娅泡泡工坊皮肤",
+  lily: "莉莉的梦境花园皮肤",
 };
 
 /** 卡片风格跟随已启用的 WebUI（已保存值），与卡片明暗互相独立。 */
@@ -69,6 +70,7 @@ const OVERRIDE_MAP = {
 export function createAppearanceView(ctx) {
   let container = null;
   let configValues = {};
+  let cardStyle = "classic";
   let cardDraft = {};
   let previewUrl = "";
   let previewMeta = null;
@@ -83,6 +85,7 @@ export function createAppearanceView(ctx) {
     ctx.setHead("加载中…");
     const payload = await ctx.api.get("config");
     configValues = payload.values || {};
+    cardStyle = payload.card_style || configValues.WEBUI_STYLE;
     cardDraft = {};
     ctx.setHead("");
   }
@@ -463,7 +466,7 @@ export function createAppearanceView(ctx) {
         layoutSeg,
         h("p", {
           class: "field-hint",
-          text: `卡片风格跟随当前启用的 WebUI：${cardStyleLabel(configValues)}。` +
+          text: `卡片风格跟随当前启用的 WebUI：${cardStyleLabel({ WEBUI_STYLE: cardStyle })}。` +
             "四种布局都按这套风格出图；卡片明暗由「卡片主题」单独决定，与页面明暗无关。",
         }),
       ]),

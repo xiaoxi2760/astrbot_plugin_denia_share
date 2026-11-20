@@ -382,10 +382,18 @@ def cream_panel(
         return
     d = ImageDraw.Draw(canvas)
     if shadow_offset:
-        d.rounded_rectangle(
-            (x0, y0 + shadow_offset, x1, y1 + shadow_offset),
-            radius=max(0, radius), fill=_a(shadow, 255),
+        # Diffuse contact shadow under the stock, including the scalloped hem.
+        blur = max(1, shadow_offset * .72)
+        margin = math.ceil(blur * 3)
+        hem = max(0, round((x1 - x0) / 68)) if scallop else 0
+        shade = Image.new("L", (x1 - x0 + 2 * margin + 1, y1 - y0 + 2 * margin + hem + 1))
+        ImageDraw.Draw(shade).rounded_rectangle(
+            (margin, margin, shade.width - margin - 1, shade.height - margin - 1),
+            radius=radius, fill=145,
         )
+        layer = Image.new("RGBA", shade.size, shadow)
+        layer.putalpha(shade.filter(ImageFilter.GaussianBlur(blur)))
+        canvas.alpha_composite(layer, (x0 - margin, y0 + shadow_offset - margin))
     d.rounded_rectangle(
         (x0, y0, x1, y1), radius=max(0, radius),
         fill=_a(paper, 255), outline=_a(outline, 255), width=1,
@@ -412,14 +420,21 @@ def dark_panel(
         return
     cut = max(6, int(cut))
     d = ImageDraw.Draw(canvas)
-    d.polygon(
-        [(x0, y0 + cut), (x0 + cut, y0), (x1, y0), (x1, y1 - cut), (x1 - cut, y1), (x0, y1)],
-        fill=_a(fill, 255),
+    # Transmitted violet light is strongest at the upper right glass edge.
+    width, height = x1 - x0 + 1, y1 - y0 + 1
+    mask = Image.new("L", (width, height))
+    ImageDraw.Draw(mask).polygon(
+        [(0, cut), (cut, 0), (width-1, 0), (width-1, height-1-cut),
+         (width-1-cut, height-1), (0, height-1)], fill=255,
     )
+    tint = tuple(round(base * .78 + rim * .22) for base, rim in zip(fill, light))
+    glass = Image.new("RGB", (2, 2))
+    glass.putdata([fill, tint, fill, fill])
+    canvas.paste(glass.resize(mask.size, Image.Resampling.BILINEAR), (x0, y0), mask)
     d.line([(x0, y0 + cut), (x0 + cut, y0), (x1, y0)], fill=_a(light, 255), width=2)
     d.line([(x1, y0 + cut), (x1, y1 - cut), (x1 - cut, y1), (x0 + 22, y1)], fill=_a(dark, 230), width=2)
-    d.line([(x0 + cut, y0 + 5), (x1 - 6, y0 + 5)], fill=(255, 255, 255, 22), width=1)
-    d.line([(x0 + 18, y1 - 1), (x1 - cut, y1 - 1)], fill=(255, 255, 255, 16), width=1)
+    d.line([(x0 + cut, y0 + 5), (x1 - 6, y0 + 5)], fill=tint, width=1)
+    d.line([(x0 + 18, y1 - 1), (x1 - cut, y1 - 1)], fill=dark, width=1)
 
 
 def bevel_mask(size: tuple[int, int], cut: int, *, corner: str = "top-right") -> Image.Image:

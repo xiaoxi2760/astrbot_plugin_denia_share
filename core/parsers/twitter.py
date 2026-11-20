@@ -4,52 +4,8 @@
 
 """Twitter / X 解析器。
 
-两级取数，逐级兜底：
-
-1. **vxtwitter**（rika 原实现）—— 第三方镜像，零成本、字段最全。
-2. **fxtwitter** —— 同族镜像，vxtwitter 抽风时顶上。
-
-两级都失败时抛 ``ParseException``（可读原因），不再有第三级。
-
-关于第三级 Guest GraphQL 的删除（2026-09-26）
--------------------------------------------
-本文件曾使用「官方接口 + guest token」作为最后一级兜底。实测该级**恒定失败**，
-已于 2026-09-26 整体移除，原因有三：
-
-1. 它依赖的公开 ``BEARER`` 已被 Twitter 吊销 —— ``guest/activate.json`` 恒返回
-   ``401 {"errors":[{"message":"Invalid or expired token","code":89}]}``。
-   也就是说这一级**不是兜底，而是一个必然失败的请求**。
-2. ``aiohttp.ClientResponseError`` 不是 ``ParseException`` 子类。作为最后一环，
-   它的异常会穿透 ``_parse`` 的两个 ``except Exception``（那两处只兜前两级），
-   一路到 ``webui.parse_url`` 的 ``except Exception`` —— 用户看到的是 **HTTP 500**，
-   而不是「解析失败」的 422 与可读原因。
-3. 上游莉卡 v3.0.1 也只保留 vxtwitter 一条路。少一级「必然失败」反而更可靠。
-
-关于 vxtwitter 必须用独立 UA（2026-09-26）
-------------------------------------------
-``api.vxtwitter.com`` 挂在 Cloudflare 后面，其规则是：**伪装成真实浏览器的 UA 会被
-下发 JS 挑战页（403 "Just a moment..."），而老实声明自己是程序的 UA 直接放行。**
-
-2026-09-26 在服务器容器内实测（直连与走代理结果一致）：
-
-===========================  ==========
-UA                           状态码
-===========================  ==========
-（不带头）                    200
-``python-httpx/0.27.0``      200
-``curl/8.0``                 200
-``Wget/1.21.4``              200
-仓库全局 ``COMMON_HEADER``    403  ← 本插件原先踩的就是这个
-真实 Chrome 120 / Edge 120    403
-Safari 17 (macOS)            403
-空字符串                      403
-===========================  ==========
-
-所以这里给 vxtwitter **单独**一个非浏览器 UA，而**不改全局 ``COMMON_HEADER``** ——
-后者是抖音 / 小红书 / 微博等全平台共用的，改它会外溢到无关平台。
-
-对照：``api.fxtwitter.com`` 没有这条规则，任何非空 UA 都能过（只有**空** UA 会返回
-``401`` 并明确提示 "You must identify yourself with a User-Agent header"）。
+优先从 vxtwitter / fxtwitter 获取图文和视频。两个镜像均不可用时，
+从 X 官方 oEmbed 的公开引用中提取作者和正文，供文本卡片使用。
 """
 
 import re
@@ -68,9 +24,17 @@ _TWIMG_HOST_PREFIX = {
     "video.twimg.com": "video",
 }
 
-# vxtwitter 专用 UA。刻意**带 httpx 自报名、不带浏览器签名** —— 见模块 docstring：
-# api.vxtwitter.com 的 Cloudflare 只挑战「像浏览器」的 UA，对程序化 UA 直接放行。
+# Retain the non-browser user agent used by the vx mirror.
 VX_UA = "python-httpx/0.27.0"
+
+# Accept the web share sheet's anonymous /i/web/status route as well as
+# user permalinks. Query parameters and /photo/1 are outside the identity.
+STATUS_PATTERN = (
+    r"(?ai)(?<![a-z0-9./@_-])(?:https?://)?(?:(?:www|mobile|m)\.)?"
+    r"(?:x\.com|twitter\.com|vxtwitter\.com|fxtwitter\.com|fixupx\.com)/"
+    r"(?:(?P<user>[a-z0-9_]{1,20})/status(?:es)?|i/web/status|status)"
+    r"/(?P<tweet_id>[0-9]{1,22})(?![a-z0-9_])"
+)
 
 
 def to_api_url(url: str, host: str) -> str:
@@ -111,11 +75,15 @@ def proxy_media_url(url: str | None) -> str | None:
 class TwitterParser(BaseParser):
     platform: ClassVar[Platform] = platform_of(PlatformEnum.TWITTER)
 
-    @handle("x.com", r"x\.com/[0-9a-zA-Z_]{1,20}/status/(?P<tweet_id>[0-9]+)")
-    @handle("twitter.com", r"twitter\.com/[0-9a-zA-Z_]{1,20}/status/(?P<tweet_id>[0-9]+)")
+    @classmethod
+    def dedup_identity(cls, searched: re.Match[str]) -> str:
+        return searched.group("tweet_id")
+
+    @handle(".", STATUS_PATTERN)
     async def _parse(self, searched: re.Match[str]) -> ParseResult:
-        url = f"https://{searched.group(0)}"
         tweet_id = searched.group("tweet_id")
+        user = searched.group("user") or "i"
+        url = f"https://x.com/{user}/status/{tweet_id}"
         failures: list[str] = []
 
         # **注意 ``BaseException`` 里的 ``CancelledError`` 不在这里捕获**：
@@ -132,8 +100,11 @@ class TwitterParser(BaseParser):
             logger.debug(f"[twitter] fxtwitter 失败: {e}")
             failures.append(f"fxtwitter: {e}")
 
-        # 这里是最后一级，异常必须以 ParseException 形式抛出：再往上就只有
-        # webui.parse_url 的裸 except Exception，那会变成 HTTP 500。
+        try:
+            return await self.parse_by_oembed(url)
+        except Exception as e:
+            failures.append(f"X oEmbed: {e}")
+
         raise ParseException("Twitter 解析失败（" + "；".join(failures) + "）")
 
     # ------------------------------------------------------------------ #
@@ -149,6 +120,8 @@ class TwitterParser(BaseParser):
             response.raise_for_status()
             data = response.json()
 
+        if not isinstance(data, dict) or data.get("error"):
+            raise ParseException("vxtwitter 未返回公开推文")
         author = self.create_author(
             data.get("user_name") or "", proxy_media_url(data.get("user_profile_image_url"))
         )
@@ -160,6 +133,8 @@ class TwitterParser(BaseParser):
             timestamp=data.get("date_epoch"), url=url,
         )
         for media in data.get("media_extended") or []:
+            if not isinstance(media, dict) or not media.get("url"):
+                continue
             mtype = media.get("type")
             if mtype in ("video", "gif"):
                 duration = (media.get("duration_millis") or 0) / 1000 or None
@@ -174,6 +149,8 @@ class TwitterParser(BaseParser):
                 result.contents.append(
                     self.create_image(proxy_media_url(f"{media.get('url')}?name=orig"))
                 )
+        if not (result.contents or result.text or title):
+            raise ParseException("vxtwitter 未返回正文或媒体")
         return result
 
     # ------------------------------------------------------------------ #
@@ -181,7 +158,7 @@ class TwitterParser(BaseParser):
     # ------------------------------------------------------------------ #
 
     async def parse_by_fxapi(self, url: str, tweet_id: str) -> ParseResult:
-        api_url = to_api_url(url, "api.fxtwitter.com")
+        api_url = f"https://api.fxtwitter.com/status/{tweet_id}"
         # fxtwitter 要求非空 UA（空 UA → 401 并提示 "You must identify yourself
         # with a User-Agent header"）。全局 COMMON_HEADER 不带这条限制，直接用即可；
         # 这里显式兜住「headers 里没有 User-Agent」的极端情况。
@@ -233,6 +210,25 @@ class TwitterParser(BaseParser):
         if not result.contents and not result.text:
             raise ParseException("推文中没有可提取的内容")
         return result
+
+    async def parse_by_oembed(self, url: str) -> ParseResult:
+        from bs4 import BeautifulSoup
+
+        async with self.new_client(headers={"User-Agent": VX_UA}) as client:
+            response = await client.get("https://publish.twitter.com/oembed", params={
+                "url": url.replace("https://x.com/", "https://twitter.com/", 1),
+                "omit_script": "true",
+            })
+            response.raise_for_status()
+            payload = response.json()
+        paragraph = BeautifulSoup(payload.get("html") or "", "html.parser").select_one("blockquote p")
+        if paragraph is not None:
+            for br in paragraph.find_all("br"):
+                br.replace_with("\n")
+        if paragraph is None or not (text := paragraph.get_text().strip()):
+            raise ParseException("X oEmbed 未返回公开正文")
+        author = payload.get("author_name") or "X"
+        return self.result(author=self.create_author(author), title=f"{author} 的推文", text=text, url=url)
 
     @staticmethod
     def _parse_created_at(value: Any) -> int | None:

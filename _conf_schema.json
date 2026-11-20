@@ -8,14 +8,16 @@
         "type": "string",
         "default": "classic",
         "invisible": false,
-        "hint": "默认只提供经典界面。泡泡工坊需先在经典界面的「配置 → 自设 WebUI」中单独安装，再选择并保存。卡片风格跟随此选项，布局和卡片明暗独立设置。未安装或加载失败时仅管理页面回退经典界面，不改已保存的选择",
+        "hint": "在经典界面的「配置 → 自设 WebUI」安装泡泡工坊或莉莉的梦境花园，再选择并保存。卡片使用所选界面的皮肤，可单独设置布局和形态。",
         "options": [
           "classic",
-          "denia"
+          "denia",
+          "lily"
         ],
         "labels": [
           "经典界面",
-          "达妮娅的泡泡工坊"
+          "达妮娅的泡泡工坊",
+          "莉莉的梦境花园"
         ]
       }
     },
@@ -39,6 +41,7 @@
           "weibo",
           "xiaohongshu",
           "twitter",
+          "youtube",
           "nga",
           "acfun",
           "github",
@@ -55,6 +58,7 @@
           "微博",
           "小红书",
           "Twitter / X",
+          "YouTube",
           "NGA",
           "AcFun",
           "GitHub",
@@ -972,6 +976,13 @@
         "default": false,
         "invisible": true,
         "hint": "开启后「Twitter / X」的接口请求与媒体下载才走上面的代理地址；关闭时不使用插件代理，环境变量代理仍可能生效。代理地址留空时本开关无效"
+      },
+      "PROXY_YOUTUBE": {
+        "description": "YouTube",
+        "type": "bool",
+        "default": false,
+        "invisible": true,
+        "hint": "开启后 YouTube 预览、取流与媒体下载使用上面的代理地址；代理地址留空时本开关无效"
       },
       "PROXY_NGA": {
         "description": "NGA",

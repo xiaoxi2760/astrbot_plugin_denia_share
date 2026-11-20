@@ -69,7 +69,7 @@ export function createConfigView(ctx, { showAccountPanels = true, collapsedByDef
   let initializedGroups = false;
   /** 底部保存栏里几个需要跟着改动数走的节点，见 syncSaveBar。 */
   let saveBar = null;
-  const webuiThemes = createWebUIThemesPanel(ctx);
+  const webuiThemes = createWebUIThemesPanel(ctx, { onInstalled: render });
 
   async function load() {
     ctx.setHead("加载中…");
@@ -1012,6 +1012,13 @@ export function createConfigView(ctx, { showAccountPanels = true, collapsedByDef
     if (item.type === "select") {
       const options = item.options || [];
       const labels = item.labels || [];
+      const choices = new Map(options.map((option, index) => [option, labels[index] || option]));
+      if (item.key === STYLE_KEY) {
+        for (const theme of webuiThemes.installed) {
+          if (theme.installed) choices.set(theme.id, theme.name || theme.id);
+        }
+        if (value && !choices.has(value)) choices.set(value, value);
+      }
       return h(
         "select",
         {
@@ -1019,10 +1026,10 @@ export function createConfigView(ctx, { showAccountPanels = true, collapsedByDef
           style: { maxWidth: "320px" },
           onChange: (event) => onValueChanged(item.key, event.target.value),
         },
-        options.map((option, index) =>
+        Array.from(choices, ([option, label]) =>
           h("option", {
             value: option,
-            text: labels[index] || option,
+            text: label,
             selected: option === value ? true : null,
           }),
         ),

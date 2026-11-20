@@ -1172,6 +1172,7 @@ class StreamDownloader:
         *,
         output_path: Path,
         ext_headers: dict[str, str] | None = None,
+        track_limits: tuple[int, int] | None = None,
     ) -> Path:
         """下载并合并音视频（同一最终产物共用**完整**流水线，含合并）。
 
@@ -1185,12 +1186,18 @@ class StreamDownloader:
         limit = self._max_bytes
         base_headers = getattr(self, "headers", None) or {}
         headers = {**base_headers, **(ext_headers or {})}
-        key = self._task_key("avmerge", f"{v_url}\x1f{a_url}", headers, output_path, limit)
+        if track_limits is not None and (min(track_limits) <= 0 or sum(track_limits) > limit):
+            raise ValueError("Invalid audio/video byte budget")
+        key = self._task_key(
+            "avmerge", f"{v_url}\x1f{a_url}", headers, output_path, limit,
+            extra=str(track_limits) if track_limits is not None else "",
+        )
         return await self._run_shared(
             "avmerge",
             key,
             lambda: self._download_av_merge_impl(
                 v_url, a_url, output_path=output_path, headers=headers, limit=limit,
+                track_limits=track_limits,
             ),
             # 只有注册表里没有在飞合并时才允许 exists() 命中 —— 合并进行中
             # output_path 可能已存在（ffmpeg 写到一半），不能把半成品当结果。
@@ -1218,6 +1225,7 @@ class StreamDownloader:
         output_path: Path,
         headers: dict[str, str],
         limit: int | None,
+        track_limits: tuple[int, int] | None = None,
     ) -> Path:
         """音视频合并的实际执行链：只有共享执行者进入。
 
@@ -1230,14 +1238,15 @@ class StreamDownloader:
         v_name = self._merge_input_name(private_output, v_url, "video")
         a_name = self._merge_input_name(private_output, a_url, "audio")
         inputs = [self.cache_dir / v_name, self.cache_dir / a_name]
+        video_limit, audio_limit = track_limits or (limit, limit)
         downloads = [asyncio.create_task(operation) for operation in (
             self._download_file_impl(
                 v_url, file_path=self.cache_dir / v_name, headers=headers,
-                chunk_size=64 * 1024, slots=self._media_slots, limit=limit,
+                chunk_size=64 * 1024, slots=self._media_slots, limit=video_limit,
             ),
             self._download_file_impl(
                 a_url, file_path=self.cache_dir / a_name, headers=headers,
-                chunk_size=64 * 1024, slots=self._media_slots, limit=limit,
+                chunk_size=64 * 1024, slots=self._media_slots, limit=audio_limit,
             ),
         )]
         # ffmpeg infers the container from the final suffix.

@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any
 
 from .constants import PLATFORMS
+from .webui_themes import CARD_STYLES, WebUIThemeError
 
 _config = None
 
@@ -25,9 +26,8 @@ _HEX_COLOR_RE = re.compile(r"^#[0-9a-fA-F]{6}$")
 # 合并转发模式白名单：读侧只认这三个字面量，脏值一律回退 none（保持直发）
 AGGREGATION_MODES: frozenset[str] = frozenset({"none", "all", "conditional"})
 
-# 插件管理页样式白名单：读侧只认这两个字面量，脏值一律回退 classic。
-# 该值同时决定管理界面与分享卡片皮肤；卡片布局、明暗主题各自独立。
-WEBUI_STYLES: frozenset[str] = frozenset({"classic", "denia"})
+# 这些选项同时出现在 AstrBot 的静态配置页。自设界面由插件页面按安装情况补充。
+WEBUI_STYLES = CARD_STYLES
 
 
 def _aggregation_threshold(raw: Any, default: int) -> int:
@@ -160,12 +160,11 @@ CONFIG_META: tuple[dict[str, Any], ...] = (
         "label": "WebUI 样式",
         "type": "select",
         "default": "classic",
-        "options": ["classic", "denia"],
-        "labels": ["经典界面", "达妮娅的泡泡工坊"],
+        "options": ["classic", "denia", "lily"],
+        "labels": ["经典界面", "达妮娅的泡泡工坊", "莉莉的梦境花园"],
         "hint": (
-            "默认只提供经典界面。泡泡工坊需先在经典界面的「配置 → 自设 WebUI」中"
-            "单独安装，再选择并保存；插件页面会自动切换。卡片风格跟随此选项，布局和卡片明暗独立设置。"
-            "未安装或加载失败时仅管理页面回退经典界面，不改已保存的选择"
+            "在插件页面的「自设 WebUI」导入主题 ZIP，然后选择样式并保存，界面会自动切换。"
+            "卡片皮肤由所选主题指定，布局和明暗独立设置。"
         ),
     },
     {"key": "COOKIECLOUD_URL", "group": "CookieCloud", "label": "服务地址", "type": "string", "default": "", "hint": "填写你自建的 CookieCloud 地址，可包含子目录。"},
@@ -1607,6 +1606,11 @@ class ParserConfig:
                 errors.append(f"未知配置项：{key}")
                 continue
             value, error = coerce_value(item, raw)
+            if key == "WEBUI_STYLE" and error and isinstance(raw, str):
+                candidate = raw.strip()
+                theme = self._custom_webui_theme(candidate)
+                if theme and theme.get("installed"):
+                    value, error = candidate, None
             if error is not None:
                 errors.append(error)
                 continue
@@ -1687,14 +1691,20 @@ class ParserConfig:
 
     @property
     def WEBUI_STYLE(self) -> str:
-        """管理页面与卡片皮肤：``classic`` / ``denia``。
-
-        和 :attr:`AUDIO_SEND_MODE`、:attr:`AGGREGATION_MODE` 一样走读侧白名单：
-        原生面板、手改 JSON 或旧版本残留都可能给出脏值，透给启动器会让它加载
-        不存在的界面。无法识别的值一律回退 ``classic``，保证管理页始终能打开。
-        """
+        """保留已知样式和已登记的主题 ID，脏值回退至经典界面。"""
         value = str(self._cfg_get("WEBUI_STYLE", "classic") or "").strip().lower()
-        return value if value in WEBUI_STYLES else "classic"
+        if value in WEBUI_STYLES or self._custom_webui_theme(value):
+            return value
+        return "classic"
+
+    def _custom_webui_theme(self, style: str) -> dict[str, Any] | None:
+        status = getattr(self.theme_manager, "status", None)
+        if style == "classic" or not callable(status):
+            return None
+        try:
+            return status(style)
+        except (OSError, WebUIThemeError):
+            return None
 
     # ---------------- 平台 ---------------- #
 
@@ -2172,15 +2182,15 @@ class ParserConfig:
         value = str(self._cfg_get("RENDER_GRADIENT_BOTTOM", "") or "").strip()
         return value if _HEX_COLOR_RE.match(value) else ""
 
-    def _card_assets_dir(self) -> Path | None:
-        """已安装自设主题的持久卡片素材目录；未选 denia 或未安装时为 None。"""
-        if self.WEBUI_STYLE != "denia":
+    def _card_assets_dir(self, style: str) -> Path | None:
+        """已安装自设主题的持久卡片素材目录；未选自设样式或未安装时为 None。"""
+        if style == "classic":
             return None
         resolver = getattr(self.theme_manager, "card_assets_path", None)
         if not callable(resolver):
             return None
         try:
-            path = resolver("denia")
+            path = resolver(style)
         except Exception:
             return None
         return Path(path) if path is not None else None
@@ -2191,13 +2201,17 @@ class ParserConfig:
         main.py 的常驻渲染器与 webui.py 的临时预览渲染器都用它，
         新增外观项只需要在这里和 ``_build_renderer`` 的覆盖层各加一行。
         """
+        style = self.WEBUI_STYLE
+        theme = self._custom_webui_theme(style)
+        skin = theme.get("card_style") if theme else style
+        skin = skin if skin in CARD_STYLES else "classic"
         return {
             "enabled": self.RENDER_ENABLED,
             "width": self.RENDER_WIDTH,
             "theme": self.RENDER_THEME,
             "font_path": self.RENDER_FONT_PATH or None,
             "layout": self.RENDER_LAYOUT,
-            "style": self.WEBUI_STYLE,
+            "style": skin,
             "cover_full_size": self.RENDER_COVER_FULL_SIZE,
             "accent_color": self.RENDER_ACCENT_COLOR or None,
             "watermark": self.RENDER_WATERMARK,
@@ -2207,7 +2221,7 @@ class ParserConfig:
             "show_ai_summary": self.RENDER_SHOW_AI_SUMMARY,
             "gradient_top": self.RENDER_GRADIENT_TOP or None,
             "gradient_bottom": self.RENDER_GRADIENT_BOTTOM or None,
-            "card_assets_dir": self._card_assets_dir(),
+            "card_assets_dir": self._card_assets_dir(style) if skin != "classic" else None,
         }
 
     # ---------------- 媒体发送 ---------------- #

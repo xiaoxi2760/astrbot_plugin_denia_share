@@ -3,7 +3,7 @@ import { h, card, toast, withBusy } from "./ui.js";
 
 const MAX_ARCHIVE = 20 * 1024 * 1024;
 
-export function createWebUIThemesPanel(ctx) {
+export function createWebUIThemesPanel(ctx, { onInstalled } = {}) {
   let supported = false;
   let installed = [];
   let busy = false;
@@ -16,7 +16,7 @@ export function createWebUIThemesPanel(ctx) {
     h("p", { class: "muted", text: "安装后，在下方「WebUI 样式」中选择并保存。未安装或载入失败时自动使用经典界面。" }),
     h("div", { class: "field-row" }, [file, h("button", { class: "btn", type: "button", onClick: (event) => importFile(event.currentTarget) }, "导入安装包")]),
     h("div", { class: "field-row" }, [url, digest, h("button", { class: "btn", type: "button", onClick: (event) => download(event.currentTarget) }, "下载并安装")]),
-    h("p", { class: "muted", text: "当前主题仓库只在本地维护，尚未发布在线地址；可先导入本地构建的安装包。" }),
+    h("a", { href: "https://github.com/xiaoxi2760/denia-share-themes/releases", target: "_blank", rel: "noopener noreferrer", text: "前往主题库下载 ZIP 安装包" }),
   ]);
 
   function refresh() {
@@ -41,7 +41,8 @@ export function createWebUIThemesPanel(ctx) {
     try {
       const result = await ctx.api.post("webui/themes/install", body);
       await load();
-      toast(`${result?.theme?.name || "自设界面"}已安装，请选择对应 WebUI 样式并保存`, "ok");
+      onInstalled?.();
+      toast(result?.message || "主题已安装，请选择对应 WebUI 样式并保存", result?.refresh_failed ? "warn" : "ok");
     } catch (error) { toast(error?.message || "安装失败，现有界面保留", "err"); }
     finally { busy = false; restore(); }
   }
@@ -63,5 +64,5 @@ export function createWebUIThemesPanel(ctx) {
     if (!url.value.trim()) return toast("请填写主题包的 HTTPS 下载地址", "warn");
     await install({ url: url.value.trim(), sha256: digest.value.trim() }, button);
   }
-  return { node, load, get supported() { return supported; } };
+  return { node, load, get supported() { return supported; }, get installed() { return installed; } };
 }

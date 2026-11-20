@@ -1,8 +1,6 @@
 /* 界面切换决策：保存 WEBUI_STYLE 之后，判断要不要换界面、换成哪个地址。
  *
- * 两套界面（经典界面 / 达妮娅的泡泡工坊）共用这一份逻辑：
- * 泡泡工坊的设置页就是把经典界面的配置视图挂进 shadow root（见主题
- * studio.js 的 mountSettings），保存走的是同一个 createConfigView。
+ * 经典界面和自设主题复用 createConfigView 的保存逻辑。
  *
  * 只做决策，不碰业务：真正跳转由调用方执行（applyStyleSwitch）。
  */
@@ -10,13 +8,12 @@
 /** 决定界面形态的配置键。 */
 export const STYLE_KEY = "WEBUI_STYLE";
 export const STYLE_CLASSIC = "classic";
-export const STYLE_DENIA = "denia";
 
-/** 把配置值收敛成两个字面量；非法值返回 null。 */
+/** 界面 ID 的格式与主题清单一致，是否已安装由插件确认。 */
 export function normalizeStyleValue(raw) {
   if (typeof raw !== "string") return null;
   const value = raw.trim().toLowerCase();
-  return value === STYLE_CLASSIC || value === STYLE_DENIA ? value : null;
+  return /^[a-z][a-z0-9_-]{0,31}$/.test(value) ? value : null;
 }
 
 /** ?ui=classic 临时入口；只认 classic，其他 ui 值一律忽略。 */
@@ -39,7 +36,7 @@ export function mapHashForStyle(hash, style) {
   if (!raw) return "";
   const view = raw.split("?")[0];
   if (view !== "config" && view !== "settings") return hash || "";
-  return `#/${style === STYLE_DENIA ? "settings" : "config"}`;
+  return `#/${style === STYLE_CLASSIC ? "config" : "settings"}`;
 }
 
 /**

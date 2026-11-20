@@ -25,7 +25,7 @@
 内置平台**关掉**。
 
 平台键也不能与内置的 11 个重名（`bilibili` / `douyin` / `kuaishou` / `weibo` /
-`xiaohongshu` / `twitter` / `nga` / `acfun` / `github` / `pixiv` / `steam`），
+`xiaohongshu` / `twitter` / `youtube` / `nga` / `acfun` / `github` / `pixiv` / `steam`），
 重名会被拒绝加载；要顶替内置平台的行为，请另起一个键（如 `bilibili_hd`）。
 
 ## 一个最小的例子
