@@ -373,9 +373,8 @@ class DeliveryService:
     async def send_text(self, event: AstrMessageEvent, result: ParseResult):
         """发送**一条**普通文本消息（标题 + 干净地址 + 简洁播放信息 + 必要提示）。
 
-        刻意**不**包含：``result.text`` 长简介、``graphics`` 正文、B站
-        ``extra["info"]`` 里的 AI 总结，也不走 OneBot 合并转发 —— 一条普通
-        ``Plain`` 消息，客户端里就是一条干净的文本。
+        对于解析器标记为主要内容的帖文，会附上正文。普通视频简介和 AI 总结
+        仍由卡片展示。文本通过一条普通 ``Plain`` 消息发送。
         """
         lines = build_concise_text(result)
         if not lines:

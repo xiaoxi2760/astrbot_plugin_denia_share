@@ -505,7 +505,7 @@ def clean_url(url: str | None) -> str | None:
 
 
 def build_concise_text(result: ParseResult) -> list[str]:
-    """构建精简文本的行列表（标题 / 干净地址 / 播放信息 / 必要提示）。
+    """构建普通文本消息，保留解析器标记为主要内容的帖文正文。
 
     **只发一条普通消息**，不含长简介、AI 总结或转发节点。字段缺失就省略，
     不为了凑格式联网取数。
@@ -514,6 +514,12 @@ def build_concise_text(result: ParseResult) -> list[str]:
 
     if result.title:
         lines.append(str(result.title).strip())
+
+    if result.extra.get("include_post_text"):
+        if result.author:
+            lines.append(f"@{result.author.name}")
+        if result.text:
+            lines.append(result.text)
 
     url = clean_url(result.url)
     if url:

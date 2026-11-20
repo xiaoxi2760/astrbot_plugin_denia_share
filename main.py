@@ -706,7 +706,7 @@ class DeniaSharePlugin(Star):
 
     @filter.regex(re.compile(YOUTUBE_LINK))
     async def youtube_handler(self, event: AstrMessageEvent, matched: re.Match | None = None):
-        """YouTube 视频及 Shorts 分享解析与下载"""
+        """YouTube 视频、Shorts 与社区图文分享解析"""
         async for r in self._dispatch(event, "youtube"):
             yield r
 

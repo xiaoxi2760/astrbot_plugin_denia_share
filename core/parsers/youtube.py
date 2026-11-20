@@ -16,20 +16,29 @@ from ..exception import DownloadException, ParseException
 from ..media_utils import ffmpeg_available
 from ..task import PathTask
 from .youtube_media import extract_formats, select_streams
+from .youtube_posts import extract_post
 
 
 _VIDEO_ID = r"[A-Za-z0-9_-]{11}"
-_VIDEO_ID_END = r"(?=$|[?#\s<>\x22\x27\x60\[\](){},.!，。！？、：；）】》」])"
+_ID_END = r"(?=$|[?#\s<>\x22\x27\x60\[\](){},.!，。！？、：；）】》」])"
 _QUERY = r"[^\s<>\"'`\[\](){},，。！？、：；）】》」#]*"
-YOUTUBE_LINK = (
+_VIDEO_LINK = (
     r"(?<![\w./@:%=-])(?i:https?://)?(?:"
     r"(?i:(?:(?:www|m|music)\.)?youtube\.com)/"
-    rf"(?:watch\?(?=(?:{_QUERY}&)?v={_VIDEO_ID}(?:&|{_VIDEO_ID_END}))(?P<query>{_QUERY})"
-    rf"|(?:shorts|live|embed|v)/(?P<video>{_VIDEO_ID}){_VIDEO_ID_END})"
-    rf"|(?i:(?:www\.)?youtu\.be)/(?P<short>{_VIDEO_ID}){_VIDEO_ID_END}"
-    rf"|(?i:(?:www\.)?youtube-nocookie\.com)/embed/(?P<embed>{_VIDEO_ID}){_VIDEO_ID_END}"
+    rf"(?:watch\?(?=(?:{_QUERY}&)?v={_VIDEO_ID}(?:&|{_ID_END}))(?P<query>{_QUERY})"
+    rf"|(?:shorts|live|embed|v)/(?P<video>{_VIDEO_ID}){_ID_END})"
+    rf"|(?i:(?:www\.)?youtu\.be)/(?P<short>{_VIDEO_ID}){_ID_END}"
+    rf"|(?i:(?:www\.)?youtube-nocookie\.com)/embed/(?P<embed>{_VIDEO_ID}){_ID_END}"
     r")"
 )
+_POST_ID = r"Ug[A-Za-z0-9_-]{20,62}"
+_POST_LINK = (
+    r"(?<![\w./\\@:%=-])(?i:https?://)?(?i:(?:(?:www|m)\.)?youtube\.com)/"
+    rf"(?:post/(?P<post>{_POST_ID})/?{_ID_END}"
+    r"|(?:@[\w.%-]+|(?:channel|c|user)/[\w.%-]+)/(?:community|posts)/?\?"
+    rf"(?=(?:{_QUERY}&)?lb={_POST_ID}(?:&|{_ID_END}))(?P<post_query>{_QUERY}))"
+)
+YOUTUBE_LINK = rf"(?:{_VIDEO_LINK}|{_POST_LINK})"
 _OEMBED_URL = "https://www.youtube.com/oembed"
 _THUMBNAIL_HOSTS = {"i.ytimg.com", "img.youtube.com"}
 
@@ -80,6 +89,14 @@ class YouTubeParser(BaseParser):
 
     @classmethod
     def dedup_identity(cls, searched: Match[str]) -> str | None:
+        if searched.group("post"):
+            return searched.group("post")
+        post_query = searched.group("post_query")
+        if post_query is not None:
+            values = parse_qs(post_query.rstrip(".!"), keep_blank_values=True).get("lb", [])
+            if len(values) == 1 and fullmatch(_POST_ID, values[0]):
+                return values[0]
+            return None
         query = searched.group("query")
         if query is not None:
             values = parse_qs(query.rstrip(".!"), keep_blank_values=True).get("v", [])
@@ -89,6 +106,38 @@ class YouTubeParser(BaseParser):
         return searched.group("video") or searched.group("short") or searched.group("embed")
 
     @handle("/", YOUTUBE_LINK)
+    async def parse_share(self, searched: Match[str]) -> ParseResult:
+        if searched.group("post") or searched.group("post_query") is not None:
+            return await self.parse_post(searched)
+        return await self.parse_video(searched)
+
+    async def parse_post(self, searched: Match[str]) -> ParseResult:
+        post_id = self.dedup_identity(searched)
+        if not post_id:
+            raise ParseException("YouTube 帖子链接缺少有效的帖子 ID")
+        url = f"https://www.youtube.com/post/{post_id}"
+        try:
+            async with self.new_client(follow_redirects=False) as client:
+                response = await client.get(url)
+                response.raise_for_status()
+        except HTTPStatusError as exc:
+            status = exc.response.status_code
+            if status in {401, 403, 404, 410} or 300 <= status < 400:
+                raise ParseException("YouTube 帖子无法公开预览，可能已删除或限制访问") from exc
+            raise ParseException("YouTube 帖子请求失败") from exc
+        except HTTPError as exc:
+            raise ParseException("YouTube 帖子请求失败") from exc
+
+        name, body, image_urls = extract_post(response.text, post_id)
+        return self.result(
+            title="社区帖子",
+            text=body or None,
+            author=Author(name=name) if name else None,
+            url=url,
+            contents=self.create_images(image_urls),
+            extra={"include_post_text": True},
+        )
+
     async def parse_video(self, searched: Match[str]) -> ParseResult:
         video_id = self.dedup_identity(searched)
         if not video_id:

@@ -2,6 +2,22 @@
 
 记录日期为 2026 年 11 月 20 日。
 
+## YouTube 社区帖子验收
+
+社区图文按帖子 ID 解析。分享入口使用 `youtube.com/post/<帖子 ID>`，旧分享链接使用频道 `community?lb=<帖子 ID>`。插件统一返回 `/post/` 原链接，沿用 YouTube 的分平台代理、输出模式和同会话去重设置。两种写法指向同一帖子时，共用去重键。
+
+| 场景 | 预期行为 |
+| --- | --- |
+| 公开的纯文字帖子 | 文本和卡片展示频道、正文及原链接，正文保留换行。 |
+| 公开单图或多图帖子 | 卡片显示帖子图片，开启富媒体后按原顺序发送图片。无正文的帖子也可解析。 |
+| 帖内包含视频预览、头像或投票缩略图 | 可返回帖文正文，图片附件仅使用帖子上传的图。 |
+| 已删除、限制访问或找不到匹配 ID | 网页解析返回公开预览失败原因，聊天按「解析失败时发送错误提示」设置反馈。 |
+| 普通 watch、短链和 Shorts | 沿用已有 oEmbed 预览和按需有声视频下载。 |
+
+YouTube 帮助记录了纯文字、图片和投票等帖子类型，以及单帖最多十张图的限制。帖子详情的公开页面数据结构可对照 yt-dlp 维护者在问题记录中给出的 `backstagePostRenderer`。 [YouTube 帮助](https://support.google.com/youtube/answer/7124474) · [yt-dlp 帖子数据样本](https://github.com/yt-dlp/yt-dlp/issues/15664)
+
+本地 YouTube 专项回归共通过 48 项。使用三个公开帖子的真实页面和图片响应生成了 WebUI 卡片，单图与十图分别解码并构建了 1 个和 10 个 AstrBot 图片组件。测试时系统代理有间歇性 TLS 中断，图文验收通过带重试的测试传输完成。真实 QQ 群和 Telegram 会话的收件效果待部署验证。样本为 [NASA 纯文字帖](https://www.youtube.com/post/Ugkx0X33g-nAj6FyciU8R9pJUCrPERrtPBJE)、[NASA 单图帖](https://www.youtube.com/post/Ugkxvw3nKUJFYnzgAx5YBGKZ5wuaHdkelGlO)和 [MrBeast 十图帖](https://www.youtube.com/post/Ugkx5QH9-Xr0EWbVJ1riARjVrDcXRN1LfJS7)。
+
 ## YouTube 视频下载实现与验收
 
 开启富媒体后，解析器把视频登记为惰性下载任务，由现有发送链路在需要视频时执行。yt-dlp 只负责获取公开播放格式。单文件交给现有下载器，分离的 AVC 视频和 AAC 音频交给现有 ffmpeg 合并流程，最后通过 AstrBot 视频组件投递。仅发文本或卡片时不下载视频本体。
