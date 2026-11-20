@@ -47,6 +47,12 @@
     "hex": "111111",
     "sha256": "da1f1da5d5278dd532dc2a276c3adf0c5c014de00ed6933aa60d1b7e51206b01"
   },
+  "youtube": {
+    "file": "youtube.png",
+    "source": "https://www.youtube.com/s/desktop/90fc6e41/img/favicon_144x144.png",
+    "kind": "official website icon",
+    "sha256": "e39dc3d8c2f82ad2375132a8efcf521c232d5e2cf08abeb9bebe1ad94afb2157"
+  },
   "github": {
     "file": "github.svg",
     "collection": "Simple Icons",

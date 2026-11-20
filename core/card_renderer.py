@@ -891,6 +891,8 @@ class ShareCardRenderer:
             from .card_lily import LAYOUT_VERSION
 
             version = LAYOUT_VERSION
+        if result.platform.name == "youtube":
+            version += "|youtube-icon"
         warnings_str = "|".join(result.extra.get("limit_warnings") or [])
         payload = (
             cache_key

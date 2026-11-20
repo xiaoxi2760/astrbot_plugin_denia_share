@@ -58,6 +58,7 @@ _ICON_DIR: Path = Path(__file__).resolve().parent.parent / "resources" / "platfo
 
 #: 平台键 → 资源文件名。
 PLATFORM_ICONS: dict[str, str] = {
+    "youtube": "youtube.png",
     "qqmusic": "qqmusic.png",
     "netease": "netease.png",
     "kugou": "kugou.png",

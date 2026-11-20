@@ -27,6 +27,7 @@ _ASSETS: tuple[tuple[str, str], ...] = (
     ("platforms/weibo.svg", "image/svg+xml"),
     ("platforms/xiaohongshu.svg", "image/svg+xml"),
     ("platforms/twitter.svg", "image/svg+xml"),
+    ("platforms/youtube.png", "image/png"),
     ("platforms/github.svg", "image/svg+xml"),
     ("platforms/pixiv.svg", "image/svg+xml"),
     ("platforms/steam.svg", "image/svg+xml"),
