@@ -136,6 +136,7 @@ _TUNABLE_ITEMS: tuple[dict[str, Any], ...] = (
     {'key': 'FORWARD_NODE_NICKNAME', 'group': '合并转发', 'label': '转发节点昵称', 'type': 'string', 'default': '希望解析器', 'hint': '合并转发节点的显示名称，最长 32 字；留空使用希望解析器，不改变实际发送账号。', 'max_length': 32},
     {'key': 'DOWNLOAD_IMAGE_CONCURRENCY', 'group': '高级设置', 'label': '图片下载并发', 'type': 'int', 'default': 8, 'hint': '每个下载池同时下载图片的数量。直连与代理分别计数；调大可能增加带宽占用和平台限流。', 'min': 1, 'max': 16, 'unit': '个', 'subgroup': '性能与网络'},
     {'key': 'DOWNLOAD_MEDIA_CONCURRENCY', 'group': '高级设置', 'label': '视频与音频下载并发', 'type': 'int', 'default': 3, 'hint': '每个下载池同时下载视频或音频的数量，B站音视频可能各占一个任务；直连与代理分别计数。', 'min': 1, 'max': 8, 'unit': '个', 'subgroup': '性能与网络'},
+    {'key': 'DOWNLOAD_MEDIA_TIMEOUT_SECONDS', 'group': '高级设置', 'label': '媒体下载总时限', 'type': 'int', 'default': 180, 'hint': '图片、封面、头像、视频和音频共用此时限。从单项媒体开始获取时计时，包含取流、等待下载槽、下载、重试和必要合并。新启动的任务使用保存后的值。', 'min': 10, 'max': 1800, 'unit': '秒', 'subgroup': '性能与网络'},
     {'key': 'DOWNLOAD_RETRY_ATTEMPTS', 'group': '高级设置', 'label': '下载重试次数', 'type': 'int', 'default': 2, 'hint': '临时网络错误时，在首次下载之外最多重建任务的次数；0 不重试。不会重试权限、磁盘或内容限制等永久错误。', 'min': 0, 'max': 5, 'unit': '次', 'subgroup': '性能与网络'},
     {'key': 'MAX_RESULT_CACHE_ENTRIES', 'group': '维护', 'label': '解析内存缓存条数', 'type': 'int', 'default': 128, 'hint': '内存中解析结果的最大条数，不是磁盘历史条数。调大可能增加内存占用，原有缓存有效期仍生效。', 'min': 16, 'max': 512, 'unit': '条', 'subgroup': '内存缓存'},
     {'key': 'MAX_RENDER_CACHE_ENTRIES', 'group': '维护', 'label': '卡片内存索引条数', 'type': 'int', 'default': 128, 'hint': '内存中渲染结果索引的最大条数；不控制磁盘卡片文件的清理。', 'min': 16, 'max': 512, 'unit': '条', 'subgroup': '内存缓存'},
@@ -1502,6 +1503,10 @@ class ParserConfig:
     @property
     def DOWNLOAD_MEDIA_CONCURRENCY(self) -> int:
         return self._tunable_value("DOWNLOAD_MEDIA_CONCURRENCY")
+
+    @property
+    def DOWNLOAD_MEDIA_TIMEOUT_SECONDS(self) -> int:
+        return self._tunable_value("DOWNLOAD_MEDIA_TIMEOUT_SECONDS")
 
     @property
     def DOWNLOAD_RETRY_ATTEMPTS(self) -> int:

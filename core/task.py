@@ -11,6 +11,9 @@ from typing import Any
 
 from astrbot.api import logger
 
+from .budget import get_download_deadline, run_download
+from .exception import DownloadTotalTimeout
+
 
 #: 惰性工厂的返回值类型：协程、已调度的 Task，或直接给出的路径。
 _LazySource = Coroutine[Any, Any, Path] | asyncio.Task[Path] | Path
@@ -59,12 +62,15 @@ class PathTask:
 
     __slots__ = (
         "_path", "_task", "_factory", "_needs_media", "_started", "_lock", "_attempts",
+        "_deadline", "_owns_factory_task",
     )
 
     def __init__(
         self,
         task: "asyncio.Task[Path] | Coroutine[Any, Any, Path] | Callable[[], _LazySource] | Path",
     ):
+        self._deadline: float | None = None
+        self._owns_factory_task = False
         # **可调用对象按惰性工厂处理**。B站主力与备用解析已经用
         # ``PathTask(lambda: download_video())`` 这个写法传下载工厂；若把 callable
         # 当协程丢给 create_task 会直接 TypeError（create_task 只收 coroutine），
@@ -87,10 +93,7 @@ class PathTask:
             self._lock = None
             self._attempts = 0
             return
-        if isinstance(task, asyncio.Task):
-            self._task: asyncio.Task[Path] | None = task
-        else:
-            self._task = asyncio.create_task(task)
+        self._task = self._start(task)
         self._factory = None
         self._path = None
         self._needs_media = False
@@ -104,6 +107,7 @@ class PathTask:
         factory: Callable[[], _LazySource],
         *,
         needs_media: bool = False,
+        owns_task: bool = False,
     ) -> "PathTask":
         """构造一个**惰性**路径任务：``factory`` 到第一次 ``get()`` 才被调用。
 
@@ -111,6 +115,8 @@ class PathTask:
             factory: 无参可调用，返回协程 / Task / Path。**不要**在这里就把
                 下载协程创建出来 —— 那样等于急式，等于没做惰化。
             needs_media: 该任务是否必须先下载本体才能完成（见类文档）。
+            owns_task: 工厂每次新建并交给本包装器管理的 Task 才设为 True。
+                它将在本次获取超时后被取消并等待收尾。共享 Task 保持 False。
         """
         self = cls.__new__(cls)
         self._task = None
@@ -120,6 +126,8 @@ class PathTask:
         self._started = False
         self._lock = None
         self._attempts = 0
+        self._deadline = None
+        self._owns_factory_task = owns_task
         return self
 
     def _ensure_started(self) -> asyncio.Task[Path]:
@@ -134,18 +142,40 @@ class PathTask:
         factory = self._factory
         if factory is None:  # pragma: no cover —— 防御：__init__/lazy 不会走到
             raise RuntimeError("PathTask 既没有预置任务也没有工厂")
-        source = factory()
-        if isinstance(source, Path):
-            # 同步就能给出结果的（如示例图），无需包一层任务
-            self._path = source
-            self._started = True
-            return _completed_task(source)
-        if isinstance(source, asyncio.Task):
-            self._task = source
-        else:
-            self._task = asyncio.create_task(source)
+        self._task = self._start(factory)
         self._started = True
         return self._task
+
+    def _start(self, source: _LazySource | Callable[[], _LazySource]) -> asyncio.Task[Path]:
+        if self._deadline is None:
+            self._deadline = get_download_deadline()
+
+        async def resolve() -> Path:
+            value = source() if callable(source) else source
+            if isinstance(value, asyncio.Task) and not self._owns_factory_task:
+                # 借用任务可能被其他包装器共享，只限制本次等待。
+                return await asyncio.shield(value)
+            return value if isinstance(value, Path) else await value
+
+        async def bounded() -> Path:
+            try:
+                return await run_download(resolve, deadline)
+            finally:
+                # 急式来源可能在包装任务运行前就已到期。
+                if asyncio.iscoroutine(source):
+                    source.close()
+
+        deadline = self._deadline
+        running = asyncio.create_task(bounded())
+        if not callable(source):
+            # 兼容无人等待的急式任务。取异常不会改变后续 await 的结果。
+            running.add_done_callback(self._retrieve_exception)
+        return running
+
+    @staticmethod
+    def _retrieve_exception(task: asyncio.Task[Path]) -> None:
+        if not task.cancelled():
+            task.exception()
 
     async def get(self) -> Path:
         if self._path is not None:
@@ -205,6 +235,9 @@ class PathTask:
         """
         from .exception import DownloadException, IgnoreException, ParseException
 
+        if isinstance(exc, DownloadTotalTimeout):
+            return False
+
         # 下载器、平台 CDN 会保留原始原因；只沿明确 cause 解包，
         # 不把任意业务错误的上下文当成可重试故障。
         if isinstance(exc, DownloadException) and _depth < 8 and exc.__cause__ is not None:
@@ -236,8 +269,17 @@ class PathTask:
             pass
         try:
             from curl_cffi.requests import exceptions as curl_errors
-            if isinstance(exc, (curl_errors.Timeout, curl_errors.ConnectionError)):
-                return not isinstance(exc, curl_errors.CertificateVerifyError)
+            if hasattr(curl_errors, "Timeout"):
+                if isinstance(exc, (curl_errors.Timeout, curl_errors.ConnectionError)):
+                    return not isinstance(exc, curl_errors.CertificateVerifyError)
+            elif isinstance(exc, curl_errors.RequestsError):
+                from curl_cffi.const import CurlECode
+
+                # 0.7.0 通过 libcurl 错误码区分瞬断与永久故障。
+                return exc.code in {
+                    CurlECode.COULDNT_CONNECT, CurlECode.PARTIAL_FILE,
+                    CurlECode.OPERATION_TIMEDOUT, CurlECode.SEND_ERROR, CurlECode.RECV_ERROR,
+                }
         except ImportError:  # pragma: no cover
             pass
         # 其余一律按永久处理：权限、磁盘满、只读文件系统、文件不存在，
@@ -257,6 +299,8 @@ class PathTask:
         """
         if self._factory is None:
             return False
+        if self._deadline is not None and asyncio.get_running_loop().time() >= self._deadline:
+            return False
         if self._attempts >= _retry_attempts():
             return False
         return self._is_transient(exc)
@@ -268,18 +312,19 @@ class PathTask:
         try:
             return await self.get()
         except Exception as e:
-            # 这里**不能**被 DEBUG_LOG_ENABLED 门控：取不到路径意味着最终产物会缺料，
-            # 而缺料必须留痕。开关只用来决定要不要附堆栈（排障时才需要）。
-            try:
-                from .config import get_config
-                verbose = get_config().DEBUG_LOG_ENABLED
-            except Exception:
-                verbose = False
-            logger.warning(
-                f"PathTask 获取失败 | task={self._describe()} | "
-                f"{type(e).__name__}: {e}",
-                exc_info=verbose,
-            )
+            if not isinstance(e, DownloadTotalTimeout):
+                # 这里**不能**被 DEBUG_LOG_ENABLED 门控：取不到路径意味着最终产物会缺料，
+                # 而缺料必须留痕。开关只用来决定要不要附堆栈（排障时才需要）。
+                try:
+                    from .config import get_config
+                    verbose = get_config().DEBUG_LOG_ENABLED
+                except Exception:
+                    verbose = False
+                logger.warning(
+                    f"PathTask 获取失败 | task={self._describe()} | "
+                    f"{type(e).__name__}: {e}",
+                    exc_info=verbose,
+                )
             if on_error is not None:
                 on_error(e)
             return None
@@ -345,16 +390,3 @@ class PathTask:
         if self._task is not None:
             return f"PathTask(task={self._describe()}, done={self._task.done()})"
         return f"PathTask(lazy, started={self._started})"
-
-
-def _completed_task(value: Path) -> asyncio.Task[Path]:
-    """把一个已知的 ``Path`` 包成已完成的 Task，让调用方统一走 await 路径。
-
-    只在协程内被调用（``get`` / ``safe_get`` 内部），因此一定拿得到运行中的
-    事件循环 —— 工厂同步给出 ``Path`` 的场景（示例图）走这里。
-    """
-
-    async def _done() -> Path:
-        return value
-
-    return asyncio.create_task(_done())
