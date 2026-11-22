@@ -189,7 +189,7 @@ class NeteaseProvider(BaseProvider):
                 {
                     "ids": f"[{song.id}]",
                     "level": level,
-                    "encodeType": "mp3",
+                    "encodeType": "flac" if level == "lossless" else "mp3",
                     "csrf_token": cookie_value(cookie, '__csrf'),
                 }
             )
@@ -220,7 +220,7 @@ class NeteaseProvider(BaseProvider):
 
     async def _outer_url(self, song_id: str) -> str:
         """公开外链：302 到 CDN 或 200 直接回流才算可播放。"""
-        target = f"{OUTER_URL}?id={song_id}.mp3"
+        target = f"{OUTER_URL}?id={song_id}"
         try:
             async with self.client(follow_redirects=False) as client:
                 async with client.stream('GET', target, headers=self._headers()) as response:
@@ -309,7 +309,6 @@ class NeteaseProvider(BaseProvider):
         except MusicError:
             outer = ''
         if outer:
-            # 外链固定 128kbps，未登录时只能拿到免费曲目
             return PlayURL(url=outer, duration=target.duration, preview=False)
         if not self._login_cookie():
             return PlayURL(message='暂未取得音频；可登录账号后重试，部分歌曲需要会员或单独购买')

@@ -6,7 +6,7 @@ AI 总结、在线人数、番剧、动态、直播、收藏夹、专栏。本�
 
 ## 刻意不做的功能
 
-只做 **BV / av 视频**，其余一律不做：动态、opus、直播、收藏夹、专栏、AI 总结、
+支持 **BV / av 视频**和直播间预览。动态、opus、收藏夹、专栏、AI 总结、
 在线人数。理由不是省事，而是**备用路径一旦开始复刻主力，就会跟着主力一起腐化**
 —— 它存在的意义是「主力彻底不能用时仍能下载视频」，不是「功能对等」。
 
@@ -33,6 +33,7 @@ from ....base_parser import (
     PlatformEnum,
     handle,
 )
+from ..live import LIVE_PATTERN, parse_live_room
 from ..access import (
     STATUS_FULL,
     STATUS_BLOCKED,
@@ -101,7 +102,7 @@ class FallbackBilibiliParser(BaseParser):
     platform: ClassVar[Platform] = platform_of(PlatformEnum.BILIBILI)
 
     #: 替补解析器的对外提示。展示在结果里，别让用户以为功能完整。
-    _NOTICE = "ℹ️ B站自建备用解析：动态 / 直播 / 收藏夹 / 专栏暂不可用"
+    _NOTICE = "ℹ️ B站自建备用解析：动态 / 收藏夹 / 专栏暂不可用"
 
     def __init__(self, downloader, bili_ck: str = "", config_dir=None):
         super().__init__(downloader)
@@ -161,6 +162,10 @@ class FallbackBilibiliParser(BaseParser):
             avid=int(searched.group("avid")),
             page_num=int(searched.group("page_num") or 1),
         )
+
+    @handle("live.bili", LIVE_PATTERN)
+    async def _parse_live(self, searched: re.Match[str]):
+        return await parse_live_room(self, int(searched.group("room_id")))
 
     @classmethod
     def dedup_identity(cls, searched: re.Match[str]) -> str | None:

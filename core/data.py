@@ -15,7 +15,7 @@ from collections.abc import Iterator, Awaitable
 
 from .task import PathTask
 from .constants import PlatformEnum, platform_meta
-from .exception import DownloadTotalTimeout, IgnoreException, MediaSizeExceeded
+from .exception import DownloadTotalTimeout, IgnoreException, MediaSizeExceeded, ShareDownloadLimitExceeded
 
 
 @dataclass(repr=False, slots=True)
@@ -44,6 +44,7 @@ class AudioContent(MediaContent):
     """音频内容"""
     duration: float | None = None
     cover: PathTask | None = None
+    music_card_loader: Any = field(default=None, kw_only=True)
 
 
 @dataclass(repr=False, slots=True)
@@ -345,11 +346,11 @@ class ParseResult:
         timed_out: dict[str, int] = {}
         size_messages: list[str] = []
         for (kind, task), result in zip(tasks, results):
-            if isinstance(result, MediaSizeExceeded):
+            if isinstance(result, (MediaSizeExceeded, ShareDownloadLimitExceeded)):
                 # **必须排在 IgnoreException 之前**：它是子类，写反了就是一条
                 # 永远不执行的分支（且类型检查也看不出来）。体积超限是「按策略
                 # 跳过」，所以**不计入 missing**，但要如实告诉用户为什么少了它。
-                message = result.user_message
+                message = result.user_message if isinstance(result, MediaSizeExceeded) else str(result)
                 if message not in size_messages:
                     size_messages.append(message)
                 continue

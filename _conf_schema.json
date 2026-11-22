@@ -337,6 +337,36 @@
         "hint": "在上方账号凭据扫码或导入包含 uin 与音乐密钥的 Cookie；可检查、续期与清除。",
         "secret": true
       },
+      "MUSIC_CARD_SIGN_URL": {
+        "description": "音乐卡片签名服务地址",
+        "type": "string",
+        "default": "",
+        "invisible": true,
+        "hint": "仅 OneBot。留空即关闭。启用时会把歌曲资料和可播放音频地址提交给此服务，请填写你信任的签名服务。",
+        "secret": true
+      },
+      "MUSIC_CARD_QQ_FORMAT": {
+        "description": "QQ 音乐签名格式",
+        "type": "string",
+        "default": "qq",
+        "invisible": true,
+        "hint": "按签名服务要求填写 QQ 音乐的 format。"
+      },
+      "MUSIC_CARD_NETEASE_FORMAT": {
+        "description": "网易云签名格式",
+        "type": "string",
+        "default": "163",
+        "invisible": true,
+        "hint": "按签名服务要求填写网易云音乐的 format。"
+      },
+      "MUSIC_CARD_PARAMS": {
+        "description": "音乐卡片签名附加参数",
+        "type": "string",
+        "default": "",
+        "invisible": true,
+        "hint": "按 键:值 填写，以逗号或换行分隔。主要歌曲字段以插件生成的值为准。",
+        "secret": true
+      },
       "MUSIC_HTTP_TIMEOUT_SECONDS": {
         "description": "音乐接口请求超时",
         "type": "int",
@@ -835,11 +865,11 @@
     "description": "合并转发策略",
     "items": {
       "AGGREGATION_MODE": {
-        "description": "聚合方式",
+        "description": "启用合并转发",
         "type": "string",
         "default": "none",
         "invisible": false,
-        "hint": "仅 OneBot 启用。将选中的图片、视频逐条发送，或合并成一条转发消息。按条件聚合时，命中下面任一阈值才合并。语音条、音频文件独立发送，简短文字和卡片不受影响；转发明确失败时改为逐条发送。",
+        "hint": "仅 OneBot 生效。勾选的内容合并转发，其余已启用的内容单独发送。",
         "options": [
           "none",
           "all",
@@ -850,6 +880,16 @@
           "全部聚合",
           "按条件聚合"
         ]
+      },
+      "AGGREGATION_CONTENTS": {
+        "description": "放入合并转发",
+        "type": "list",
+        "render_type": "checkbox",
+        "default": ["image", "video"],
+        "options": ["text", "card", "image", "video", "voice", "file"],
+        "labels": ["简短文本", "封面卡片", "图片与动图", "视频", "语音条", "音频文件"],
+        "invisible": false,
+        "hint": "仅打包本次实际发送且已勾选的内容。协议端明确拒绝时，改为逐条发送。"
       },
       "AGGREGATION_IMAGE_THRESHOLD": {
         "description": "图片数量阈值",
@@ -876,7 +916,7 @@
         "type": "int",
         "default": 5,
         "invisible": true,
-        "hint": "仅「按条件聚合」生效：本次待发送的图片与视频节点总数达到该值时合并。语音、文件、精简文字和卡片不计入。0=这一项不触发",
+        "hint": "仅「按条件聚合」生效：本次选入转发的节点总数达到该值时合并。0=这一项不触发",
         "min": 0,
         "max": 999,
         "unit": "个"
@@ -1084,12 +1124,22 @@
       "DOWNLOAD_MEDIA_TIMEOUT_SECONDS": {
         "description": "媒体下载总时限",
         "type": "int",
-        "default": 180,
+        "default": 120,
         "invisible": true,
         "hint": "图片、封面、头像、视频和音频共用此时限。从单项媒体开始获取时计时，包含取流、等待下载槽、下载、重试和必要合并。新启动的任务使用保存后的值。",
         "min": 10,
         "max": 1800,
         "unit": "秒"
+      },
+      "SHARE_DOWNLOAD_MAXIMUM_MB": {
+        "description": "单次分享下载总量",
+        "type": "int",
+        "default": 256,
+        "invisible": true,
+        "hint": "限制一次分享新下载的媒体字节数，缓存命中不计入。达到上限后保留已完成的媒体。0 表示不限制总量。",
+        "min": 0,
+        "max": 8192,
+        "unit": "MB"
       },
       "DOWNLOAD_RETRY_ATTEMPTS": {
         "description": "下载重试次数",

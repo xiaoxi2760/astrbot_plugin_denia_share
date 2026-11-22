@@ -136,13 +136,18 @@ _TUNABLE_ITEMS: tuple[dict[str, Any], ...] = (
     {'key': 'FORWARD_NODE_NICKNAME', 'group': '合并转发', 'label': '转发节点昵称', 'type': 'string', 'default': '希望解析器', 'hint': '合并转发节点的显示名称，最长 32 字；留空使用希望解析器，不改变实际发送账号。', 'max_length': 32},
     {'key': 'DOWNLOAD_IMAGE_CONCURRENCY', 'group': '高级设置', 'label': '图片下载并发', 'type': 'int', 'default': 8, 'hint': '每个下载池同时下载图片的数量。直连与代理分别计数；调大可能增加带宽占用和平台限流。', 'min': 1, 'max': 16, 'unit': '个', 'subgroup': '性能与网络'},
     {'key': 'DOWNLOAD_MEDIA_CONCURRENCY', 'group': '高级设置', 'label': '视频与音频下载并发', 'type': 'int', 'default': 3, 'hint': '每个下载池同时下载视频或音频的数量，B站音视频可能各占一个任务；直连与代理分别计数。', 'min': 1, 'max': 8, 'unit': '个', 'subgroup': '性能与网络'},
-    {'key': 'DOWNLOAD_MEDIA_TIMEOUT_SECONDS', 'group': '高级设置', 'label': '媒体下载总时限', 'type': 'int', 'default': 180, 'hint': '图片、封面、头像、视频和音频共用此时限。从单项媒体开始获取时计时，包含取流、等待下载槽、下载、重试和必要合并。新启动的任务使用保存后的值。', 'min': 10, 'max': 1800, 'unit': '秒', 'subgroup': '性能与网络'},
+    {'key': 'DOWNLOAD_MEDIA_TIMEOUT_SECONDS', 'group': '高级设置', 'label': '媒体下载总时限', 'type': 'int', 'default': 120, 'hint': '图片、封面、头像、视频和音频共用此时限。从单项媒体开始获取时计时，包含取流、等待下载槽、下载、重试和必要合并。新启动的任务使用保存后的值。', 'min': 10, 'max': 1800, 'unit': '秒', 'subgroup': '性能与网络'},
+    {'key': 'SHARE_DOWNLOAD_MAXIMUM_MB', 'group': '高级设置', 'label': '单次分享下载总量', 'type': 'int', 'default': 256, 'hint': '限制一次分享新下载的媒体字节数，缓存命中不计入。达到上限后保留已完成的媒体。0 表示不限制总量。', 'min': 0, 'max': 8192, 'unit': 'MB', 'subgroup': '性能与网络'},
     {'key': 'DOWNLOAD_RETRY_ATTEMPTS', 'group': '高级设置', 'label': '下载重试次数', 'type': 'int', 'default': 2, 'hint': '临时网络错误时，在首次下载之外最多重建任务的次数；0 不重试。不会重试权限、磁盘或内容限制等永久错误。', 'min': 0, 'max': 5, 'unit': '次', 'subgroup': '性能与网络'},
     {'key': 'MAX_RESULT_CACHE_ENTRIES', 'group': '维护', 'label': '解析内存缓存条数', 'type': 'int', 'default': 128, 'hint': '内存中解析结果的最大条数，不是磁盘历史条数。调大可能增加内存占用，原有缓存有效期仍生效。', 'min': 16, 'max': 512, 'unit': '条', 'subgroup': '内存缓存'},
     {'key': 'MAX_RENDER_CACHE_ENTRIES', 'group': '维护', 'label': '卡片内存索引条数', 'type': 'int', 'default': 128, 'hint': '内存中渲染结果索引的最大条数；不控制磁盘卡片文件的清理。', 'min': 16, 'max': 512, 'unit': '条', 'subgroup': '内存缓存'},
     {'key': 'SCREENSHOT_TIMEOUT_SECONDS', 'group': '网页截图', 'label': '截图请求超时', 'type': 'int', 'default': 60, 'hint': '等待截图服务响应的本地请求预算；CF 页面加载预算是另一个计时器，需为截图生成和传输留出时间。', 'min': 10, 'max': 300, 'unit': '秒'},
     {'key': 'SCREENSHOT_CF_WAIT_UNTIL', 'group': '网页截图', 'label': 'CF 页面加载等待策略', 'type': 'select', 'default': 'networkidle0', 'hint': '仅影响 Cloudflare 截图。提前到 DOM 就绪可能截到尚未完成的页面；等待网络空闲可能被持续请求拖慢。', 'options': ['load', 'domcontentloaded', 'networkidle0', 'networkidle2'], 'labels': ['页面加载完成', 'DOM 就绪', '网络完全空闲', '网络基本空闲']},
     {'key': 'SCREENSHOT_CF_GOTO_TIMEOUT_MS', 'group': '网页截图', 'label': 'CF 页面加载预算', 'type': 'int', 'default': 45000, 'hint': '仅影响 Cloudflare 服务端页面加载，最多 60000ms；本地截图请求超时应留有余量。', 'min': 1000, 'max': 60000, 'unit': '毫秒'},
+    {'key': 'MUSIC_CARD_SIGN_URL', 'group': '音乐设置', 'label': '音乐卡片签名服务地址', 'type': 'string', 'default': '', 'hint': '仅 OneBot。留空即关闭。启用时会把歌曲资料和可播放音频地址提交给此服务，请填写你信任的签名服务。', 'secret': True},
+    {'key': 'MUSIC_CARD_QQ_FORMAT', 'group': '音乐设置', 'label': 'QQ 音乐签名格式', 'type': 'string', 'default': 'qq', 'hint': '按签名服务要求填写 QQ 音乐的 format。'},
+    {'key': 'MUSIC_CARD_NETEASE_FORMAT', 'group': '音乐设置', 'label': '网易云签名格式', 'type': 'string', 'default': '163', 'hint': '按签名服务要求填写网易云音乐的 format。'},
+    {'key': 'MUSIC_CARD_PARAMS', 'group': '音乐设置', 'label': '音乐卡片签名附加参数', 'type': 'string', 'default': '', 'hint': '按 键:值 填写，以逗号或换行分隔。主要歌曲字段以插件生成的值为准。', 'secret': True},
     {'key': 'MUSIC_HTTP_TIMEOUT_SECONDS', 'group': '音乐设置', 'label': '音乐接口请求超时', 'type': 'int', 'default': 15, 'hint': '音乐搜索、详情和取流的 HTTP 等待预算；封面总预算及扫码、续期仍有独立限制。', 'min': 5, 'max': 120, 'unit': '秒'},
     {'key': 'BILI_EXTRA_INFO_TIMEOUT_SECONDS', 'group': 'B站设置', 'label': 'B站附加信息等待', 'type': 'int', 'default': 5, 'hint': '卡片等待在线人数和 AI 摘要的上限，不是视频解析总超时；调大会延长部分卡片的等待。', 'min': 1, 'max': 30, 'unit': '秒'},
     {'key': 'CREDENTIAL_CHECK_TIMEOUT_SECONDS', 'group': '高级设置', 'label': '凭据探针请求超时', 'type': 'int', 'default': 15, 'hint': '通用凭据 HTTP 检查的请求预算，不控制全部扫码或 QQ音乐续期流程。', 'min': 5, 'max': 120, 'unit': '秒', 'subgroup': '性能与网络'},
@@ -774,16 +779,22 @@ CONFIG_META: tuple[dict[str, Any], ...] = (
     {
         "key": "AGGREGATION_MODE",
         "group": "合并转发",
-        "label": "聚合方式",
+        "label": "启用合并转发",
         "type": "select",
         "default": "none",
         "options": ["none", "all", "conditional"],
         "labels": ["不聚合", "全部聚合", "按条件聚合"],
-        "hint": (
-            "仅 OneBot 启用。将选中的图片、视频逐条发送，或合并成一条转发消息。"
-            "按条件聚合时，命中下面任一阈值才合并。"
-            "语音条、音频文件独立发送，简短文字和卡片不受影响；转发明确失败时改为逐条发送。"
-        ),
+        "hint": "仅 OneBot 生效。勾选的内容合并转发，其余已启用的内容单独发送。",
+    },
+    {
+        "key": "AGGREGATION_CONTENTS",
+        "group": "合并转发",
+        "label": "放入合并转发",
+        "type": "list",
+        "default": ["image", "video"],
+        "options": ["text", "card", "image", "video", "voice", "file"],
+        "labels": ["简短文本", "封面卡片", "图片与动图", "视频", "语音条", "音频文件"],
+        "hint": "仅打包本次实际发送且已勾选的内容。协议端明确拒绝时，改为逐条发送。",
     },
     {
         "key": "AGGREGATION_IMAGE_THRESHOLD",
@@ -816,7 +827,7 @@ CONFIG_META: tuple[dict[str, Any], ...] = (
         "min": 0,
         "max": 999,
         "unit": "个",
-        "hint": "仅「按条件聚合」生效：本次待发送的图片与视频节点总数达到该值时合并。语音、文件、精简文字和卡片不计入。0=这一项不触发",
+        "hint": "仅「按条件聚合」生效：本次选入转发的节点总数达到该值时合并。0=这一项不触发",
     },
     # ---------------- 高级设置 ---------------- #
     {
@@ -1509,6 +1520,10 @@ class ParserConfig:
         return self._tunable_value("DOWNLOAD_MEDIA_TIMEOUT_SECONDS")
 
     @property
+    def SHARE_DOWNLOAD_MAXIMUM_MB(self) -> int:
+        return self._tunable_value("SHARE_DOWNLOAD_MAXIMUM_MB")
+
+    @property
     def DOWNLOAD_RETRY_ATTEMPTS(self) -> int:
         return self._tunable_value("DOWNLOAD_RETRY_ATTEMPTS")
 
@@ -1531,6 +1546,22 @@ class ParserConfig:
     @property
     def SCREENSHOT_CF_GOTO_TIMEOUT_MS(self) -> int:
         return self._tunable_value("SCREENSHOT_CF_GOTO_TIMEOUT_MS")
+
+    @property
+    def MUSIC_CARD_SIGN_URL(self) -> str:
+        return self._tunable_value("MUSIC_CARD_SIGN_URL")
+
+    @property
+    def MUSIC_CARD_QQ_FORMAT(self) -> str:
+        return self._tunable_value("MUSIC_CARD_QQ_FORMAT")
+
+    @property
+    def MUSIC_CARD_NETEASE_FORMAT(self) -> str:
+        return self._tunable_value("MUSIC_CARD_NETEASE_FORMAT")
+
+    @property
+    def MUSIC_CARD_PARAMS(self) -> str:
+        return self._tunable_value("MUSIC_CARD_PARAMS")
 
     @property
     def MUSIC_HTTP_TIMEOUT_SECONDS(self) -> int:
@@ -2080,6 +2111,12 @@ class ParserConfig:
         """
         value = str(self._cfg_get("AGGREGATION_MODE", "none") or "").strip().lower()
         return value if value in AGGREGATION_MODES else "none"
+
+    @property
+    def AGGREGATION_CONTENTS(self) -> tuple[str, ...]:
+        item = _ITEM_BY_KEY["AGGREGATION_CONTENTS"]
+        values, error = coerce_value(item, self._cfg_get(item["key"], item["default"]))
+        return tuple(item["default"] if error else values)
 
     @property
     def AGGREGATION_IMAGE_THRESHOLD(self) -> int:

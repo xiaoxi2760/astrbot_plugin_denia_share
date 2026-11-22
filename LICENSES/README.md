@@ -5,6 +5,7 @@
 | 文件 | 许可 | 覆盖范围 |
 | --- | --- | --- |
 | `NotoEmoji-OFL.txt` | SIL Open Font License 1.1 | Google Noto Emoji 单色字体，随包分发保留全部字形的静态常规字重版本；来源与校验见 `resources/fonts/SOURCES.json` |
+| `DeniaHangul-OFL.txt` | SIL Open Font License 1.1 | MusicUID 所附 Nanum Gothic 的韩文子集，重命名为 Denia Hangul，用于搜歌卡片 |
 | `Apache-2.0.txt` | Apache License 2.0 | B站备用取流模块，以及移植自 [Johnserf-Seed/f2](https://github.com/Johnserf-Seed/f2) 的抖音 `a_bogus` 签名实现 |
 | `MusicUID-MIT.txt` | MIT | 改造自 [Xbaiyz12/MusicUID](https://github.com/Xbaiyz12/MusicUID) 的音乐接口与账号登录相关实现 |
 | `Heybox-URL-MIT.txt` | MIT | [huandu/heybox-url](https://github.com/huandu/heybox-url) 的小黑盒移动分享签名协议参考 |

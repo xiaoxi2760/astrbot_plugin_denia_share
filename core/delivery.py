@@ -28,6 +28,7 @@ from __future__ import annotations
 import asyncio
 import re
 from contextvars import ContextVar
+from copy import copy
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, AsyncGenerator
@@ -46,6 +47,7 @@ from .data import (
     VideoContent,
     build_concise_text,
 )
+from .music.signed_card import send_signed_card
 from .relay import register_file
 from .telegram import is_telegram
 
@@ -103,6 +105,17 @@ def audio_display_name(result: ParseResult, path: Path) -> str:
     return f"{cleaned[:max_stem]}{suffix}"
 
 
+_FORWARD_BATCH_NODES = 20
+_FORWARD_BATCH_BYTES = 40 * 1024 * 1024
+
+
+def _file_size(path: Path) -> int:
+    try:
+        return path.stat().st_size
+    except OSError:
+        return 0
+
+
 @dataclass
 class AudioFallbackItem:
     """语音发送失败后的文件兜底载体：沿用原结果与已落盘路径。"""
@@ -128,6 +141,15 @@ class DeliveryService:
             return "aiocqhttp" in event.get_platform_name().lower()
         except Exception:
             return False
+
+    @staticmethod
+    def preview_outputs(text: str, card_path: Path | None):
+        messages = []
+        if text:
+            messages.append(("text", [Comp.Plain(text)], len(text.encode("utf-8"))))
+        if card_path is not None:
+            messages.append(("card", card_path, _file_size(card_path)))
+        return messages
 
     async def deliver(
         self, event: AstrMessageEvent, result: ParseResult, cache_key: str, *, on_delivered=None, diagnostic=None
@@ -201,6 +223,20 @@ class DeliveryService:
             stage('render', 'ok' if render_path is not None else 'error', '' if render_path is not None else 'render_failed')
         else:
             stage('render', 'skipped', 'skipped')
+
+        if self.is_onebot(event) and pconfig.AGGREGATION_MODE != "none":
+            text = "\n".join(build_concise_text(result)) if text_on else ""
+            messages = self.preview_outputs(text, render_path)
+            if media_on:
+                messages.extend([item async for item in self.iter_onebot_media(result)])
+            async for output in self.send_onebot_outputs(
+                event, messages, on_delivered=on_delivered,
+                on_failed=lambda: stage('send', 'error', 'send_failed'),
+            ):
+                yield output
+            if media_on:
+                await send_signed_card(event, pconfig, result)
+            return
 
         # ---- 文本 ----
         # 渲染失败**不**回退成文本：文本只在 text_on 时才发。反过来也一样。
@@ -402,71 +438,104 @@ class DeliveryService:
             ):
                 yield output
             return
-        if not self.is_onebot(event) or pconfig.AGGREGATION_MODE == "none":
+        onebot = self.is_onebot(event)
+        if not onebot or pconfig.AGGREGATION_MODE == "none":
             async for parts in self.iter_media_components(result, local_upload=is_telegram(event)):
                 async for output in self.send_media_item(
                     event, parts, on_delivered=on_delivered, on_failed=on_failed
                 ):
                     yield output
+            if onebot:
+                await send_signed_card(event, pconfig, result)
             return
 
-        messages = [parts async for parts in self.iter_media_components(result)]
-        # 只把图片、视频送进转发，避免一段语音或文件使整份图集发送失败。
-        eligible = [
-            parts for parts in messages
-            if not isinstance(parts, AudioFallbackItem)
-            and all(isinstance(part, (Comp.Image, Comp.Video)) for part in parts)
-        ]
-        image_count = sum(isinstance(part, Comp.Image) for parts in eligible for part in parts)
-        video_count = sum(isinstance(part, Comp.Video) for parts in eligible for part in parts)
-        if not eligible or not pconfig.should_aggregate_nodes(image_count, video_count, len(eligible)):
-            for parts in messages:
-                async for output in self.send_media_item(
-                    event, parts, on_delivered=on_delivered, on_failed=on_failed
-                ):
-                    yield output
-            return
+        messages = [item async for item in self.iter_onebot_media(result)]
+        async for output in self.send_onebot_outputs(
+            event, messages, on_delivered=on_delivered, on_failed=on_failed,
+        ):
+            yield output
+        await send_signed_card(event, pconfig, result)
 
-        try:
-            forward = await self.build_nodes_result(event, "", eligible)
-            # 主动发送才能捕获协议端拒绝；yield 的发送异常在宿主管线中发生。
-            sent = await event.send(forward)
-            if sent is False:
-                raise RuntimeError("合并转发未发送成功")
-        except _UNCERTAIN_SEND_ERRORS:
-            # 回执丢失时转发可能已经送达，不能自动重放整套图片/视频。
-            # 标记「送达未知」而不是「失败」：调用方据此保留去重窗口、
-            # 但不记成功历史（见 _process_url 的对应分支）。
-            _DELIVERY_UNCERTAIN.set(True)
-            logger.warning("[denia_share] 合并转发送达状态未知，不自动重发图片视频，继续发送独立音频", exc_info=True)
-            for parts in messages:
-                if isinstance(parts, AudioFallbackItem) or not all(
-                    isinstance(part, (Comp.Image, Comp.Video)) for part in parts
-                ):
-                    async for output in self.send_media_item(
-                        event, parts, on_delivered=on_delivered, on_failed=on_failed
-                    ):
-                        yield output
-            return
-        except Exception:
-            logger.warning("[denia_share] 合并转发失败，改为逐条发送已选媒体", exc_info=True)
-            for parts in messages:
-                async for output in self.send_media_item(
-                    event, parts, on_delivered=on_delivered, on_failed=on_failed
-                ):
-                    yield output
-            return
+    async def iter_onebot_media(self, result: ParseResult):
+        async for item, path in self.iter_media_payloads(result):
+            if isinstance(item, AudioFallbackItem):
+                kind = "voice"
+            elif isinstance(item[0], Comp.Image):
+                kind = "image"
+            elif isinstance(item[0], Comp.Video):
+                kind = "video"
+            else:
+                kind = "file"
+            yield kind, item, _file_size(path)
 
-        if on_delivered is not None:
-            on_delivered()
-        for parts in messages:
-            if isinstance(parts, AudioFallbackItem) or not all(
-                isinstance(part, (Comp.Image, Comp.Video)) for part in parts
+    @staticmethod
+    def forward_batches(entries):
+        batch = []
+        total = 0
+        for entry in entries:
+            size = entry[1][2]
+            if batch and (len(batch) >= _FORWARD_BATCH_NODES or total + size > _FORWARD_BATCH_BYTES):
+                yield batch
+                batch = []
+                total = 0
+            batch.append(entry)
+            total += size
+        if batch:
+            yield batch
+
+    async def send_onebot_outputs(self, event, messages, *, on_delivered=None, on_failed=None):
+        pconfig = get_config()
+        selected = pconfig.AGGREGATION_CONTENTS
+        eligible = [(index, entry) for index, entry in enumerate(messages) if entry[0] in selected]
+        kinds = [entry[0] for _, entry in eligible]
+        forwarded = set()
+        if eligible and pconfig.should_aggregate_nodes(kinds.count("image"), kinds.count("video"), len(eligible)):
+            for batch in self.forward_batches(eligible):
+                try:
+                    nodes = []
+                    for _, (kind, item, _) in batch:
+                        if kind == "card":
+                            nodes.append([Comp.Image.fromFileSystem(str(item))])
+                        elif kind == "voice":
+                            nodes.append([Comp.Record(file=str(item.path))])
+                        elif kind == "file":
+                            parts = [copy(part) for part in item]
+                            for part in parts:
+                                self.apply_audio_path_mapping(event, part)
+                            nodes.append(parts)
+                        else:
+                            nodes.append(item)
+                    forward = await self.build_nodes_result(event, "", nodes)
+                except Exception:
+                    logger.warning("[denia_share] 构建合并转发失败，本批改为逐条发送", exc_info=True)
+                    continue
+                try:
+                    if await event.send(forward) is False:
+                        raise RuntimeError("合并转发未发送成功")
+                except _UNCERTAIN_SEND_ERRORS:
+                    _DELIVERY_UNCERTAIN.set(True)
+                    logger.warning("[denia_share] 合并转发送达状态未知，不重发此批", exc_info=True)
+                except Exception:
+                    logger.warning("[denia_share] 合并转发失败，本批改为逐条发送", exc_info=True)
+                    continue
+                else:
+                    if on_delivered is not None:
+                        on_delivered()
+                forwarded.update(index for index, _ in batch)
+
+        for index, (kind, item, _) in enumerate(messages):
+            if index in forwarded:
+                continue
+            if kind == "card":
+                sent = await self.send_image(event, item)
+                callback = on_delivered if sent else on_failed
+                if callback is not None:
+                    callback()
+                continue
+            async for output in self.send_media_item(
+                event, item, on_delivered=on_delivered, on_failed=on_failed,
             ):
-                async for output in self.send_media_item(
-                    event, parts, on_delivered=on_delivered, on_failed=on_failed
-                ):
-                    yield output
+                yield output
 
     async def send_media_item(
         self, event: AstrMessageEvent, item, *, on_delivered=None, on_failed=None
@@ -611,6 +680,15 @@ class DeliveryService:
         self, result: ParseResult, *, skip_images: bool = False, skip_videos: bool = False,
         local_upload: bool = False,
     ):
+        async for item, _ in self.iter_media_payloads(
+            result, skip_images=skip_images, skip_videos=skip_videos, local_upload=local_upload,
+        ):
+            yield item
+
+    async def iter_media_payloads(
+        self, result: ParseResult, *, skip_images: bool = False, skip_videos: bool = False,
+        local_upload: bool = False,
+    ):
         """构建原始媒体组件，复用下载、缓存和中转规则。
 
         旧实现里图片是塞进文本节点的（``build_output``），而精简文本按设计
@@ -639,7 +717,7 @@ class DeliveryService:
             path = await image.path_task.safe_get()
             if path is None or not path.exists():
                 continue
-            yield [Comp.Image.fromFileSystem(str(path))]
+            yield [Comp.Image.fromFileSystem(str(path))], path
 
         for graphic in result.graphics:
             if skip_images or not isinstance(graphic, ImageContent):
@@ -647,12 +725,12 @@ class DeliveryService:
             path = await graphic.path_task.safe_get()
             if path is None or not path.exists():
                 continue
-            yield [Comp.Image.fromFileSystem(str(path))]
+            yield [Comp.Image.fromFileSystem(str(path))], path
 
         # 转发的原帖图片同样归富媒体（微博/NGA 那种 repost 里有图集的情况）。
         # 递归只走一层：repost 不会自己再套 repost。
         if result.repost is not None:
-            async for parts in self.iter_media_components(
+            async for parts in self.iter_media_payloads(
                 result.repost, skip_images=skip_images, skip_videos=skip_videos,
                 local_upload=local_upload,
             ):
@@ -684,15 +762,15 @@ class DeliveryService:
                             f"[denia_share] 视频中转不可用，回退本地文件发送: {path.name}"
                         )
                 if url:
-                    yield [Comp.Video.fromURL(url)]
+                    yield [Comp.Video.fromURL(url)], path
                 else:
-                    yield [Comp.Video.fromFileSystem(str(path))]
+                    yield [Comp.Video.fromFileSystem(str(path))], path
             elif pconfig.AUDIO_SEND_MODE == "voice":
-                yield AudioFallbackItem(result, path)
+                yield AudioFallbackItem(result, path), path
             else:
                 yield [await self.build_audio_component(
                     result, path, relay_enabled, callback_base, ttl
-                )]
+                )], path
 
     async def try_send_audio(
         self,

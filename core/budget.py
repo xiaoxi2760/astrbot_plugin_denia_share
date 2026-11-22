@@ -2,16 +2,55 @@
 
 import asyncio
 from collections.abc import Awaitable, Callable
+from contextlib import contextmanager
 from contextvars import ContextVar
+from dataclasses import dataclass
 from typing import TypeVar
 
 from astrbot.api import logger
 
-from .exception import DownloadTotalTimeout
+from .exception import DownloadTotalTimeout, ShareDownloadLimitExceeded
 
 
 T = TypeVar("T")
 download_deadline: ContextVar[float | None] = ContextVar("denia_download_deadline", default=None)
+
+
+@dataclass
+class _ShareBudget:
+    limit: int
+    remaining: int
+
+
+_share_budget: ContextVar[_ShareBudget | None] = ContextVar("denia_share_budget", default=None)
+
+
+@contextmanager
+def share_download_budget(maximum_mb: int):
+    if _share_budget.get() is not None or not maximum_mb:
+        yield
+        return
+    limit = maximum_mb * 1024 * 1024
+    token = _share_budget.set(_ShareBudget(limit, limit))
+    try:
+        yield
+    finally:
+        _share_budget.reset(token)
+
+
+def check_share_download_budget(size: int = 1) -> None:
+    budget = _share_budget.get()
+    if budget is not None and size > budget.remaining:
+        raise ShareDownloadLimitExceeded(budget.limit)
+
+
+def consume_share_download_bytes(size: int) -> None:
+    budget = _share_budget.get()
+    if budget is not None:
+        remaining = budget.remaining
+        budget.remaining = max(0, remaining - size)
+        if size > remaining:
+            raise ShareDownloadLimitExceeded(budget.limit)
 
 
 def get_download_deadline() -> float:
@@ -25,7 +64,7 @@ def get_download_deadline() -> float:
         config = get_config()
     except RuntimeError:
         config = None
-    seconds = getattr(config, "DOWNLOAD_MEDIA_TIMEOUT_SECONDS", 180)
+    seconds = getattr(config, "DOWNLOAD_MEDIA_TIMEOUT_SECONDS", 120)
     return asyncio.get_running_loop().time() + seconds
 
 

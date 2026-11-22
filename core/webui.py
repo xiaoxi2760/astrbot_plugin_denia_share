@@ -33,6 +33,7 @@ from typing import Any, Callable, Iterable
 
 from astrbot.api import logger
 
+from .budget import share_download_budget
 from .card_renderer import LAYOUT_NAMES, ShareCardRenderer
 from .config import config_meta_payload, get_config, verify_schema_alignment
 from .constants import (
@@ -963,14 +964,15 @@ class WebUIApi:
             diagnostic.stage('parse', 'ok', 'cached')
         # 手动预览只获取卡片用图，与聊天输出选项独立；不下载视频或音频本体。
         # 先审计再渲染，让本轮图片限制提示进入卡片缓存键。
-        try:
-            missing = await result.audit_missing_media(img_only=True)
-            diagnostic.stage('media', 'error' if missing else 'ok', 'media_missing' if missing else '')
-        except Exception:
-            diagnostic.stage('media', 'error', 'media_missing')
-            logger.warning("[denia_share] WebUI 媒体结算失败", exc_info=True)
+        with share_download_budget(get_config().SHARE_DOWNLOAD_MAXIMUM_MB):
+            try:
+                missing = await result.audit_missing_media(img_only=True)
+                diagnostic.stage('media', 'error' if missing else 'ok', 'media_missing' if missing else '')
+            except Exception:
+                diagnostic.stage('media', 'error', 'media_missing')
+                logger.warning("[denia_share] WebUI 媒体结算失败", exc_info=True)
 
-        card = await self._render_card(result, cache_key, overrides)
+            card = await self._render_card(result, cache_key, overrides)
         enabled = bool(getattr(self.plugin._renderer, 'enabled', False))
         diagnostic.stage('render', 'ok' if card else 'error' if enabled else 'skipped',
             '' if card else 'render_failed' if enabled else 'skipped')

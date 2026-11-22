@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import re
+from time import monotonic
 from urllib.parse import parse_qs, urljoin, urlsplit
 
 from ..base_parser import BaseParser, handle
@@ -156,7 +157,27 @@ class _MusicMethods:
         result = self.result(title=song.title, url=song.url, author=self.create_author(song.artist),
                              contents=[], extra={'content_type':'音乐', 'duration':fmt_duration(song.duration),
                                                 'stats_line':song.album, 'limit_warnings':warnings})
+        played_url = ""
+        played_at = 0.0
+
+        async def load_music_card(endpoint):
+            from ..music.signed_card import sign_music_card
+
+            config = get_config()
+            audio_url = played_url
+            if not audio_url or monotonic() - played_at > 30:
+                source = await asyncio.wait_for(self._provider().play(song), timeout=5)
+                audio_url = source.url
+            format_name = (
+                config.MUSIC_CARD_NETEASE_FORMAT or "163" if song.platform == "netease"
+                else config.MUSIC_CARD_QQ_FORMAT or "qq"
+            )
+            return await sign_music_card(
+                endpoint, song, audio_url, format_name=format_name, custom_params=config.MUSIC_CARD_PARAMS,
+            )
+
         async def download():
+            nonlocal played_url, played_at
             from ..music.models import MusicError
             try:
                 before_play = getattr(self, 'before_play', None)
@@ -183,6 +204,7 @@ class _MusicMethods:
                     warnings.append(reason)
                 raise IgnoreException(reason)
             result.contents[0].duration = duration
+            played_url, played_at = source.url, monotonic()
             return await self.downloader.download_audio(source.url, ext_headers=self.headers)
         # Permission-limited previews may be shorter than the full track.
         # Apply the duration limit only after resolving the actual playable audio.
@@ -190,6 +212,7 @@ class _MusicMethods:
             PathTask.lazy(download),
             duration=song.duration,
             info_loader=lambda: self._describe_audio(song),
+            music_card_loader=load_music_card,
         )
         result.contents.append(audio)
         if isinstance(cover, str) and cover:

@@ -951,6 +951,31 @@ export function createConfigView(ctx, { showAccountPanels = true, collapsedByDef
   }
 
   function buildControl(item) {
+    if (item.key === "AGGREGATION_MODE") {
+      const previousMode = currentValue(item.key);
+      return switchControl(
+        previousMode === "all" || previousMode === "conditional",
+        (enabled) => onValueChanged(item.key, enabled ? (previousMode === "conditional" ? "conditional" : "all") : "none"),
+        "已启用",
+        "已关闭",
+      );
+    }
+    if (item.key === "AGGREGATION_CONTENTS") {
+      const picked = new Set(parseListValue(currentValue(item.key)));
+      return h("div", { class: "cfg-output-choices", role: "group", "aria-label": item.label }, item.options.map((value, index) => {
+        const input = h("input", { type: "checkbox" });
+        input.checked = picked.has(value);
+        input.addEventListener("change", () => {
+          if (input.checked) picked.add(value);
+          else picked.delete(value);
+          emitListValue(item.key, item.options.filter((option) => picked.has(option)));
+        });
+        return h("label", { class: "cfg-output-choice" }, [
+          input, h("span", { text: item.labels[index] }),
+        ]);
+      }));
+    }
+
     const value = currentValue(item.key);
 
     if (item.type === "bool") {

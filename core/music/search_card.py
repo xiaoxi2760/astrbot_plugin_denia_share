@@ -45,6 +45,7 @@ import re
 import time
 import unicodedata
 import uuid
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
 from ..platform_icons import load_platform_icon
@@ -87,6 +88,9 @@ _FONT_CACHE_LIMIT = 96          # 防止长时间运行后字体缓存无限增�
 _MAX_COVER_BYTES = 8 * 1024 * 1024
 _MAX_COVER_PIXELS = 40_000_000
 _FORMATS = {"png": "png", "jpeg": "jpg", "jpg": "jpg", "webp": "webp"}
+
+_HANGUL = re.compile(r"([\u1100-\u11ff\u3130-\u318f\ua960-\ua97f\uac00-\ud7ff]+)")
+_HANGUL_FONT = Path(__file__).resolve().parents[2] / "resources/fonts/DeniaHangul-Regular.ttf"
 
 _MEASURE_DRAW: Any = None
 
@@ -302,20 +306,50 @@ def _font(size: int, *, bold: bool = False, font_path: Any = None) -> Any:
     return obj
 
 
+@lru_cache(maxsize=16)
+def _hangul_font(size: int):
+    try:
+        return ImageFont.truetype(str(_HANGUL_FONT), size)
+    except OSError:
+        return None
+
+
+def _text_runs(text: str, font: Any):
+    size = getattr(font, "size", None)
+    if not size or not _HANGUL.search(text):
+        yield text, font
+        return
+    hangul = _hangul_font(size)
+    for index, piece in enumerate(_HANGUL.split(text)):
+        if piece:
+            yield piece, (hangul or font) if index % 2 else font
+
+
 def _text_w(text: str, font: Any) -> int:
     if not text:
         return 0
-    d = _measure()
-    if d is None or font is None:
+    draw = _measure()
+    if draw is None or font is None:
         return len(text) * 10
     try:
-        return int(d.textlength(text, font=font))
+        return int(sum(draw.textlength(piece, font=face) for piece, face in _text_runs(text, font)))
     except Exception:  # pragma: no cover
         try:
-            l, t, r, b = d.textbbox((0, 0), text, font=font)
-            return int(r - l)
+            left, _, right, _ = draw.textbbox((0, 0), text, font=font)
+            return int(right - left)
         except Exception:
             return len(text) * 10
+
+
+def _draw_music_text(draw, xy, text, *, font, fill):
+    if not _HANGUL.search(text) or not hasattr(font, "getmetrics"):
+        draw.text(xy, text, font=font, fill=fill)
+        return
+    x, y = xy
+    baseline = y + font.getmetrics()[0]
+    for piece, face in _text_runs(text, font):
+        draw.text((x, baseline), piece, font=face, fill=fill, anchor="ls")
+        x += draw.textlength(piece, font=face)
 
 
 def _ellipsize(text: str, font: Any, max_w: int) -> str:
@@ -718,7 +752,7 @@ def _render_sync(songs: Sequence[Any], keyword: str, output_dir: Path,
         block_h = len(lines) * (_L.F_ROW + 6) + (_L.F_ROW_META + 10)
         ty = top + (row_h - block_h) // 2
         for ln in lines:
-            draw.text((tx, ty), ln, font=f_row, fill=_hex_to_rgb(theme.text_primary))
+            _draw_music_text(draw, (tx, ty), ln, font=f_row, fill=_hex_to_rgb(theme.text_primary))
             ty += _L.F_ROW + 6
 
         artist = safe_text(_song_field(song, "artist"), 60)
@@ -732,8 +766,10 @@ def _render_sync(songs: Sequence[Any], keyword: str, output_dir: Path,
         meta_parts = [p for p in (artist, album) if p]
         meta = " · ".join(meta_parts)
         if meta:
-            draw.text((tx, ty), _ellipsize(meta, f_meta, meta_width), font=f_meta,
-                      fill=_hex_to_rgb(theme.text_secondary))
+            _draw_music_text(
+                draw, (tx, ty), _ellipsize(meta, f_meta, meta_width), font=f_meta,
+                fill=_hex_to_rgb(theme.text_secondary),
+            )
         # 平台色点 + 平台名 + 时长（右列）
         rx = pad + inner_w - _L.ROW_PAD_Y
         if dur:

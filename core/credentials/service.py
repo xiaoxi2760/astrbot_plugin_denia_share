@@ -433,6 +433,7 @@ class CredentialManager:
     async def _probe(self, spec: PlatformSpec, secret: str) -> tuple[str, str]:
         if spec.id == "xiaoheihe":
             return STATUS_UNKNOWN, "已保存；请用帖子链接确认可用性，平台要求验证时请先在小黑盒网页完成"
+        rotated = None
         if spec.id == "qqmusic":
             # 判活选型（2026-11-01 真机实测）：
             # * GetLoginUserInfo 对鉴权完全不敏感（空/垃圾 authst 也回 code 0 与
@@ -444,7 +445,7 @@ class CredentialManager:
             #   优先走它——顺带完成续期；没有移动端凭据（纯 Cookie 导入）才回退
             #   到主页探针。
             rotated = await self._probe_qqmusic_via_refresh()
-            if rotated is not None:
+            if rotated is not None and rotated[0] != STATUS_VALID:
                 return rotated
         if spec.id in {"netease", "qqmusic"}:
             from ..music.netease import NeteaseProvider
@@ -453,12 +454,16 @@ class CredentialManager:
             # 显式传超时：凭据检查走 CREDENTIAL_CHECK_TIMEOUT_SECONDS，
             # 不与音乐搜歌/取流的 MUSIC_HTTP_TIMEOUT_SECONDS 混在一起。
             provider = provider_type(
-                cookie=secret, proxy=self._pconfig.proxy_for(spec.id),
+                cookie=(self._pconfig.QQMUSIC_CK or secret) if spec.id == "qqmusic" and rotated else secret,
+                proxy=self._pconfig.proxy_for(spec.id),
                 verify_ssl=self._pconfig.HTTP_VERIFY_SSL,
                 timeout=_credential_check_timeout(self._pconfig),
             )
             try:
-                result = await provider.check_login()
+                if spec.id == "qqmusic" and rotated:
+                    result = {"status": rotated[0], "message": rotated[1]}
+                else:
+                    result = await provider.check_login()
                 status = result.get("status")
                 if status not in {STATUS_VALID, STATUS_INVALID, STATUS_UNKNOWN}:
                     status = STATUS_UNKNOWN
@@ -466,6 +471,15 @@ class CredentialManager:
                 message = text_of(result.get("message")) or {
                     STATUS_VALID: "登录态有效", STATUS_INVALID: "登录态已失效",
                     STATUS_UNKNOWN: "暂时无法确认，请稍后重试"}[status]
+                if spec.id == "qqmusic" and status == STATUS_VALID:
+                    try:
+                        member = await asyncio.wait_for(provider.check_member_playback(), timeout=3)
+                    except Exception:
+                        member = None
+                    if member is True:
+                        message += "。参考会员曲目可播放"
+                    elif member is False:
+                        message += "。参考会员曲目未取得播放权限"
                 return status, message
             except Exception:
                 return STATUS_UNKNOWN, "暂时无法确认（网络或代理不可用）"

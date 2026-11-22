@@ -33,6 +33,7 @@ from typing import Any, AsyncGenerator
 
 from astrbot.api import logger
 
+from .budget import share_download_budget
 from .config import get_config
 from .constants import is_custom_platform
 from .data import (
@@ -1019,9 +1020,10 @@ class ConfirmController:
         preview_path = None
         if card_on:
             try:
-                preview_path = await self._plugin._renderer.render(
-                    preview, cache_key=f"confirm:{offer.id}:{cache_key}"
-                )
+                with share_download_budget(get_config().SHARE_DOWNLOAD_MAXIMUM_MB):
+                    preview_path = await self._plugin._renderer.render(
+                        preview, cache_key=f"confirm:{offer.id}:{cache_key}"
+                    )
             except Exception:
                 logger.warning("[denia_share] 确认卡片渲染失败", exc_info=True)
         offer.preview_path = str(preview_path) if preview_path else None
@@ -1033,11 +1035,16 @@ class ConfirmController:
                 offer.history_id = record.id
                 await self._update_history(offer, result, "pending", desc)
 
-        if card_on and preview_path is not None:
-            await self._plugin._delivery.send_image(event, preview_path)
-        # 普通文本：仍按原有精简文字发送作品内容，与确认提示严格分开。
-        if text_on:
-            text = "\n".join(build_concise_text(preview))
+        delivery = self._plugin._delivery
+        text = "\n".join(build_concise_text(preview)) if text_on else ""
+        if delivery.is_onebot(event) and get_config().AGGREGATION_MODE != "none":
+            async for output in delivery.send_onebot_outputs(
+                event, delivery.preview_outputs(text, preview_path),
+            ):
+                yield output
+        else:
+            if preview_path is not None:
+                await delivery.send_image(event, preview_path)
             if text:
                 yield event.plain_result(text)
         # 确认提示是用户明确要求的控制消息：独立发送一次；不并入作品文本，
@@ -1167,7 +1174,8 @@ class ConfirmController:
                 f"⏳ 已确认 {offer.id}，正在下载源媒体并发送…"
             )
             try:
-                await fresh.audit_missing_media()
+                with share_download_budget(pconfig.SHARE_DOWNLOAD_MAXIMUM_MB):
+                    await fresh.audit_missing_media()
             except asyncio.CancelledError:
                 self.finalize(offer.id, "failed", "cancelled")
                 raise

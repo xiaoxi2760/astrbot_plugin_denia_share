@@ -64,6 +64,7 @@ def _quality_tiers() -> tuple[tuple[str, str], ...]:
     return _QUALITY_TIERS.get(value.strip().lower(), _QUALITY_TIERS["high"])
 # 取流固定 guid；登录态缺失或曲目权限不足时服务端返回该 code
 LOGIN_REQUIRED: Final[int] = 104003
+_MEMBERSHIP_PROBE_MID: Final[str] = "0039MnYb0qxYhV"
 GUID: Final[str] = "10000"
 
 DEFAULT_TITLE: Final[str] = "未知歌曲"
@@ -207,31 +208,54 @@ class QQMusicProvider(BaseProvider):
                 return song
         raise MusicError("未能获取这首歌的信息，可能已下架或需要会员")
 
+    async def _fetch_vkey(self, song_mid: str, filename: str, uin: str, what: str):
+        payload = {
+            "req_1": {
+                "module": "vkey.GetVkeyServer",
+                "method": "CgiGetVkey",
+                "param": {
+                    "filename": [filename],
+                    "guid": GUID,
+                    "songmid": [song_mid],
+                    "songtype": [0],
+                    "uin": uin,
+                    "loginflag": 1,
+                    "platform": "20",
+                },
+            },
+            "loginUin": uin,
+            "comm": {"uin": uin, "format": "json", "ct": 24, "cv": 0},
+        }
+        return await self._post_musicu(payload, what)
+
+    async def check_member_playback(self) -> bool | None:
+        """Report playback of the reference member track, separate from login validity."""
+        uin = self._uin()
+        if uin == "0":
+            return None
+        mid = _MEMBERSHIP_PROBE_MID
+        try:
+            body = await self._fetch_vkey(mid, f"M800{mid}{mid}.mp3", uin, "QQ 音乐会员曲目检查")
+        except MusicError:
+            return None
+        data = as_dict(as_dict(body.get("req_1")).get("data"))
+        items = as_list(data.get("midurlinfo"))
+        if not items:
+            return None
+        detail = as_dict(items[0])
+        purl = text_of(detail.get("purl"))
+        hosts = [text_of(host) for host in as_list(data.get("sip"))]
+        if purl and any(safe_media_url(urljoin(host, purl)) for host in hosts):
+            return True
+        return False if int_of(detail.get("result")) == LOGIN_REQUIRED else None
+
     async def play(self, song: Song) -> PlayURL:
         target = self._song_or_error(song)
         media_mid = target.media_mid or target.id
         uin = self._uin()
-        headers = self._headers()
         last_code = 0
         for prefix, suffix in _quality_tiers():
-            payload = {
-                "req_1": {
-                    "module": "vkey.GetVkeyServer",
-                    "method": "CgiGetVkey",
-                    "param": {
-                        "filename": [f"{prefix}{media_mid}.{suffix}"],
-                        "guid": GUID,
-                        "songmid": [target.id],
-                        "songtype": [0],
-                        "uin": uin,
-                        "loginflag": 1,
-                        "platform": "20",
-                    },
-                },
-                "loginUin": uin,
-                "comm": {"uin": uin, "format": "json", "ct": 24, "cv": 0},
-            }
-            body = await self._post_musicu(payload, "QQ 音乐取流")
+            body = await self._fetch_vkey(target.id, f"{prefix}{media_mid}.{suffix}", uin, "QQ 音乐取流")
             data = as_dict(as_dict(body.get("req_1")).get("data"))
             infos = [as_dict(item) for item in as_list(data.get("midurlinfo"))]
             purl = text_of(infos[0].get("purl")) if infos else ""

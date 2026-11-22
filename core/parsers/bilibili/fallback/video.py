@@ -194,11 +194,9 @@ async def fetch_video_info(
         raise ValueError("必须提供 bvid 或 avid")
     params: Dict[str, Any] = {"bvid": bvid} if bvid else {"aid": int(avid)}
 
-    async with client_factory() as client:
-        resp = await client.get(VIEW_API, params=params, headers=headers or {})
-        resp.raise_for_status()
-        payload = resp.json()
+    from .fetch import request_bili_json
 
+    payload = await request_bili_json(client_factory, VIEW_API, params=params, headers=headers or {})
     code = (payload or {}).get("code")
     if code != 0:
         raise RuntimeError(

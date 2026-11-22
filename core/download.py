@@ -46,7 +46,10 @@ from .media_verify import (
 )
 from .constants import COMMON_HEADER, DOWNLOAD_TIMEOUT
 from .exception import IgnoreException, DownloadException, DownloadTotalTimeout, MediaSizeExceeded
-from .budget import check_download_deadline, download_deadline, get_download_deadline, run_download
+from .budget import (
+    check_download_deadline, check_share_download_budget, consume_share_download_bytes,
+    download_deadline, get_download_deadline, run_download,
+)
 
 # 导入即修一次 NO_PROXY：httpx 0.28 解析不了 ``[::1]`` 这种方括号写法，
 # 而下载器也走 trust_env。详见 core/http_env.py。
@@ -489,13 +492,16 @@ class StreamDownloader:
         try:
             async with self.client.stream("GET", url, headers=headers, follow_redirects=True) as response:
                 response.raise_for_status()
-                self._validate_content_length(response, limit)
+                length = self._validate_content_length(response, limit)
+                if length is not None:
+                    check_share_download_budget(length)
                 received_bytes = 0
                 head = b""
                 async with _part_file(part) as file:
                     async for chunk in response.aiter_bytes(chunk_size):
                         if not chunk:
                             continue
+                        consume_share_download_bytes(len(chunk))
                         if not head:
                             # 只探开头一段：CDN 的错误页一定从头开始，
                             # 所以不需要多一次请求，也不影响流式写入
@@ -550,13 +556,16 @@ class StreamDownloader:
             session = AsyncSession(**session_kwargs)
             async with self._curl_response(session, url, headers) as response:
                 response.raise_for_status()
-                self._validate_content_length(response, limit)
+                length = self._validate_content_length(response, limit)
+                if length is not None:
+                    check_share_download_budget(length)
                 received_bytes = 0
                 head = b""
                 async with _part_file(part) as file:
                     async for chunk in response.aiter_content():
                         if not chunk:
                             continue
+                        consume_share_download_bytes(len(chunk))
                         if not head:
                             # 与 httpx 通道同形：只探开头一段
                             head = chunk[:HEAD_PROBE_BYTES]
@@ -836,6 +845,7 @@ class StreamDownloader:
             if file_path.exists():
                 return self._cached_within_limit(file_path, limit)
             check_download_deadline()
+            check_share_download_budget()
             try:
                 return await self._download_file_with_httpx(
                     url, file_path=file_path, headers=headers,
@@ -843,6 +853,7 @@ class StreamDownloader:
                 )
             except httpx.HTTPError as primary_error:
                 check_download_deadline()
+                check_share_download_budget()
                 from .config import get_config
                 try:
                     return await self._download_file_with_curl_cffi(
@@ -932,6 +943,7 @@ class StreamDownloader:
                 for _ in range(MAX_M3U8_PLAYLIST_DEPTH):
                     seen_playlists.add(playlist_url)
                     check_download_deadline()
+                    check_share_download_budget()
                     response = await self.client.get(playlist_url, headers=headers)
                     response.raise_for_status()
                     init, segments, variants = parse_m3u8_playlist(
@@ -966,12 +978,14 @@ class StreamDownloader:
                 async def _write_stream(target, url: str) -> int:
                     """把一个 URL 的字节流写进 target，返回累计字节数。"""
                     check_download_deadline()
+                    check_share_download_budget()
                     written = 0
                     async with self.client.stream("GET", url, headers=headers) as resp:
                         resp.raise_for_status()
                         async for chunk in resp.aiter_bytes(chunk_size=1024 * 1024):
                             if not chunk:
                                 continue
+                            consume_share_download_bytes(len(chunk))
                             candidate = received_bytes + written + len(chunk)
                             if limit and candidate > limit:
                                 raise MediaSizeExceeded(received_bytes=candidate, limit_bytes=limit)

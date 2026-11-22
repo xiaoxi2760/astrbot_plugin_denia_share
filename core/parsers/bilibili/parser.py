@@ -9,16 +9,19 @@ import json
 import asyncio
 from typing import ClassVar
 
+import httpx
+
 from astrbot.api import logger
 from bilibili_api import HEADERS, Credential, select_client, request_settings
 from bilibili_api.opus import Opus
 from bilibili_api.video import Video
 from bilibili_api.login_v2 import QrCodeLogin, QrCodeLoginEvents
-from msgspec import convert
+from msgspec import ValidationError, convert
 
 from ...base_parser import BaseParser, PlatformEnum, ParseException, IgnoreException, DownloadException, handle
 from ...exception import DownloadTotalTimeout, MediaProcessException
 from ...download import validate_cached_media
+from .live import LIVE_PATTERN, parse_live_room
 from .access import (
     STATUS_BLOCKED,
     STATUS_FULL,
@@ -159,7 +162,7 @@ class BilibiliParser(BaseParser):
         dynamic_id = int(searched.group("dynamic_id"))
         return await self.parse_dynamic_or_opus(dynamic_id)
 
-    @handle("live.bili", r"live\.bilibili\.com/(?P<room_id>\d+)")
+    @handle("live.bili", LIVE_PATTERN)
     async def _parse_live(self, searched: re.Match[str]):
         room_id = int(searched.group("room_id"))
         return await self.parse_live(room_id)
@@ -180,12 +183,30 @@ class BilibiliParser(BaseParser):
     async def parse_video(self, *, bvid: str | None = None, avid: int | None = None, page_num: int = 1):
         from .models.video import VideoInfo, AIConclusion
 
-        credential = await self.credential
-        video = Video(bvid=bvid, aid=avid, credential=credential)
-        video_info = convert(
-            await self._call_bili_api_with_retry(video.get_info, operation="视频信息"),
-            VideoInfo,
-        )
+        credential = None
+        try:
+            credential = await self.credential
+            video = Video(bvid=bvid, aid=avid, credential=credential)
+            video_info = convert(
+                await self._call_bili_api_with_retry(video.get_info, operation="视频信息"),
+                VideoInfo,
+            )
+        except Exception as error:
+            # SDK 网络/凭据检查失败或上游更改字段时，用同一链接交给轻量解析器。
+            # 已删除、私有或参数错误等业务响应保留原有语义。
+            code = str(getattr(error, "code", ""))
+            if not (self._is_transient_api_error(error) or code in {"-352", "-412", "-509"}
+                    or isinstance(error, (ValidationError, OSError, httpx.TransportError))
+                    or type(error).__name__ == "NetworkException"):
+                raise
+            from .fallback.parser import FallbackBilibiliParser
+
+            logger.warning("B站视频资料请求失败，启用备用解析（%s）", type(error).__name__)
+            cookie = self._bili_ck or ""
+            if credential is not None:
+                cookie = "; ".join(f"{name}={value}" for name, value in credential.get_cookies().items() if value)
+            fallback = FallbackBilibiliParser(self.downloader, bili_ck=cookie)
+            return await fallback.parse_video(bvid=bvid or "", avid=avid or 0, page_num=page_num)
         author = self.create_author(video_info.owner.name, video_info.owner.face)
         page_info = video_info.extract_info_with_page(page_num)
 
@@ -404,21 +425,7 @@ class BilibiliParser(BaseParser):
         return result
 
     async def parse_live(self, room_id: int):
-        from bilibili_api.live import LiveRoom
-        from .models.live import RoomData
-
-        room = LiveRoom(room_display_id=room_id, credential=await self.credential)
-        info_dict = await room.get_room_info()
-        room_data = convert(info_dict, RoomData)
-        contents: list[MediaContent] = []
-        if cover := room_data.cover:
-            contents.append(self.create_image(self.downloader.download_img(cover, ext_headers=self.headers)))
-        if keyframe := room_data.keyframe:
-            contents.append(self.create_image(self.downloader.download_img(keyframe, ext_headers=self.headers)))
-        author = self.create_author(room_data.name, room_data.avatar)
-        url = f"https://www.bilibili.com/blackboard/live/live-activity-player.html?enterTheRoom=0&cid={room_id}"
-        return self.result(url=url, title=room_data.title, text=room_data.detail,
-                          contents=contents, author=author, extra={"content_type": "直播"})
+        return await parse_live_room(self, room_id)
 
     async def parse_favlist(self, fav_id: int):
         from bilibili_api.favorite_list import get_video_favorite_list_content

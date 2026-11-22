@@ -28,6 +28,8 @@ from astrbot.api.event import filter, AstrMessageEvent, MessageEventResult, Mess
 import astrbot.api.message_components as Comp
 from astrbot.api.star import Context, Star, register, StarTools
 
+from .core.music.share_card import decode_card, is_card_component, music_card_links, text_card_payloads
+from .core.budget import share_download_budget
 from .core.media_utils import (
     CACHE_MARKER_NAME,
     cleanup_cache_dir,
@@ -1427,10 +1429,11 @@ class DeniaSharePlugin(Star):
         self, event: AstrMessageEvent, result: ParseResult, cache_key: str, *, on_delivered=None, diagnostic=None
     ) -> AsyncGenerator[MessageEventResult, None]:
         """把已得到的 ParseResult 按用户选中的输出模式发出去（实现见 core/delivery.py）。"""
-        async for r in self._delivery.deliver(
-            event, result, cache_key, on_delivered=on_delivered, diagnostic=diagnostic
-        ):
-            yield r
+        with share_download_budget(get_config().SHARE_DOWNLOAD_MAXIMUM_MB):
+            async for r in self._delivery.deliver(
+                event, result, cache_key, on_delivered=on_delivered, diagnostic=diagnostic
+            ):
+                yield r
 
     async def _audit_for_modes(
         self, result: ParseResult, *, media_on: bool
@@ -2203,35 +2206,35 @@ class DeniaSharePlugin(Star):
 
     @staticmethod
     def _has_json_component(event: AstrMessageEvent) -> bool:
-        if not hasattr(event, "message_obj") or not hasattr(event.message_obj, "message"):
-            return False
-        for c in event.message_obj.message:
-            if isinstance(c, Comp.Json):
+        for component in getattr(getattr(event, "message_obj", None), "message", None) or ():
+            kind = component.get("type") if isinstance(component, dict) else getattr(component, "type", None)
+            if is_card_component(kind) or isinstance(component, getattr(Comp, 'Json', ())):
                 return True
-            t = c.get("type") if isinstance(c, dict) else getattr(c, "type", None)
-            if t and t != "reply" and "json" in str(t).lower():
-                return True
-        return False
+        text = event.message_str or ""
+        return "[CQ:json,data=" in text or "[json:data=" in text
 
     def _extract_links_from_event(self, event: AstrMessageEvent) -> list[str]:
         links: list[str] = []
-        if hasattr(event, "message_obj") and hasattr(event.message_obj, "message"):
-            for c in event.message_obj.message:
-                if isinstance(c, Comp.Json):
-                    links.extend(self._extract_links_from_json(c.data))
-                elif isinstance(c, Comp.Plain):
-                    links.extend(URL_PATTERN.findall(c.text or ""))
-                elif isinstance(c, dict) and "json" in str(c.get("type", "")).lower():
-                    links.extend(self._extract_links_from_json(c.get("data", c)))
-        links.extend(URL_PATTERN.findall(event.message_str or ""))
+        for component in getattr(getattr(event, "message_obj", None), "message", None) or ():
+            if isinstance(component, Comp.Plain):
+                links.extend(URL_PATTERN.findall(component.text or ""))
+                continue
+            kind = component.get("type") if isinstance(component, dict) else getattr(component, "type", None)
+            if is_card_component(kind) or isinstance(component, getattr(Comp, 'Json', ())):
+                raw = component.get("data", component) if isinstance(component, dict) else getattr(component, "data", None)
+                links.extend(self._extract_links_from_json(raw))
+        text = event.message_str or ""
+        for payload in text_card_payloads(text):
+            links.extend(self._extract_links_from_json(payload))
+        links.extend(URL_PATTERN.findall(text))
         return links
 
     @staticmethod
     def _extract_links_from_json(data) -> list[str]:
         links: list[str] = []
         try:
-            if isinstance(data, str):
-                data = json.loads(data)
+            data = decode_card(data)
+            links.extend(music_card_links(data))
 
             def search(obj):
                 found = []

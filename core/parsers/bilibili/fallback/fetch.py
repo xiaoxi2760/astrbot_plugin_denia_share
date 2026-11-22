@@ -9,7 +9,13 @@
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any, Dict, Optional, Tuple
+
+import httpx
+
+from ....base_parser import BaseParser
+from ....budget import check_download_deadline
 
 from .streams import PLAYURL_API, StreamPair, pick_single_file, pick_streams
 from .wbi import WbiKeyProvider, sign_params
@@ -85,6 +91,27 @@ async def fetch_streams(
     return video, audio, data
 
 
+async def request_bili_json(client_factory, url, *, params, headers):
+    """Retry one transient network or upstream failure on a public API request."""
+    for attempt in range(2):
+        check_download_deadline()
+        try:
+            async with client_factory() as client:
+                response = await client.get(url, params=params, headers=headers)
+                response.raise_for_status()
+                payload = response.json()
+        except httpx.TransportError as error:
+            if attempt or BaseParser._permanent_network_error(error):
+                raise
+        except httpx.HTTPStatusError as error:
+            if attempt or error.response.status_code not in {408, 500, 502, 503, 504}:
+                raise
+        else:
+            if attempt or payload.get("code") != -504:
+                return payload
+        await asyncio.sleep(0.4)
+
+
 async def _request_playurl(
     client_factory,
     params: Dict[str, Any],
@@ -113,13 +140,11 @@ async def _request_playurl(
     if key:
         params = sign_params(params, key)
 
-    async with client_factory() as client:
-        resp = await client.get(PLAYURL_API, params=params, headers=request_headers)
-        resp.raise_for_status()
-        payload = resp.json()
-
+    payload = await request_bili_json(client_factory, PLAYURL_API, params=params, headers=request_headers)
     code = (payload or {}).get("code")
     if code != 0:
+        if code in {-352, -412}:
+            raise RuntimeError(f"B站暂时限制取流（{code}），请稍后重试或打开原视频")
         raise RuntimeError(f"B站 playurl 返回 code={code}: {(payload or {}).get('message')}")
 
     return (payload or {}).get("data") or {}

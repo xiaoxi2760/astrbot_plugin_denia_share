@@ -6,6 +6,7 @@ import re
 from pathlib import Path
 from urllib.parse import urlsplit
 
+from ..budget import share_download_budget
 from ..config import get_config
 from ..constants import PLATFORM_DISPLAY_NAMES
 
@@ -208,7 +209,8 @@ class MusicController:
                     content.cover = None
             # 编号播放只走富媒体一路：复用现成的下载、限大、语音/文件与中转链路，
             # 但**不**经过 _deliver —— 那里会按输出模式补发普通解析卡片。
-            await plugin._audit_for_modes(result, media_on=True)
+            with share_download_budget(get_config().SHARE_DOWNLOAD_MAXIMUM_MB):
+                await plugin._audit_for_modes(result, media_on=True)
             delivered = False
             send_failed = False
 

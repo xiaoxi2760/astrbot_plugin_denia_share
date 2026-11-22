@@ -12,7 +12,7 @@ from typing import Any
 from astrbot.api import logger
 
 from .budget import get_download_deadline, run_download
-from .exception import DownloadTotalTimeout
+from .exception import DownloadTotalTimeout, ShareDownloadLimitExceeded
 
 
 #: 惰性工厂的返回值类型：协程、已调度的 Task，或直接给出的路径。
@@ -209,7 +209,7 @@ class PathTask:
                     if not self._should_retry(exc):
                         from .exception import IgnoreException
                         # 策略跳过保留结果；改限额时配置热更新会统一清缓存。
-                        task._denia_failed = not isinstance(exc, IgnoreException)
+                        task._denia_failed = not isinstance(exc, IgnoreException) or isinstance(exc, ShareDownloadLimitExceeded)
                         raise
                     self._task = None
                     self._started = False

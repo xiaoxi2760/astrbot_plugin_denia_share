@@ -51,6 +51,13 @@ def _format_mb(byte_count: int) -> str:
     return f"{byte_count}B"
 
 
+class ShareDownloadLimitExceeded(IgnoreException):
+    """单次分享的下载字节预算不足。"""
+
+    def __init__(self, limit_bytes: int):
+        super().__init__(f"⚠️ 单次分享下载总量达到上限（{_format_mb(limit_bytes)}），部分媒体已跳过")
+
+
 class MediaSizeExceeded(IgnoreException):
     """媒体体积超过上限 —— 是「**故意不下载**」，但用户有权知道是哪一条。
 

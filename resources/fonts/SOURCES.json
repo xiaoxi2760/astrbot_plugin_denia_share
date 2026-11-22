@@ -18,6 +18,22 @@
       "bytes": 4330,
       "sha256": "500bb1ccf43df7bbb522112f9133a52b16e1c35e809632f5d8609b179152de5b",
       "license": "SIL Open Font License 1.1"
+    },
+    {
+      "file": "DeniaHangul-Regular.ttf",
+      "source": "https://github.com/Xbaiyz12/MusicUID/blob/38e027f720e7ed2dc86bc997746ec88786f841e0/MusicUID/resource/fonts/NanumGothic-Regular.ttf",
+      "bytes": 1267444,
+      "sha256": "c062c99da633cc5ca037ba8b47350a4bef272d76fc97d5155d301639ed95a8bc",
+      "license": "SIL Open Font License 1.1",
+      "derivation": "fontTools 4.68.0 Hangul-only subset (1100-11FF, 3130-318F, A960-A97F, AC00-D7FF), renamed Denia Hangul; TrueType hinting removed to reduce size",
+      "upstream_sha256": "76f45ef4a6bcff344c837c95a7dcc26e017e38b5846d5ae0cdcb5b86be2e2d31"
+    },
+    {
+      "file": "../../LICENSES/DeniaHangul-OFL.txt",
+      "source": "https://github.com/Xbaiyz12/MusicUID/blob/38e027f720e7ed2dc86bc997746ec88786f841e0/MusicUID/resource/fonts/OFL-NanumGothic.txt",
+      "bytes": 4534,
+      "sha256": "eeacf16032901d0ed0456876ec77b8f0fda6b3fecec7d972f8543eb602e6c30f",
+      "license": "SIL Open Font License 1.1"
     }
   ]
 }
