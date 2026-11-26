@@ -12,7 +12,9 @@
 
 from __future__ import annotations
 
+import json
 import re
+from functools import cache
 from pathlib import Path
 from typing import Any
 
@@ -1031,14 +1033,24 @@ _KEY_GROUP_MAP: dict[str, str] = {
 _DEFAULTS: dict[str, Any] = {item["key"]: item["default"] for item in CONFIG_META}
 
 
-def config_meta_payload() -> dict[str, Any]:
+@cache
+def _english_config_locale() -> dict[str, Any]:
+    path = Path(__file__).resolve().parents[1] / ".astrbot-plugin/i18n/en-US.json"
+    try:
+        catalog = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return catalog if isinstance(catalog, dict) else {}
+
+
+def config_meta_payload(language: str = "") -> dict[str, Any]:
     """返回供 WebUI 渲染的配置元数据（大类 + 分组 + 全部配置项定义）。
 
     ``groups`` 保持扁平结构不变（向后兼容，旧前端/脚本直接读它）；
     ``sections`` 是大类视角的导航：配置页按「大类 → 分组 → 子组 → 配置项」
     渲染，子组来自配置项的可选 ``subgroup`` 字段。
     """
-    return {
+    payload = {
         "sections": [
             {
                 "key": section["key"],
@@ -1062,6 +1074,34 @@ def config_meta_payload() -> dict[str, Any]:
         ],
         "items": [dict(item) for item in CONFIG_META if not item.get("internal")],
     }
+
+    if language.lower().split("-", 1)[0] != "en":
+        return payload
+
+    catalog = _english_config_locale()
+    config = catalog.get("config", {})
+    sections = catalog.get("config_sections", {})
+    subgroups = catalog.get("config_subgroups", {})
+    for section in payload["sections"]:
+        labels = sections.get(section["key"], {})
+        for key in ("label", "description"):
+            section[key] = labels.get(key, section[key])
+    for group in payload["groups"]:
+        labels = config.get(group["name"], {})
+        group["label"] = labels.get("title", group["name"])
+        group["description"] = labels.get("description", group["description"])
+    for item in payload["items"]:
+        labels = config.get(item["group"], {}).get(item["key"], {})
+        for field, translation in (
+            ("label", "description"), ("hint", "hint"), ("unit", "unit"), ("placeholder", "placeholder"),
+        ):
+            if translation in labels:
+                item[field] = labels[translation]
+        if labels.get("labels") and len(labels["labels"]) == len(item.get("options", ())):
+            item["labels"] = list(labels["labels"])
+        if item.get("subgroup"):
+            item["subgroup"] = subgroups.get(item["subgroup"], item["subgroup"])
+    return payload
 
 
 def section_coverage_problems() -> list[str]:

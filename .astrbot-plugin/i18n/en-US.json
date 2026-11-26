@@ -12,6 +12,7 @@
   },
   "config": {
     "界面设置": {
+      "title": "Interface",
       "description": "WebUI and share cards follow the saved style. Classic is bundled; custom WebUIs are installed separately. Card layout and light/dark theme stay independent.",
       "WEBUI_STYLE": {
         "description": "WebUI style",
@@ -22,6 +23,744 @@
           "Lily’s Dream Garden"
         ]
       }
+    },
+    "解析设置": {
+      "title": "Parsing",
+      "description": "The settings you use most day to day.",
+      "DISABLED_PLATFORMS": {
+        "description": "Disabled platforms",
+        "hint": "Check a platform to disable it; leave all unchecked to enable everything. Shares the same settings as the platform switches in the classic WebUI.",
+        "labels": [
+          "Bilibili",
+          "Douyin",
+          "Kuaishou",
+          "Weibo",
+          "Xiaohongshu",
+          "Twitter / X",
+          "YouTube",
+          "NGA",
+          "AcFun",
+          "GitHub",
+          "Pixiv",
+          "Steam",
+          "Heybox",
+          "NetEase Cloud Music",
+          "QQ Music"
+        ]
+      },
+      "VIDEO_DURATION_MAXIMUM": {
+        "description": "Maximum video/audio duration",
+        "hint": "Videos or audio longer than this are not downloaded; selected text and cards can still show the content and the reason.",
+        "unit": "seconds"
+      },
+      "VIDEO_SIZE_MAXIMUM_MB": {
+        "description": "Maximum size per video/audio file",
+        "hint": "Checked from Content-Length before download and while downloading. Large uploads often fail on QQ, so 60 or less is recommended.",
+        "unit": "MB"
+      },
+      "SEND_ERROR_MESSAGES": {
+        "description": "Send an error notice when parsing fails",
+        "hint": "When off, errors are only logged and no error messages are posted in the group. Turn it on temporarily when troubleshooting."
+      },
+      "IMAGE_COUNT_MAXIMUM": {
+        "description": "Maximum images per parse",
+        "hint": "Maximum gallery images processed per result, excluding avatars and card covers; the platform's own limit still applies.",
+        "unit": "images"
+      }
+    },
+    "权限控制": {
+      "title": "Access Control",
+      "description": "Who can trigger parsing: allowlist / blocklist.",
+      "WHITELIST_ENABLE": {
+        "description": "Enable allowlist",
+        "hint": "When on, **only** users / groups on the list can trigger parsing; administrators are always exempt. An empty list means nobody except administrators can use the plugin."
+      },
+      "WHITELIST_USER": {
+        "description": "Allowlisted users",
+        "hint": "Leave empty to allow no users (private chats will also be denied). For the official QQ bot, enter the user openid (use /sid to look it up), not the QQ number; separate entries with commas or spaces.",
+        "placeholder": "User ID or official QQ bot user openid"
+      },
+      "WHITELIST_GROUP": {
+        "description": "Allowlisted groups",
+        "hint": "Private chats are not affected by the group list. For the official QQ bot, enter the group openid (use /sid to look it up), not the group number or full UMO; separate entries with commas or spaces.",
+        "placeholder": "Group ID or official QQ bot group openid"
+      },
+      "BLACKLIST_ENABLE": {
+        "description": "Enable blocklist",
+        "hint": "When on, listed users / groups cannot trigger parsing; administrators are still exempt. If both lists are on, the allowlist is checked first, then the blocklist."
+      },
+      "BLACKLIST_USER": {
+        "description": "Blocklisted users",
+        "hint": "Listed users cannot trigger parsing. For the official QQ bot, enter the user openid (use /sid to look it up), not the QQ number; separate entries with commas or spaces.",
+        "placeholder": "User ID or official QQ bot user openid"
+      },
+      "BLACKLIST_GROUP": {
+        "description": "Blocklisted groups",
+        "hint": "Private chats are not affected by the group list. For the official QQ bot, enter the group openid (use /sid to look it up), not the group number or full UMO; separate entries with commas or spaces.",
+        "placeholder": "Group ID or official QQ bot group openid"
+      }
+    },
+    "B站设置": {
+      "title": "Bilibili",
+      "description": "Bilibili cookies and download quality.",
+      "BILI_CK": {
+        "description": "Bilibili Cookie",
+        "hint": "Sign in by QR code under Settings → Account Credentials → Bilibili or on the overview page; quality depends on the account's permissions."
+      },
+      "BILI_QUALITY": {
+        "description": "Bilibili download quality",
+        "hint": "Higher quality requires the corresponding account permissions; without sign-in only 720P is available in practice."
+      },
+      "BILI_CODEC": {
+        "description": "Bilibili video codec preference",
+        "hint": "Bilibili offers several compressed formats for the same video; this sets which one is preferred. H.264 plays on any client; AV1 is the smallest but older clients (such as QQ for PC) show artifacts; H.265 is in between. 4K/8K often only offer H.265/AV1, and the plugin falls back automatically rather than failing the download—so preferring H.264 does not make 4K videos undownloadable, it only means the H.264 version at that resolution is unavailable.",
+        "labels": [
+          "H.264 preferred",
+          "H.265 preferred",
+          "AV1 preferred"
+        ]
+      },
+      "BILI_EXTRA_INFO_TIMEOUT_SECONDS": {
+        "description": "Bilibili extra-info wait",
+        "hint": "Upper limit for waiting for the online viewer count and AI summary on the card, not the overall video parse timeout; increasing it lengthens the wait for some cards.",
+        "unit": "seconds"
+      }
+    },
+    "Steam 设置": {
+      "title": "Steam",
+      "description": "Price region and historical-low data source.",
+      "STEAM_REGION": {
+        "description": "Price region code",
+        "hint": "Sets the currency for official prices (cn/us/jp, etc.) and is also used as the ITAD country parameter."
+      },
+      "ITAD_API_KEY": {
+        "description": "IsThereAnyDeal API key",
+        "hint": "Only needed for historical low prices; apply for free at https://isthereanydeal.com/apps. When empty, Steam parsing still works, just without historical lows."
+      },
+      "STEAM_SCREENSHOT_COUNT": {
+        "description": "Steam game screenshot count",
+        "hint": "Number of screenshots attached to a game parse; 0 attaches none. Also limited by the maximum images per parse.",
+        "unit": "images"
+      }
+    },
+    "音乐设置": {
+      "title": "Music",
+      "description": "QQ Music and NetEase Cloud Music sign-in, song search and playback.",
+      "MUSIC_COMMANDS_ENABLED": {
+        "description": "Enable song search and playback",
+        "hint": "Song search sends a numbered result card; after choosing a song, it is sent using the current voice/file settings. Sharing-link parsing is controlled separately by the platform switches."
+      },
+      "MUSIC_DEFAULT_PLATFORM": {
+        "description": "Default song search platform",
+        "hint": "You can also specify it in the command, e.g. 点歌 QQ 晴天. With All, results from both services are interleaved and numbered continuously.",
+        "labels": [
+          "All",
+          "NetEase Cloud Music",
+          "QQ Music"
+        ]
+      },
+      "MUSIC_QUALITY": {
+        "description": "Playback audio quality",
+        "hint": "Highest quality attempted when streaming a selected song; it falls back automatically when unavailable. Lossless requires account entitlements (NetEase VIP / QQ Music Green Diamond); anonymous or free accounts fall back to lower tiers.",
+        "labels": [
+          "Standard (128k)",
+          "High (320k, default)",
+          "Lossless (FLAC, membership required)"
+        ]
+      },
+      "MUSIC_SEARCH_LIMIT": {
+        "description": "Number of song search results",
+        "hint": "Shows 1–10 candidates per search; with All selected, results from both services are interleaved and numbered continuously, with the total not exceeding this value."
+      },
+      "MUSIC_SESSION_TTL_SECONDS": {
+        "description": "Song selection list lifetime",
+        "hint": "The search list is kept separately for each session and user; after it expires, search again.",
+        "unit": "seconds"
+      },
+      "MUSIC_SEARCH_COMMANDS": {
+        "description": "Song search command",
+        "hint": "“点歌 <song>” shows this plugin's search card; add other aliases separated by commas, without spaces or slashes."
+      },
+      "MUSIC_PLAY_COMMANDS": {
+        "description": "Play and select command",
+        "hint": "“听1” or “听 1” sends the audio for the first item in the list without a parse card. Add other selection aliases separated by commas."
+      },
+      "NETEASE_CK": {
+        "description": "NetEase Cloud Music Cookie",
+        "hint": "Import MUSIC_U or a full cookie under Account Credentials above (see the credential page for steps); member tracks are fetched according to the account's actual permissions. Third-party QR sign-in is blocked by NetEase, so cookie import is the only way."
+      },
+      "QQMUSIC_CK": {
+        "description": "QQ Music Cookie",
+        "hint": "Scan the QR code or import a cookie containing uin and the music keys under Account Credentials above; it can be checked, renewed and cleared."
+      },
+      "MUSIC_CARD_SIGN_URL": {
+        "description": "Music card signing service URL",
+        "hint": "OneBot only. Leave empty to disable. When enabled, song metadata and playable audio URLs are submitted to this service; only use a signing service you trust."
+      },
+      "MUSIC_CARD_QQ_FORMAT": {
+        "description": "QQ Music signing format",
+        "hint": "Enter the QQ Music format required by the signing service."
+      },
+      "MUSIC_CARD_NETEASE_FORMAT": {
+        "description": "NetEase signing format",
+        "hint": "Enter the NetEase Cloud Music format required by the signing service."
+      },
+      "MUSIC_CARD_PARAMS": {
+        "description": "Music card signing extra parameters",
+        "hint": "Enter key:value pairs separated by commas or newlines. Main song fields are taken from values generated by the plugin."
+      },
+      "MUSIC_HTTP_TIMEOUT_SECONDS": {
+        "description": "Music API request timeout",
+        "hint": "HTTP wait budget for music search, details and streaming; cover images and QR sign-in/renewal still have their own limits.",
+        "unit": "seconds"
+      }
+    },
+    "CookieCloud": {
+      "title": "CookieCloud",
+      "description": "Sync browser logins for selected platforms from a self-hosted service.",
+      "COOKIECLOUD_URL": {
+        "description": "Service URL",
+        "hint": "Enter the address of your self-hosted CookieCloud; subdirectories are allowed."
+      },
+      "COOKIECLOUD_UUID": {
+        "description": "User key UUID",
+        "hint": "Must match the user key in the browser CookieCloud extension."
+      },
+      "COOKIECLOUD_PASSWORD": {
+        "description": "End-to-end encryption password",
+        "hint": "Decrypted only locally by the bot and never sent to the sync server."
+      },
+      "COOKIECLOUD_PLATFORMS": {
+        "description": "Sync platforms",
+        "hint": "Enter platform names: bilibili, xiaohongshu, pixiv, netease, qqmusic, xiaoheihe; leave empty to import nothing. GitHub tokens are not synced."
+      },
+      "COOKIECLOUD_INTERVAL_MINUTES": {
+        "description": "Auto-sync interval",
+        "hint": "0 means manual only. Auto-sync only updates logins that are not configured yet or are still managed by CookieCloud; manual changes are not overwritten.",
+        "unit": "minutes"
+      }
+    },
+    "网页截图": {
+      "title": "Webpage Screenshots",
+      "description": "Capture any webpage as an image and send it.",
+      "SCREENSHOT_BACKEND": {
+        "description": "Screenshot backend",
+        "hint": "thum=image.thum.io, a 900×900 viewport image that works out of the box; cloudflare can capture full pages and wait for JavaScript, but requires an account.",
+        "labels": [
+          "thum (no key required)",
+          "cloudflare (account required)"
+        ]
+      },
+      "SCREENSHOT_FULL_PAGE": {
+        "description": "Capture full-page long screenshots",
+        "hint": "On = capture the whole page (long articles can be read in full); off = only the first viewport. The difference is large in practice: for the same long wiki article, off gives only a 900×900 square image (about 0.3 MB, showing just the top), while full page is about 4.4 MB and its height follows the page (thum caps at 16000px and the bottom is cut off when it hits the cap). The trade-off is that long images can be several MB, and chat clients may compress them, so this is on by default but can be turned off. Both backends support full pages (thum via /fullpage, cloudflare via fullPage)."
+      },
+      "SCREENSHOT_FALLBACK": {
+        "description": "Auto-screenshot links with no matching platform",
+        "hint": "Off by default to avoid flooding groups with images. When on, any http link that cannot be parsed will be screenshotted."
+      },
+      "CF_ACCOUNT_ID": {
+        "description": "Cloudflare Account ID",
+        "hint": "Needed only for the cloudflare backend; copy it from the right sidebar of the Cloudflare dashboard."
+      },
+      "CF_API_TOKEN": {
+        "description": "Cloudflare API Token",
+        "hint": "Needed only for the cloudflare backend; it must have Browser Rendering write permission."
+      },
+      "SCREENSHOT_TIMEOUT_SECONDS": {
+        "description": "Screenshot request timeout",
+        "hint": "Local request budget for waiting for the screenshot service; the CF page-load budget is a separate timer, so leave time for generating and transferring the image.",
+        "unit": "seconds"
+      },
+      "SCREENSHOT_CF_WAIT_UNTIL": {
+        "description": "CF page-load wait strategy",
+        "hint": "Affects Cloudflare screenshots only. Waiting only for DOM readiness may capture an unfinished page; waiting for network idle may be slowed by continuous requests.",
+        "labels": [
+          "Page load complete",
+          "DOM ready",
+          "Network fully idle",
+          "Network mostly idle"
+        ]
+      },
+      "SCREENSHOT_CF_GOTO_TIMEOUT_MS": {
+        "description": "CF page-load budget",
+        "hint": "Affects only server-side page loading in Cloudflare, up to 60000 ms; leave headroom in the local screenshot request timeout.",
+        "unit": "ms"
+      }
+    },
+    "输出模式": {
+      "title": "Output Modes",
+      "description": "Choose text, cards and rich media in any combination.",
+      "OUTPUT_TEXT_ENABLED": {
+        "description": "Text",
+        "hint": "A plain text message with the title, link, brief playback information and necessary notices. Can be sent together with cards and rich media."
+      },
+      "OUTPUT_CARD_ENABLED": {
+        "description": "Card",
+        "hint": "Requires “Enable card rendering” as well. If rendering fails, only the card is skipped and the other output options are unchanged."
+      },
+      "OUTPUT_MEDIA_ENABLED": {
+        "description": "Rich media",
+        "hint": "Sends original images, videos, GIFs and audio. When off, the video itself is not downloaded; the card only fetches the images it needs."
+      },
+      "AUDIO_SEND_MODE": {
+        "description": "Audio delivery method",
+        "hint": "If sending as a voice message fails, the audio is sent as a file automatically; with file mode it is always sent as a file. A timeout can cause both the voice message and the file to arrive; if the API reports success but the client did not receive it, this cannot be detected. For files in split containers, use a relay, shared directory or host path mapping.",
+        "labels": [
+          "Voice message",
+          "Audio file"
+        ]
+      },
+      "SEND_BACKGROUND_MUSIC": {
+        "description": "Send background music for image posts",
+        "hint": "Whether to also send the background music that image posts carry. Currently supported for Douyin image posts; off by default to avoid unexpectedly adding music to ordinary image posts."
+      },
+      "OUTPUT_MODES_INITIALIZED": {
+        "description": "Output mode migration flag",
+        "hint": "Maintained by the plugin to avoid migrating user choices again after the host fills in defaults."
+      },
+      "MEDIA_DOWNLOAD_MODE": {
+        "description": "Download timing",
+        "hint": "Auto downloads and sends as before. Confirm first shows the post, with quality, size and the confirm command sent separately as text; rich media must be enabled, and the normal text switch does not affect it. After confirmation the media is downloaded and sent automatically, still subject to size, duration and the 2 GB hard limit.",
+        "labels": [
+          "Download automatically (default)",
+          "Confirm before downloading"
+        ]
+      },
+      "CONFIRM_ALLOW_ANYONE": {
+        "description": "Any user with access can confirm",
+        "hint": "When on, any user with plugin access (platform switches and allowlist still apply) can confirm pending downloads; this is an OR relationship with the roles below, and if all are off nobody can confirm."
+      },
+      "CONFIRM_ALLOW_SENDER": {
+        "description": "Original sharer can confirm",
+        "hint": "When on, the original sharer can confirm their own pending downloads (on by default)."
+      },
+      "CONFIRM_ALLOW_QQ_ADMIN": {
+        "description": "QQ group owner/admin can confirm",
+        "hint": "When on, the QQ group owner/admin can confirm pending downloads **in this group** (the owner counts); only available for aiocqhttp / OneBot group events. The official QQ bot cannot identify group admins this way, and it does not apply in private chats or when the identity is unknown."
+      },
+      "CONFIRM_ALLOW_BOT_ADMIN": {
+        "description": "AstrBot administrator can confirm",
+        "hint": "When on, AstrBot administrators can confirm pending downloads."
+      },
+      "CONFIRM_DOWNLOAD_TTL_SECONDS": {
+        "description": "Pending confirmation lifetime",
+        "hint": "Lifetime of a pending item (seconds, 30–1800). After it expires, the link must be shared again to confirm.",
+        "unit": "seconds"
+      },
+      "OUTPUT_CONTENTS": {
+        "description": "Sent contents",
+        "hint": "Select any combination; if none are selected, nothing is parsed or downloaded. Selecting Card also enables card rendering.",
+        "labels": [
+          "Text",
+          "Card",
+          "Rich media"
+        ]
+      },
+      "CONFIRM_ROLES": {
+        "description": "Roles allowed to confirm",
+        "hint": "Select any combination; any matching role is sufficient. If none are selected, nobody can confirm. QQ group admin applies only to OneBot group events where roles can be identified; the official QQ bot is not supported.",
+        "labels": [
+          "Any user with access",
+          "Original sharer",
+          "QQ group owner/admin",
+          "AstrBot administrator"
+        ]
+      },
+      "NATIVE_CHOICES_INITIALIZED": {
+        "description": "Multi-select migration flag",
+        "hint": "Maintained by the plugin to keep the default lists from overwriting older switch choices."
+      }
+    },
+    "卡片外观": {
+      "title": "Card Appearance",
+      "description": "Render parse results as share-card images.",
+      "RENDER_ENABLED": {
+        "description": "Enable card rendering",
+        "hint": "Controls card rendering only. When off, no cards are sent; selected text and rich media are unaffected."
+      },
+      "RENDER_THEME": {
+        "description": "Card theme",
+        "hint": "Affects only the card images that are sent, not the web interface theme.",
+        "labels": [
+          "Dark",
+          "Light"
+        ]
+      },
+      "RENDER_LAYOUT": {
+        "description": "Card layout",
+        "hint": "All four layouts support the card style of the current WebUI and can be previewed before saving; card light/dark mode is set separately.",
+        "labels": [
+          "Standard",
+          "Magazine",
+          "Immersive",
+          "Feed"
+        ]
+      },
+      "RENDER_WIDTH": {
+        "description": "Card width",
+        "hint": "520–1080. Wider cards give content more room but appear smaller in chat apps.",
+        "unit": "px"
+      },
+      "RENDER_COVER_FULL_SIZE": {
+        "description": "Show cover at original size",
+        "hint": "When on, the cover is not cropped; tall images are displayed in full at the top of the card."
+      },
+      "RENDER_FONT_PATH": {
+        "description": "Custom font file",
+        "hint": "Leave empty to auto-detect system fonts; specify an absolute path only when cards show missing-glyph boxes."
+      },
+      "RENDER_ACCENT_COLOR": {
+        "description": "Custom accent color",
+        "hint": "Empty = each platform uses its own brand color. Set #RRGGBB to use the same accent color on all cards (badges, glows, watermark dots)."
+      },
+      "RENDER_WATERMARK": {
+        "description": "Card watermark text",
+        "hint": "Watermark text in the bottom-right corner of the card; leave empty to hide it. Maximum 12 characters."
+      },
+      "RENDER_DESC_MAX_LINES": {
+        "description": "Maximum body text lines",
+        "hint": "0 = layout default (4–6 lines). Long descriptions are truncated to this many lines to keep cards compact.",
+        "unit": "lines"
+      },
+      "RENDER_SHOW_AVATAR": {
+        "description": "Show author avatar",
+        "hint": "When off, the author row keeps only the nickname and signature and does not draw the avatar circle (the avatar is no longer loaded either)."
+      },
+      "RENDER_SHOW_PLAY_BUTTON": {
+        "description": "Cover play button",
+        "hint": "Show the play button in the center of the video cover; when off, only the cover image remains."
+      },
+      "RENDER_SHOW_AI_SUMMARY": {
+        "description": "Show Bilibili AI summary",
+        "hint": "Shown in Standard, Magazine and Feed layouts; hidden in Immersive. Hidden when no summary is available."
+      },
+      "RENDER_GRADIENT_TOP": {
+        "description": "Background gradient · top color",
+        "hint": "Empty = follow the card theme. Set #RRGGBB to override the top color of the card background gradient."
+      },
+      "RENDER_GRADIENT_BOTTOM": {
+        "description": "Background gradient · bottom color",
+        "hint": "Empty = follow the card theme. Set #RRGGBB to override the bottom color of the card background gradient."
+      }
+    },
+    "媒体发送": {
+      "title": "Media Delivery",
+      "description": "How videos reach the messaging platform: shared directory or relay links.",
+      "QQ_OFFICIAL_MEDIA_MODE": {
+        "description": "QQ official bot multimedia delivery",
+        "hint": "Only applies to the official QQ bot. With source links, multiple images become up to 2 pages of thumbnail previews (9 per page); for GIFs and multiple videos, open the source link. Without a source link, media is sent one by one. OneBot merged forwarding is unaffected.",
+        "labels": [
+          "Compact preview with source link",
+          "Send original media one by one"
+        ]
+      },
+      "CACHE_DIR": {
+        "description": "Shared cache directory",
+        "hint": "① Local file method: enter a container path that every container maps to the same host directory, so the protocol side (NapCat, etc.) can read videos directly. Empty = use the plugin data directory—in split-container deployments the protocol side cannot read it and videos cannot be sent (images and voice are unaffected because they are converted to base64). Safety limit: cache cleanup recursively deletes this directory, so the root directory, any parent directory that contains the plugin data directory, and directories that already contain files without a .denia_share_cache sentinel file are rejected and fall back to the plugin data directory."
+      },
+      "MEDIA_RELAY_ENABLED": {
+        "description": "Enable media relay",
+        "hint": "② Link method: register downloaded videos as temporary AstrBot HTTP links (/api/file/<token>) and send those. The protocol side only needs access to the callback URL below; no shared mount is required. If registration fails, it falls back to local files automatically."
+      },
+      "MEDIA_RELAY_CALLBACK_URL": {
+        "description": "AstrBot callback URL",
+        "hint": "When empty, the global AstrBot callback_api_base is used. Must be an address the messaging-platform container can reach; on the same Docker network, a container name works, e.g. http://astrbot:6185."
+      },
+      "MEDIA_RELAY_TTL": {
+        "description": "Relay link lifetime",
+        "hint": "The link expires after this time. Larger videos and slower links need more time; at least 120 seconds is recommended.",
+        "unit": "seconds"
+      }
+    },
+    "合并转发": {
+      "title": "Merged Forwarding",
+      "description": "Whether selected media should be packed into a single merged-forward message.",
+      "AGGREGATION_MODE": {
+        "description": "Enable merged forwarding",
+        "hint": "OneBot only. The selected contents are merged and forwarded; other enabled contents are sent separately.",
+        "labels": [
+          "No aggregation",
+          "Aggregate all",
+          "Aggregate by condition"
+        ]
+      },
+      "AGGREGATION_CONTENTS": {
+        "description": "Include in merged forwarding",
+        "hint": "Only contents actually sent in this delivery and selected here are packed. If the protocol side explicitly rejects the message, contents are sent one by one instead.",
+        "labels": [
+          "Short text",
+          "Cover card",
+          "Images and GIFs",
+          "Videos",
+          "Voice messages",
+          "Audio files"
+        ]
+      },
+      "AGGREGATION_IMAGE_THRESHOLD": {
+        "description": "Image count threshold",
+        "hint": "Only for “Aggregate by condition”: merge when the image count reaches this value. 0 = this condition never triggers.",
+        "unit": "images"
+      },
+      "AGGREGATION_VIDEO_THRESHOLD": {
+        "description": "Video count threshold",
+        "hint": "Only for “Aggregate by condition”: merge when the video count reaches this value. 0 = this condition never triggers.",
+        "unit": "videos"
+      },
+      "AGGREGATION_NODE_THRESHOLD": {
+        "description": "Total node threshold",
+        "hint": "Only for “Aggregate by condition”: merge when the total number of nodes selected for forwarding reaches this value. 0 = this condition never triggers.",
+        "unit": "nodes"
+      },
+      "FORWARD_NODE_NICKNAME": {
+        "description": "Forwarded node nickname",
+        "hint": "Display name of the merged-forward node, up to 32 characters; empty uses the default name 希望解析器. Does not change the actual sending account."
+      }
+    },
+    "高级设置": {
+      "title": "Advanced",
+      "description": "Rarely needed; enable only as required.",
+      "XIAOHEIHE_CK": {
+        "description": "Heybox Cookie",
+        "hint": "Import browser cookies under Account Credentials → Heybox above. Posts that require sign-in are fetched according to the account's permissions; if the platform still asks for verification, complete it on the website first."
+      },
+      "XHS_CK": {
+        "description": "Xiaohongshu Cookie",
+        "hint": "Some notes require a signed-in session for complete parsing; copy the xiaohongshu.com cookies from your browser."
+      },
+      "PIXIV_CK": {
+        "description": "Pixiv Cookie",
+        "hint": "Search works without it. With it, coverage is better, but R18 results may appear—the plugin strictly filters non-all-ages content and will not relax that."
+      },
+      "GITHUB_TOKEN": {
+        "description": "GitHub Token",
+        "hint": "Strongly recommended. Without a token the limit is 60 requests/hour per egress IP, which is easily exhausted on shared IPs; with one it is 5000 requests/hour."
+      },
+      "PROXY": {
+        "description": "Proxy URL",
+        "hint": "Empty = no plugin proxy, though environment-variable proxies may still apply. Enter an address reachable from the machine running AstrBot; which platforms use it is controlled by the per-platform “Use proxy” switches below, which are all off by default. In split-container Docker deployments, use the host address (e.g. http://172.18.0.1:7890), not 127.0.0.1—that is the container itself."
+      },
+      "PROXY_BILIBILI": {
+        "description": "Bilibili",
+        "hint": "When on, API requests and media downloads for “Bilibili” use the proxy URL above; when off, no plugin proxy is used, though environment-variable proxies may still apply. This switch has no effect when the proxy URL is empty."
+      },
+      "PROXY_DOUYIN": {
+        "description": "Douyin",
+        "hint": "When on, API requests and media downloads for “Douyin” use the proxy URL above; when off, no plugin proxy is used, though environment-variable proxies may still apply. This switch has no effect when the proxy URL is empty."
+      },
+      "PROXY_KUAISHOU": {
+        "description": "Kuaishou",
+        "hint": "When on, API requests and media downloads for “Kuaishou” use the proxy URL above; when off, no plugin proxy is used, though environment-variable proxies may still apply. This switch has no effect when the proxy URL is empty."
+      },
+      "PROXY_WEIBO": {
+        "description": "Weibo",
+        "hint": "When on, API requests and media downloads for “Weibo” use the proxy URL above; when off, no plugin proxy is used, though environment-variable proxies may still apply. This switch has no effect when the proxy URL is empty."
+      },
+      "PROXY_XIAOHONGSHU": {
+        "description": "Xiaohongshu",
+        "hint": "When on, API requests and media downloads for “Xiaohongshu” use the proxy URL above; when off, no plugin proxy is used, though environment-variable proxies may still apply. This switch has no effect when the proxy URL is empty."
+      },
+      "PROXY_TWITTER": {
+        "description": "Twitter / X",
+        "hint": "When on, API requests and media downloads for “Twitter / X” use the proxy URL above; when off, no plugin proxy is used, though environment-variable proxies may still apply. This switch has no effect when the proxy URL is empty."
+      },
+      "PROXY_YOUTUBE": {
+        "description": "YouTube",
+        "hint": "When on, YouTube previews, streaming and media downloads use the proxy URL above; this switch has no effect when the proxy URL is empty."
+      },
+      "PROXY_NGA": {
+        "description": "NGA",
+        "hint": "When on, API requests and media downloads for “NGA” use the proxy URL above; when off, no plugin proxy is used, though environment-variable proxies may still apply. This switch has no effect when the proxy URL is empty."
+      },
+      "PROXY_ACFUN": {
+        "description": "AcFun",
+        "hint": "When on, API requests and media downloads for “AcFun” use the proxy URL above; when off, no plugin proxy is used, though environment-variable proxies may still apply. This switch has no effect when the proxy URL is empty."
+      },
+      "PROXY_GITHUB": {
+        "description": "GitHub",
+        "hint": "When on, API requests and media downloads for “GitHub” use the proxy URL above; when off, no plugin proxy is used, though environment-variable proxies may still apply. This switch has no effect when the proxy URL is empty."
+      },
+      "PROXY_PIXIV": {
+        "description": "Pixiv",
+        "hint": "When on, API requests and media downloads for “Pixiv” use the proxy URL above; when off, no plugin proxy is used, though environment-variable proxies may still apply. This switch has no effect when the proxy URL is empty."
+      },
+      "PROXY_STEAM": {
+        "description": "Steam",
+        "hint": "When on, API requests and media downloads for “Steam” use the proxy URL above; when off, no plugin proxy is used, though environment-variable proxies may still apply. This switch has no effect when the proxy URL is empty."
+      },
+      "PROXY_XIAOHEIHE": {
+        "description": "Heybox",
+        "hint": "When on, API requests and media downloads for “Heybox” use the proxy URL above; when off, no plugin proxy is used, though environment-variable proxies may still apply. This switch has no effect when the proxy URL is empty."
+      },
+      "PROXY_NETEASE": {
+        "description": "NetEase Cloud Music",
+        "hint": "When on, API requests and media downloads for “NetEase Cloud Music” use the proxy URL above; when off, no plugin proxy is used, though environment-variable proxies may still apply. This switch has no effect when the proxy URL is empty."
+      },
+      "PROXY_QQMUSIC": {
+        "description": "QQ Music",
+        "hint": "When on, API requests and media downloads for “QQ Music” use the proxy URL above; when off, no plugin proxy is used, though environment-variable proxies may still apply. This switch has no effect when the proxy URL is empty."
+      },
+      "PROXY_SCREENSHOT": {
+        "description": "Webpage screenshots",
+        "hint": "When on, screenshot requests use the proxy URL above; when off, no plugin proxy is used, though environment-variable proxies may still apply. This switch has no effect when the proxy URL is empty."
+      },
+      "HTTP_VERIFY_SSL": {
+        "description": "Verify HTTPS certificates",
+        "hint": "On by default. Downloads and plugin-made requests verify the server certificate to prevent man-in-the-middle interception of requests carrying cookies. Turn it off temporarily only when a site with a broken certificate chain (self-hosted reverse proxy, internal mirror) causes parsing failures."
+      },
+      "TWITTER_MEDIA_PROXY_BASE": {
+        "description": "Twitter image/video proxy base URL",
+        "hint": "Empty = disabled. Set this when the server cannot reach twimg."
+      },
+      "DOWNLOAD_IMAGE_CONCURRENCY": {
+        "description": "Image download concurrency",
+        "hint": "Number of images downloaded at the same time per download pool. Direct and proxied downloads are counted separately; increasing it may use more bandwidth and trigger platform rate limits.",
+        "unit": "tasks"
+      },
+      "DOWNLOAD_MEDIA_CONCURRENCY": {
+        "description": "Video and audio download concurrency",
+        "hint": "Number of videos or audio files downloaded at the same time per download pool; Bilibili audio and video may each occupy a task. Direct and proxied downloads are counted separately.",
+        "unit": "tasks"
+      },
+      "DOWNLOAD_MEDIA_TIMEOUT_SECONDS": {
+        "description": "Total media download time limit",
+        "hint": "Shared by images, covers, avatars, videos and audio. Timing starts when a media item begins fetching and covers stream retrieval, waiting for a download slot, downloading, retries and necessary merging. Newly started tasks use the saved value.",
+        "unit": "seconds"
+      },
+      "SHARE_DOWNLOAD_MAXIMUM_MB": {
+        "description": "Download total per share",
+        "hint": "Limits the bytes of newly downloaded media per share; cache hits are not counted. Completed media is kept after the limit is reached. 0 means no total limit.",
+        "unit": "MB"
+      },
+      "DOWNLOAD_RETRY_ATTEMPTS": {
+        "description": "Download retry attempts",
+        "hint": "Maximum number of times a task is rebuilt after the initial download when a temporary network error occurs; 0 disables retries. Permanent errors such as permission, disk or content limits are not retried.",
+        "unit": "attempts"
+      },
+      "CREDENTIAL_CHECK_TIMEOUT_SECONDS": {
+        "description": "Credential probe request timeout",
+        "hint": "Request budget for generic credential HTTP checks; it does not control all QR sign-in or QQ Music renewal flows.",
+        "unit": "seconds"
+      },
+      "PIXIV_IMAGE_COUNT_MAXIMUM": {
+        "description": "Pixiv artwork image limit",
+        "hint": "Maximum images sent for multi-page artworks; also limited by the maximum images per parse.",
+        "unit": "images"
+      },
+      "PIXIV_SEARCH_IMAGE_COUNT": {
+        "description": "Pixiv search image count",
+        "hint": "Maximum images sent for Pixiv search results; also limited by the maximum images per parse.",
+        "unit": "images"
+      },
+      "ACFUN_QUALITY": {
+        "description": "AcFun quality preference",
+        "hint": "Tries the selected quality first and uses an available alternative stream when unavailable; this is not a hard quality lock.",
+        "labels": [
+          "1080P preferred",
+          "720P preferred",
+          "480P preferred",
+          "360P preferred"
+        ]
+      },
+      "WEIBO_VIDEO_QUALITY": {
+        "description": "Weibo video quality preference",
+        "hint": "Prefers the stream at the requested API tier and still tries other available URLs if it is missing; HD/data-saver are API tiers, not fixed resolutions.",
+        "labels": [
+          "720P preferred",
+          "HD preferred",
+          "Data saver preferred"
+        ]
+      },
+      "XHS_IMAGE_WIDTH": {
+        "description": "Xiaohongshu image resize width",
+        "hint": "Default 1080; 0 means no extra CDN resize and JPEG transcoding directives are added, so the actual image quality and format are determined by the origin server.",
+        "unit": "px"
+      }
+    },
+    "维护": {
+      "title": "Maintenance",
+      "description": "Cache and debugging; changes take effect immediately.",
+      "CACHE_TTL_HOURS": {
+        "description": "Cache retention",
+        "hint": "Cache unused for longer than this is cleaned up automatically; 0 disables automatic cleanup.",
+        "unit": "hours"
+      },
+      "RESULT_CACHE_TTL_SECONDS": {
+        "description": "Re-parse interval",
+        "hint": "When the same link is sent again within this time, the previous result is used and Bilibili/Douyin/etc. are not queried again. 0 means re-parse every time. Do not set this longer than Cache retention: if media files on disk are deleted first, the card can still be sent but the video cannot (the plugin re-parses automatically, wasting one request).",
+        "unit": "seconds"
+      },
+      "DUPLICATE_LINK_WINDOW_SECONDS": {
+        "description": "Duplicate-link suppression in groups",
+        "hint": "**Group chats only**: after the first person posts a link in a group, if someone else posts the same link within this window, it is **not parsed and no card is sent**; the bot replies once with the duplicate-link notice. Private chats are not deduplicated. 0 disables it. Difference from Re-parse interval: that reuses the previous result and **still sends the card**; this sends **no response**. The latter prevents a hot link forwarded repeatedly in a group from flooding the chat.",
+        "unit": "seconds"
+      },
+      "CACHE_CLEANUP_INTERVAL_MINUTES": {
+        "description": "Cache cleanup interval",
+        "hint": "How often the background cleanup task runs; changes take effect after reloading the plugin.",
+        "unit": "minutes"
+      },
+      "DEBUG_LOG_ENABLED": {
+        "description": "Output debug logs",
+        "hint": "When off, only warnings and errors are logged; turn it on when troubleshooting."
+      },
+      "HISTORY_MAX_RECORDS": {
+        "description": "History record limit",
+        "hint": "Maximum number of share records kept. Reducing it trims older records but does not delete media files; media cleanup is controlled by the cache settings.",
+        "unit": "records"
+      },
+      "DEDUP_HINT_TEXT": {
+        "description": "Duplicate-link notice text",
+        "hint": "Notice shown when a duplicate link in the same group is skipped, up to 200 characters; empty silently skips confirmed duplicates without affecting notices for deliveries whose status is uncertain."
+      },
+      "MAX_RESULT_CACHE_ENTRIES": {
+        "description": "Parse memory cache entries",
+        "hint": "Maximum number of parse results kept in memory, not the number of history records on disk. Increasing it may use more memory; existing cache lifetimes still apply.",
+        "unit": "entries"
+      },
+      "MAX_RENDER_CACHE_ENTRIES": {
+        "description": "Card memory index entries",
+        "hint": "Maximum number of rendered-result index entries kept in memory; does not control cleanup of card files on disk.",
+        "unit": "entries"
+      }
     }
+  },
+  "config_sections": {
+    "basic": {
+      "label": "Basic",
+      "description": "Interface, parsing behavior, delivery strategy and access permissions—the ones you change most day to day."
+    },
+    "platform": {
+      "label": "Platform access",
+      "description": "Credentials, quality settings and third-party data sources for each platform."
+    },
+    "output": {
+      "label": "Output & delivery",
+      "description": "Choose what to send and tune cards and media delivery."
+    },
+    "advanced": {
+      "label": "Advanced & maintenance",
+      "description": "Credentials, networking and cache debugging; rarely needed."
+    }
+  },
+  "config_subgroups": {
+    "白名单": "Allowlist",
+    "黑名单": "Blocklist",
+    "通用": "General",
+    "Cloudflare 后端": "Cloudflare backend",
+    "确认下载": "Download confirmation",
+    "基础": "Basics",
+    "内容元素": "Content elements",
+    "配色": "Colors",
+    "方式一 · 本地共享目录": "Method 1 · Local shared directory",
+    "方式二 · 中转链接": "Method 2 · Relay links",
+    "平台凭据": "Platform credentials",
+    "网络": "Network",
+    "性能与网络": "Performance & network",
+    "平台偏好": "Platform preferences",
+    "缓存清理": "Cache cleanup",
+    "日志": "Logs",
+    "消息与历史": "Messages & history",
+    "内存缓存": "Memory cache"
   }
 }

@@ -515,7 +515,11 @@ class WebUIApi:
 
     async def get_config(self):
         pconfig = get_config()
-        payload = config_meta_payload()
+        try:
+            language = query_arg("lang")
+        except RuntimeError:
+            language = ""
+        payload = config_meta_payload(language)
         payload["values"], payload["secret_status"] = self._public_config(pconfig)
         payload["card_style"] = getattr(getattr(self.plugin, "_renderer", None), "style_name", None)
         payload["platforms"] = [

@@ -51,10 +51,9 @@ except ImportError:  # pragma: no cover
     Image = ImageDraw = ImageFilter = ImageFont = None
     ImageOps = None
 
-try:
-    _LANCZOS = Image.Resampling.LANCZOS
-except AttributeError:  # Pillow < 9.1
-    _LANCZOS = Image.LANCZOS  # type: ignore[attr-defined]
+# Rendering exits early when Pillow is unavailable. Resolve the filter only
+# when the module was loaded, including older Pillow releases.
+_LANCZOS = getattr(Image, "Resampling", Image).LANCZOS if Image is not None else None
 
 # 卡片右下角的默认水印文字。
 WATERMARK_TAG = "希望解析"

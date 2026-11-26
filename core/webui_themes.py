@@ -29,6 +29,7 @@ from urllib.parse import urljoin, urlsplit
 
 import httpx
 
+from . import http_env  # noqa: F401 -- normalize environment proxy settings
 
 PLUGIN_ID = "astrbot_plugin_denia_share"
 CARD_STYLES = frozenset({"classic", "denia", "lily"})

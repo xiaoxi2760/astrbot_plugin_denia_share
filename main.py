@@ -1612,9 +1612,8 @@ class DeniaSharePlugin(Star):
     # ==================== 配置热生效 ====================
 
     def refresh_card_renderer(self) -> None:
-        renderer = ShareCardRenderer(self.cache_dir, **get_config().renderer_options())
-        self._renderer = renderer
         self._render_cache.clear()
+        self._renderer = ShareCardRenderer(self.cache_dir, **get_config().renderer_options())
 
     async def apply_runtime_config(self) -> dict[str, Any]:
         """按最新配置重建运行时组件。

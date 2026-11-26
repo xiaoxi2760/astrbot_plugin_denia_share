@@ -41,7 +41,33 @@ function parseListValue(raw) {
   return [...seen];
 }
 
+const CONFIG_LANGUAGE_KEY = "denia-share.config-language";
+
+function initialConfigLanguage(ctx) {
+  const requested = new URLSearchParams(globalThis.location?.search || "").get("lang");
+  if (requested) return requested;
+  try {
+    const saved = globalThis.window?.localStorage?.getItem(CONFIG_LANGUAGE_KEY);
+    if (saved) return saved;
+  } catch {
+    // A sandboxed iframe may not have access to localStorage.
+  }
+  if (ctx.locale) return ctx.locale;
+  if (globalThis.window) {
+    try {
+      const hostLanguage = window.parent !== window && window.parent.document.documentElement.lang;
+      if (hostLanguage) return hostLanguage;
+    } catch {
+      // The host document may be on a different origin.
+    }
+    return globalThis.navigator?.language || "";
+  }
+  return "";
+}
+
 export function createConfigView(ctx, { showAccountPanels = true, collapsedByDefault = false } = {}) {
+  let english = /^en(?:-|$)/i.test(initialConfigLanguage(ctx));
+  const tr = (chinese, translation) => english ? translation : chinese;
   let container = null;
   let meta = { sections: [], groups: [], items: [], platforms: [], problems: [] };
   let values = {};
@@ -71,9 +97,7 @@ export function createConfigView(ctx, { showAccountPanels = true, collapsedByDef
   let saveBar = null;
   const webuiThemes = createWebUIThemesPanel(ctx, { onInstalled: render });
 
-  async function load() {
-    ctx.setHead("加载中…");
-    const payload = await ctx.api.get("config");
+  function applyConfigMeta(payload) {
     meta = {
       sections: Array.isArray(payload.sections) ? payload.sections : [],
       groups: payload.groups || [],
@@ -81,6 +105,32 @@ export function createConfigView(ctx, { showAccountPanels = true, collapsedByDef
       platforms: payload.platforms || [],
       problems: payload.problems || [],
     };
+  }
+
+  async function switchLanguage(button) {
+    const next = !english;
+    button.disabled = true;
+    try {
+      const payload = await ctx.api.get("config", next ? { lang: "en" } : undefined);
+      applyConfigMeta(payload);
+      english = next;
+      try {
+        globalThis.window?.localStorage?.setItem(CONFIG_LANGUAGE_KEY, english ? "en" : "zh-CN");
+      } catch {
+        // Keep the in-memory selection if local storage is unavailable.
+      }
+      render();
+    } catch (error) {
+      toast(tr("无法切换语言", "Unable to change language") + " · " + error.message, "err");
+    } finally {
+      button.disabled = false;
+    }
+  }
+
+  async function load() {
+    ctx.setHead(tr("加载中…", "Loading…"));
+    const payload = await ctx.api.get("config", english ? { lang: "en" } : undefined);
+    applyConfigMeta(payload);
     values = payload.values || {};
     secretStatus = payload.secret_status || {};
     draft = {};
@@ -180,7 +230,7 @@ export function createConfigView(ctx, { showAccountPanels = true, collapsedByDef
     }
     for (const button of container.querySelectorAll("[data-secret-clear]")) {
       const pending = pendingSecretClears.has(button.dataset.secretClear);
-      button.textContent = pending ? "取消清除" : "清除已保存值";
+      button.textContent = pending ? tr("取消清除", "Cancel clearing") : tr("清除已保存值", "Clear saved value");
       button.disabled = !pending && secretConfigured(button.dataset.secretClear) !== true;
     }
     syncSaveBar();
@@ -208,22 +258,22 @@ export function createConfigView(ctx, { showAccountPanels = true, collapsedByDef
         const state = credentials.platforms().find((item) => item.id === platform);
         const label = state
           ? state.configured
-            ? "已由凭据管理配置"
-            : "尚未配置"
-          : "尚未配置";
+            ? tr("已由凭据管理配置", "Configured in account credentials")
+            : tr("尚未配置", "Not configured")
+          : tr("尚未配置", "Not configured");
         node.textContent = label;
         node.hidden = false;
         continue;
       }
       const configured = secretConfigured(key);
-      node.textContent = configured === true ? "已配置，留空则保持不变" : "";
+      node.textContent = configured === true ? tr("已配置，留空则保持不变", "Configured. Leave blank to keep the saved value.") : "";
       node.hidden = configured !== true;
     }
   }
 
   function matchesFilter(item) {
     if (!filter) return true;
-    const haystack = [item.key, item.label, item.hint, item.group]
+    const haystack = [item.key, item.label, item.hint, item.group, groupOf(item.group)?.label]
       .filter(Boolean)
       .join(" ")
       .toLowerCase();
@@ -255,7 +305,7 @@ export function createConfigView(ctx, { showAccountPanels = true, collapsedByDef
 
     if (meta.problems && meta.problems.length) {
       container.appendChild(
-        card("配置契约有问题", "请先把下面这些改好，否则保存的值可能被丢弃", [
+        card(tr("配置契约有问题", "Configuration schema mismatch"), tr("请先把下面这些改好，否则保存的值可能被丢弃", "Resolve these issues so saved values can be retained."), [
           ...meta.problems.map((text) =>
             h("p", { class: "card-note", style: { color: "var(--err)" }, text }),
           ),
@@ -285,8 +335,8 @@ export function createConfigView(ctx, { showAccountPanels = true, collapsedByDef
 
     if (rendered === 0) {
       container.appendChild(
-        card("没有匹配的配置项", null, [
-          h("p", { class: "card-note", text: `没有找到包含「${filter}」的配置项。` }),
+        card(tr("没有匹配的配置项", "No matching settings"), null, [
+          h("p", { class: "card-note", text: tr(`没有找到包含「${filter}」的配置项。`, `No settings match “${filter}”.`) }),
         ]),
       );
     }
@@ -307,9 +357,9 @@ export function createConfigView(ctx, { showAccountPanels = true, collapsedByDef
       class: "input",
       type: "search",
       value: filter,
-      "aria-label": "搜索配置项",
+      "aria-label": tr("搜索配置项", "Search settings"),
       dataset: { configSearch: "1" },
-      placeholder: "搜索配置项（名称 / 键 / 说明），跨全部大类",
+      placeholder: tr("搜索配置项（名称 / 键 / 说明），跨全部大类", "Search all sections by name, key, or description"),
       onInput: (event) => {
         // 保留用户输入的大小写，匹配时再统一转小写；避免每次输入后搜索框文字跳变。
         filter = event.target.value.trim();
@@ -332,14 +382,20 @@ export function createConfigView(ctx, { showAccountPanels = true, collapsedByDef
       ? meta.items.filter(matchesFilter).length
       : meta.items.length;
     const subtitle = filter
-      ? `跨全部大类 · ${matchCount} 项匹配`
+      ? tr(`跨全部大类 · ${matchCount} 项匹配`, `${matchCount} matches across all sections`)
       : section
         ? `${section.label} · ${section.description}`
-        : `${meta.items.length} 项，保存后立即生效`;
+        : tr(`${meta.items.length} 项，保存后立即生效`, `${meta.items.length} settings. Saved changes apply immediately.`);
 
-    const toolbar = card("配置项", subtitle, [
+    const toolbar = card(tr("配置项", "Settings"), subtitle, [
       h("div", { class: "toolbar" }, [
         h("div", { class: "grow" }, [search]),
+        h("button", {
+          class: "btn",
+          type: "button",
+          dataset: { configLanguage: "1" },
+          onClick: (event) => switchLanguage(event.currentTarget),
+        }, english ? "中文" : "English"),
         h(
           "button",
           {
@@ -355,7 +411,7 @@ export function createConfigView(ctx, { showAccountPanels = true, collapsedByDef
               render();
             },
           },
-          collapseAllState() ? "展开全部" : "收起全部",
+          collapseAllState() ? tr("展开全部", "Expand all") : tr("收起全部", "Collapse all"),
         ),
       ]),
       renderSectionTabs(),
@@ -386,7 +442,7 @@ export function createConfigView(ctx, { showAccountPanels = true, collapsedByDef
           // 条件渲染的话，首次渲染时没有改动 → 节点不存在 → 后面也没法让它出现。
           h("span", {
             class: "seg-badge",
-            title: "未保存项数",
+            title: tr("未保存项数", "Unsaved changes"),
             text: String(dirty),
             hidden: dirty === 0 ? true : null,
             dataset: { dirtyScope: key === "all" ? "all" : `section:${key}` },
@@ -394,7 +450,7 @@ export function createConfigView(ctx, { showAccountPanels = true, collapsedByDef
         ],
       );
 
-    const tabs = [tab("all", "全部", meta.items.length, dirtyKeys().length)];
+    const tabs = [tab("all", tr("全部", "All"), meta.items.length, dirtyKeys().length)];
     for (const section of meta.sections) {
       const count = section.groups.reduce((sum, name) => {
         const group = groupOf(name);
@@ -412,7 +468,7 @@ export function createConfigView(ctx, { showAccountPanels = true, collapsedByDef
     const dirtyCount = group.keys.filter(hasDraft).length;
     const section = meta.sections.find((s) => s.groups.includes(group.name));
 
-    const subParts = [`${items.length} 项`];
+    const subParts = [tr(`${items.length} 项`, `${items.length} settings`)];
     // 搜索时跨大类展示，卡头标出归属大类，免得找完不知道改的是哪一类
     if (filter && section) subParts.push(section.label);
     if (group.description) subParts.push(group.description);
@@ -431,14 +487,14 @@ export function createConfigView(ctx, { showAccountPanels = true, collapsedByDef
       [
         h("h2", {}, [
           h("span", { class: `chev${isCollapsed ? " closed" : ""}` }),
-          group.name,
+          group.label || group.name,
         ]),
         h("span", { class: "sub", text: subParts.join(" · ") }),
         h("span", {
           class: "cfg-dirty",
-          text: `${dirtyCount} 项未保存`,
+          text: tr(`${dirtyCount} 项未保存`, `${dirtyCount} unsaved`),
           hidden: dirtyCount === 0 ? true : null,
-          dataset: { dirtyScope: `group:${group.name}`, dirtySuffix: " 项未保存" },
+          dataset: { dirtyScope: `group:${group.name}`, dirtySuffix: tr(" 项未保存", " unsaved") },
         }),
       ],
     );
@@ -502,7 +558,7 @@ export function createConfigView(ctx, { showAccountPanels = true, collapsedByDef
 
   function renderOutputChoices(items) {
     return h("div", { class: "field" }, [
-      h("div", { class: "cfg-output-choices", role: "group", "aria-label": "输出模式" }, items.map((item) => {
+      h("div", { class: "cfg-output-choices", role: "group", "aria-label": tr("输出模式", "Output modes") }, items.map((item) => {
         const input = h("input", {
           type: "checkbox",
           dataset: { outputKey: item.key },
@@ -513,12 +569,12 @@ export function createConfigView(ctx, { showAccountPanels = true, collapsedByDef
           input,
           h("span", { text: item.label }),
           h("span", {
-            class: "cfg-dirty", text: "已改", hidden: hasDraft(item.key) ? null : true,
+            class: "cfg-dirty", text: tr("已改", "Edited"), hidden: hasDraft(item.key) ? null : true,
             dataset: { dirtyMark: item.key },
           }),
         ]);
       })),
-      h("p", { class: "field-hint", text: "可任意组合，也可全部关闭。卡片还需开启「启用卡片渲染」；富媒体包含原图、视频、动图和音频。" }),
+      h("p", { class: "field-hint", text: tr("可任意组合，也可全部关闭。卡片还需开启「启用卡片渲染」；富媒体包含原图、视频、动图和音频。", "Choose any combination. Cards also require card rendering. Rich media includes images, video, animations, and audio.") }),
     ]);
   }
 
@@ -531,8 +587,8 @@ export function createConfigView(ctx, { showAccountPanels = true, collapsedByDef
       const control = switchControl(
         Boolean(currentValue(item.key)),
         (next) => onValueChanged(item.key, next),
-        "使用插件代理",
-        "不走插件代理",
+        tr("使用插件代理", "Use plugin proxy"),
+        tr("不走插件代理", "Skip plugin proxy"),
       );
       // 外层**不能用 label**：switchControl 自己就是 label，嵌套后点一下
       // 会被两层 label 各转发一次、开关来回切两次等于没切。用 div + 点击转发：
@@ -542,7 +598,7 @@ export function createConfigView(ctx, { showAccountPanels = true, collapsedByDef
         control,
         h("span", {
           class: "cfg-dirty",
-          text: "已改",
+          text: tr("已改", "Edited"),
           hidden: hasDraft(item.key) ? null : true,
           dataset: { dirtyMark: item.key },
         }),
@@ -562,8 +618,8 @@ export function createConfigView(ctx, { showAccountPanels = true, collapsedByDef
       h("div", {
         class: "field-hint",
         text: hasScreenshot
-          ? "这些开关只控制本插件的请求是否使用上方代理地址；关闭时仍可能受运行环境代理设置影响。悬停查看各项说明"
-          : "这些开关只控制本插件该平台的接口请求与媒体下载是否使用上方代理地址；关闭时仍可能受运行环境代理设置影响。悬停查看各项说明",
+          ? tr("这些开关只控制本插件的请求是否使用上方代理地址；关闭时仍可能受运行环境代理设置影响。悬停查看各项说明", "These switches control the plugin proxy above. Environment proxies may still apply. Hover for details.")
+          : tr("这些开关只控制本插件该平台的接口请求与媒体下载是否使用上方代理地址；关闭时仍可能受运行环境代理设置影响。悬停查看各项说明", "These switches control the plugin proxy for platform requests and downloads. Environment proxies may still apply. Hover for details."),
       }),
     ]);
   }
@@ -577,7 +633,7 @@ export function createConfigView(ctx, { showAccountPanels = true, collapsedByDef
       h("code", { text: item.key }),
       h("span", {
         class: "cfg-dirty",
-        text: "已改",
+        text: tr("已改", "Edited"),
         hidden: hasDraft(item.key) ? null : true,
         dataset: { dirtyMark: item.key },
       }),
@@ -591,7 +647,7 @@ export function createConfigView(ctx, { showAccountPanels = true, collapsedByDef
           class: "cfg-dirty cred-secret-hint",
           dataset: { secretHint: item.key },
           hidden: configured ? true : null,
-          text: "已配置，留空则保持不变",
+          text: tr("已配置，留空则保持不变", "Configured. Leave blank to keep the saved value."),
         }),
       );
     }
@@ -638,7 +694,7 @@ export function createConfigView(ctx, { showAccountPanels = true, collapsedByDef
     const input = h("input", {
       class: "input",
       type: "text",
-      placeholder: item.placeholder || "输入后回车添加",
+      placeholder: item.placeholder || tr("输入后回车添加", "Enter a value and press Enter"),
       spellcheck: "false",
     });
     const addButton = h(
@@ -651,7 +707,7 @@ export function createConfigView(ctx, { showAccountPanels = true, collapsedByDef
           input.focus();
         },
       },
-      "添加",
+      tr("添加", "Add"),
     );
     // listHost 里不含 input，每次 commit 整体重建它是安全的
     const listHost = h("div", { class: "list-editor-host" });
@@ -660,7 +716,7 @@ export function createConfigView(ctx, { showAccountPanels = true, collapsedByDef
     let dropClose = null;
 
     function countText() {
-      return entries.length ? `共 ${entries.length} 项` : "还没有条目";
+      return entries.length ? tr(`共 ${entries.length} 项`, `${entries.length} entries`) : tr("还没有条目", "No entries yet");
     }
 
     function removeEntry(entry) {
@@ -677,7 +733,7 @@ export function createConfigView(ctx, { showAccountPanels = true, collapsedByDef
           {
             class: "tag-x",
             type: "button",
-            title: "移除",
+            title: tr("移除", "Remove"),
             onClick: () => removeEntry(entry),
           },
           "×",
@@ -725,7 +781,7 @@ export function createConfigView(ctx, { showAccountPanels = true, collapsedByDef
       function syncMeta() {
         const preview = entries.slice(0, 2).join("、");
         triggerText.textContent =
-          entries.length > 2 ? `${preview} 等 ${entries.length} 项` : preview;
+          entries.length > 2 ? tr(`${preview} 等 ${entries.length} 项`, `${preview} · ${entries.length} entries`) : preview;
         trigger.title = entries.join("、");
         countNode.textContent = countText();
       }
@@ -738,7 +794,7 @@ export function createConfigView(ctx, { showAccountPanels = true, collapsedByDef
             {
               class: "tag-x",
               type: "button",
-              title: "移除该条目",
+              title: tr("移除该条目", "Remove entry"),
               onClick: () => {
                 entries = entries.filter((current) => current !== entry);
                 emitListValue(item.key, entries);
@@ -761,9 +817,9 @@ export function createConfigView(ctx, { showAccountPanels = true, collapsedByDef
 
       async function clearAll() {
         const ok = await confirmDialog({
-          title: "清空名单",
-          body: `将移除全部 ${entries.length} 个条目（保存后生效）。`,
-          confirmText: "清空",
+          title: tr("清空名单", "Clear list"),
+          body: tr(`将移除全部 ${entries.length} 个条目（保存后生效）。`, `Saving will remove all ${entries.length} entries.`),
+          confirmText: tr("清空", "Clear"),
           danger: true,
         });
         if (!ok) return;
@@ -791,7 +847,7 @@ export function createConfigView(ctx, { showAccountPanels = true, collapsedByDef
           h(
             "button",
             { class: "btn tiny danger", type: "button", onClick: clearAll },
-            "清空",
+            tr("清空", "Clear"),
           ),
         ]),
       );
@@ -923,7 +979,7 @@ export function createConfigView(ctx, { showAccountPanels = true, collapsedByDef
       // 但界面上要看得见、删得掉，不能悄悄丢
       parts.push(
         h("div", { class: "tag-editor", style: { marginTop: "8px" } }, [
-          h("span", { class: "tag-count", text: "不在平台列表里的旧值：" }),
+          h("span", { class: "tag-count", text: tr("不在平台列表里的旧值：", "Previously saved entries outside the platform list:") }),
           ...unknown.map((name) => {
             const chip = h("span", { class: "tag-chip" }, [
               h("span", { text: name }),
@@ -932,7 +988,7 @@ export function createConfigView(ctx, { showAccountPanels = true, collapsedByDef
                 {
                   class: "tag-x",
                   type: "button",
-                  title: "移除",
+                  title: tr("移除", "Remove"),
                   onClick: () => {
                     picked.delete(name);
                     chip.remove();
@@ -956,8 +1012,8 @@ export function createConfigView(ctx, { showAccountPanels = true, collapsedByDef
       return switchControl(
         previousMode === "all" || previousMode === "conditional",
         (enabled) => onValueChanged(item.key, enabled ? (previousMode === "conditional" ? "conditional" : "all") : "none"),
-        "已启用",
-        "已关闭",
+        tr("已启用", "Enabled"),
+        tr("已关闭", "Disabled"),
       );
     }
     if (item.key === "AGGREGATION_CONTENTS") {
@@ -1084,13 +1140,13 @@ export function createConfigView(ctx, { showAccountPanels = true, collapsedByDef
           h("span", {
             class: "cfg-dirty cred-managed-note",
             dataset: { secretHint: item.key },
-            text: state && state.configured ? "已由凭据管理配置" : "尚未配置",
+            text: state && state.configured ? tr("已由凭据管理配置", "Configured in account credentials") : tr("尚未配置", "Not configured"),
           }),
           h("span", {
             class: "field-hint",
             text: showAccountPanels
-              ? "请在上方「账号凭据」卡片里导入或检查。"
-              : "请前往「平台与账号」导入或检查。",
+              ? tr("请在上方「账号凭据」卡片里导入或检查。", "Import or check this credential in Account credentials above.")
+              : tr("请前往「平台与账号」导入或检查。", "Open Platforms and accounts to import or check this credential."),
           }),
         ]);
       }
@@ -1101,7 +1157,7 @@ export function createConfigView(ctx, { showAccountPanels = true, collapsedByDef
         // 已配置时值是空串：提示写清楚「留空 = 保持不变」，
         // 否则用户会以为清空了、又不敢保存。
         configured === true
-          ? item.placeholder || "已配置，留空则保持不变"
+          ? item.placeholder || tr("已配置，留空则保持不变", "Configured. Leave blank to keep the saved value.")
           : item.placeholder || "",
       );
       const clearButton = h("button", {
@@ -1114,9 +1170,9 @@ export function createConfigView(ctx, { showAccountPanels = true, collapsedByDef
             delete draft[item.key];
           } else {
             const ok = await confirmDialog({
-              title: `清除${item.label}`,
-              body: "点击页面的保存按钮后，该项已保存的值将被清除。",
-              confirmText: "标记清除", danger: true,
+              title: tr(`清除${item.label}`, `Clear ${item.label}`),
+              body: tr("点击页面的保存按钮后，该项已保存的值将被清除。", "Saving these settings clears the stored value."),
+              confirmText: tr("标记清除", "Mark for clearing"), danger: true,
             });
             if (!ok) return;
             pendingSecretClears.add(item.key);
@@ -1126,7 +1182,7 @@ export function createConfigView(ctx, { showAccountPanels = true, collapsedByDef
           if (field) field.value = "";
           syncDirtyUI();
         },
-      }, "清除已保存值");
+      }, tr("清除已保存值", "Clear saved value"));
       return h("div", { class: "cred-generic-secret" }, [input, clearButton]);
     }
 
@@ -1163,15 +1219,15 @@ export function createConfigView(ctx, { showAccountPanels = true, collapsedByDef
     const textNode = saveBar.querySelector("[data-save-text]");
     if (textNode) {
       textNode.textContent = keys.length
-        ? `已修改 ${keys.length} 项：${keys.slice(0, 3).join("、")}${keys.length > 3 ? " 等" : ""}`
-        : "没有未保存的改动";
+        ? tr(`已修改 ${keys.length} 项：${keys.slice(0, 3).join("、")}${keys.length > 3 ? " 等" : ""}`, `${keys.length} changed · ${keys.slice(0, 3).join(", ")}${keys.length > 3 ? "…" : ""}`)
+        : tr("没有未保存的改动", "No unsaved changes");
     }
     const discard = saveBar.querySelector("[data-save-discard]");
     if (discard) discard.disabled = keys.length === 0;
     const submit = saveBar.querySelector("[data-save-submit]");
     if (submit) {
       submit.disabled = keys.length === 0;
-      submit.textContent = `保存更改${keys.length ? `（${keys.length}）` : ""}`;
+      submit.textContent = tr("保存更改", "Save changes") + (keys.length ? tr(`（${keys.length}）`, ` (${keys.length})`) : "");
     }
   }
 
@@ -1189,7 +1245,7 @@ export function createConfigView(ctx, { showAccountPanels = true, collapsedByDef
             render();
           },
         },
-        "放弃更改",
+        tr("放弃更改", "Discard changes"),
       ),
       h(
         "button",
@@ -1198,7 +1254,7 @@ export function createConfigView(ctx, { showAccountPanels = true, collapsedByDef
           type: "button",
           onClick: (event) => resetAll(event.currentTarget),
         },
-        "恢复默认",
+        tr("恢复默认", "Reset to defaults"),
       ),
       h(
         "button",
@@ -1224,7 +1280,7 @@ export function createConfigView(ctx, { showAccountPanels = true, collapsedByDef
 
     // 保存前的已保存值：用来判断「生效界面」是不是真的换了。
     const previousStyle = values[STYLE_KEY];
-    const restore = withBusy(button, true, "保存中…");
+    const restore = withBusy(button, true, tr("保存中…", "Saving…"));
     try {
       const result = await ctx.api.post("config", { values: valuesToSave });
       values = result.values || values;
@@ -1233,11 +1289,11 @@ export function createConfigView(ctx, { showAccountPanels = true, collapsedByDef
       pendingSecretClears.clear();
       const failed = Boolean(result.errors && result.errors.length);
       if (failed) {
-        toast(`部分配置未保存：${result.errors.join("；")}`, "err");
+        toast(tr(`部分配置未保存：${result.errors.join("；")}`, `Some settings could not be saved · ${result.errors.join(", ")}`), "err");
       } else if (result.changed && result.changed.length) {
-        toast(`已保存 ${result.changed.length} 项配置`, "ok");
+        toast(tr(`已保存 ${result.changed.length} 项配置`, `Saved ${result.changed.length} settings`), "ok");
       } else {
-        toast("配置没有变化", "");
+        toast(tr("配置没有变化", "No settings changed"), "");
       }
       // 界面形态（经典界面 / 泡泡工坊）换了 → 回到同插件入口重新载入。
       // 只有真正改了生效值才换：保存失败、值没变、只改了别的配置都不换。
@@ -1251,7 +1307,7 @@ export function createConfigView(ctx, { showAccountPanels = true, collapsedByDef
           hash: globalThis.location?.hash || "",
         });
         if (plan.navigate) {
-          toast("界面已切换，正在载入…", "");
+          toast(tr("界面已切换，正在载入…", "Loading the selected interface…"), "");
           applyStyleSwitch(plan, {
             navigate: typeof ctx.navigateToStyle === "function" ? ctx.navigateToStyle : undefined,
           });
@@ -1263,7 +1319,7 @@ export function createConfigView(ctx, { showAccountPanels = true, collapsedByDef
       if (cookiecloud.supported) await Promise.resolve().then(() => cookiecloud.load()).catch(() => false);
       render();
     } catch (error) {
-      toast(`保存失败：${error.message}`, "err");
+      toast(tr(`保存失败：${error.message}`, `Save failed · ${error.message}`), "err");
     } finally {
       restore();
     }
@@ -1271,20 +1327,23 @@ export function createConfigView(ctx, { showAccountPanels = true, collapsedByDef
 
   async function resetAll(button) {
     const ok = await confirmDialog({
-      title: "恢复默认配置",
+      title: tr("恢复默认配置", "Restore default settings"),
       // 文案必须与后端一致：reset_config 除了重置配置项，还会调 bili_logout() 把
       // B 站扫码登录态一起清掉（它不在配置项里，单独存在插件数据目录）。
       // 两个提交曾各修了这句承诺的一侧 —— 代码清了、文案说没清，方向相反。
       body:
-        "所有配置项都会回到默认值，包括 Cookie、Token 与代理设置；" +
-        "B 站扫码登录保存的登录态（不在配置项里）也会一并清除。这一步不能撤销。",
-      confirmText: "恢复默认",
+        tr(
+          "所有配置项都会回到默认值，包括 Cookie、Token 与代理设置；" +
+          "B 站扫码登录保存的登录态（不在配置项里）也会一并清除。这一步不能撤销。",
+          "This resets all settings, including cookies, tokens, and proxies, and clears the saved Bilibili QR login. This cannot be undone.",
+        ),
+      confirmText: tr("恢复默认", "Reset to defaults"),
       danger: true,
     });
     if (!ok) return;
 
     const previousStyle = values[STYLE_KEY];
-    const restore = withBusy(button, true, "恢复中…");
+    const restore = withBusy(button, true, tr("恢复中…", "Restoring…"));
     try {
       const result = await ctx.api.post("config/reset", {});
       values = result.values || values;
@@ -1293,11 +1352,11 @@ export function createConfigView(ctx, { showAccountPanels = true, collapsedByDef
       pendingSecretClears.clear();
       const failed = Boolean(result.errors && result.errors.length);
       if (failed) {
-        toast(`恢复默认时有操作未完成：${result.errors.join("；")}`, "err");
+        toast(tr(`恢复默认时有操作未完成：${result.errors.join("；")}`, `Some defaults could not be restored · ${result.errors.join(", ")}`), "err");
       } else if (result.runtime_ok === false) {
-        toast("默认配置已写入，但运行时更新未完成，请重试", "err");
+        toast(tr("默认配置已写入，但运行时更新未完成，请重试", "Defaults were saved. Retry to apply them to the running plugin."), "err");
       } else {
-        toast(`已恢复默认（改动 ${result.changed ? result.changed.length : 0} 项）`, "ok");
+        toast(tr(`已恢复默认（改动 ${result.changed ? result.changed.length : 0} 项）`, `Defaults restored · ${result.changed?.length || 0} settings changed`), "ok");
       }
       // 恢复默认同样可能把界面形态换掉（默认值是经典界面），规则与保存一致。
       if (!failed && result.runtime_ok !== false) {
@@ -1310,7 +1369,7 @@ export function createConfigView(ctx, { showAccountPanels = true, collapsedByDef
           hash: globalThis.location?.hash || "",
         });
         if (plan.navigate) {
-          toast("界面已切换，正在载入…", "");
+          toast(tr("界面已切换，正在载入…", "Loading the selected interface…"), "");
           applyStyleSwitch(plan, {
             navigate: typeof ctx.navigateToStyle === "function" ? ctx.navigateToStyle : undefined,
           });
@@ -1321,7 +1380,7 @@ export function createConfigView(ctx, { showAccountPanels = true, collapsedByDef
       if (cookiecloud.supported) await Promise.resolve().then(() => cookiecloud.load()).catch(() => false);
       render();
     } catch (error) {
-      toast(`恢复失败：${error.message}`, "err");
+      toast(tr(`恢复失败：${error.message}`, `Reset failed · ${error.message}`), "err");
     } finally {
       restore();
     }
